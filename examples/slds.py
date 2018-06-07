@@ -26,16 +26,13 @@ N_sgd_iters = 5000
 
 print("Fitting HMM with SGD")
 slds = GaussianSLDS(N, K, D)
-slds_elbos, variational_params = slds.fit(y, num_iters=N_sgd_iters, step_size=.001)
-slds_x = variational_params[0][0]
-slds_Ez, _ = slds.expected_states(variational_params[0])
-slds_z = np.argmax(slds_Ez, axis=1)
-slds_y = slds.smooth(variational_params[0])
+slds_elbos, (slds_x, slds_x_var) = slds.fit(y, num_iters=N_sgd_iters, step_size=.001)
+slds_z = slds.most_likely_states((slds_x, slds_x_var))
+slds_y = slds.smooth((slds_x, slds_x_var))
 
 plt.figure(figsize=(8,6))
 plt.subplot(311)
 plt.imshow(np.column_stack((z, slds_z)).T, aspect="auto")
-# plt.ylabel("$z$")
 plt.yticks([0, 1], ["$z_{{\\mathrm{{true}}}}$", "$z_{{\\mathrm{{inf}}}}$"])
 plt.xlim(0, T)
 plt.subplot(312)

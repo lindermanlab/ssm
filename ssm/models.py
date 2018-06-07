@@ -72,6 +72,7 @@ class _HMM(object):
         raise NotImplementedError
 
     def sample(self, T, input=None):
+        # import ipdb; ipdb.set_trace()
         K, D = self.K, self.D
         data = np.zeros((T, D))
         input = np.zeros((T, self.M)) if input is None else input
@@ -100,12 +101,17 @@ class _HMM(object):
         """
         pass
 
+    @ensure_args_not_none
     def expected_states(self, data, input=None, mask=None):
-        mask = np.ones_like(data, dtype=bool) if mask is None else mask
         log_pi0 = self._log_initial_state_distn(data, input, mask)
         log_Ps = self._log_transition_matrices(data, input, mask)
         log_likes = self._log_likelihoods(data, input, mask)
         return hmm_expected_states(log_pi0, log_Ps, log_likes)
+
+    @ensure_args_not_none
+    def most_likely_states(self, data, input=None, mask=None):
+        Ez, _ = self.expected_states(data, input, mask)
+        return np.argmax(Ez, axis=1)
 
     @ensure_args_not_none
     def smooth(self, data, input=None, mask=None):
@@ -235,7 +241,7 @@ class _StationaryHMM(_HMM):
         
         # Initialize params
         self.log_pi0 = -np.log(K) * np.ones(K)
-        Ps = .99 * np.eye(K) + .01 * npr.rand(K, K)
+        Ps = .95 * np.eye(K) + .05 * npr.rand(K, K)
         Ps /= Ps.sum(axis=1, keepdims=True)
         self.log_Ps = np.log(Ps)
 
@@ -263,7 +269,7 @@ class _StationaryHMM(_HMM):
         T = data.shape[0]
         log_Ps = np.tile(self.log_Ps[None, :, :], (T-1, 1, 1))
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
-        
+    
 
 class _InputDrivenHMM(_HMM):
     """
@@ -278,7 +284,7 @@ class _InputDrivenHMM(_HMM):
         self.log_pi0 = -np.log(K) * np.ones(K)
 
         # Baseline transition probabilities
-        Ps = .9 * np.eye(K) + .1 * npr.rand(K, K)
+        Ps = .95 * np.eye(K) + .05 * npr.rand(K, K)
         Ps /= Ps.sum(axis=1, keepdims=True)
         self.log_Ps = np.log(Ps)
 
@@ -409,9 +415,13 @@ class _AutoRegressiveObservations(object):
         super(_AutoRegressiveObservations, self).__init__(K, D, M)
 
         self.D = D
+        # Distribution over initial point
+        self.mu_init = np.zeros(D)
+        self.inv_sigma_init = np.zeros(D)
+        # AR parameters
         self.As = .95 * np.array([random_rotation(D) for _ in range(K)])
         self.bs = npr.randn(K, D)
-        self.Vs = npr.randn(D, M)
+        self.Vs = npr.randn(K, D, M)
         self.inv_sigmas = -4 + npr.randn(K, D)
 
     @property
@@ -436,25 +446,27 @@ class _AutoRegressiveObservations(object):
             ts = npr.choice(T-1, replace=False, size=T//2)
             x, y = np.column_stack((data[ts], input[ts])), data[ts+1]
             lr = LinearRegression().fit(x, y)
-            self.As[k] = lr.coef_
+            self.As[k] = lr.coef_[:, :self.D]
+            self.Vs[k] = lr.coef_[:, self.D:]
             self.bs[k] = lr.intercept_
             
             resid = y - lr.predict(x)
             sigmas = np.var(resid, axis=0)
             self.inv_sigmas[k] = np.log(sigmas)
 
-    def _log_transition_matrices(self, data, input, mask):
-        T = data.shape[0]
-        log_Ps = np.tile(self.log_Ps[None, :, :], (T-1, 1, 1))
-        return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
-
     def _compute_mus(self, data, input, mask):
         assert np.all(mask), "ARHMM cannot handle missing data"
 
-        As, bs = self.As, self.bs
-        # pad the data by repeating the first observation
-        padded_data = np.row_stack((data[0], data[:-1]))
-        return np.matmul(As[None, ...], padded_data[:, None, :, None])[:, :, :, 0] + bs
+        As, bs, Vs = self.As, self.bs, self.Vs
+
+        # linear function of preceding data, current input, and bias
+        mus = np.matmul(As[None, ...], data[:-1, None, :, None])[:, :, :, 0]
+        mus = mus + np.matmul(Vs[None, ...], input[1:, None, :, None])[:, :, :, 0]
+        mus = mus + bs
+
+        # Pad with the initial condition
+        mus = np.concatenate((self.mu_init * np.ones((1, self.K, self.D)), mus))
+        return mus
 
     def _log_likelihoods(self, data, input, mask):
         mus = self._compute_mus(data, input, mask)
@@ -466,7 +478,9 @@ class _AutoRegressiveObservations(object):
     def _sample_x(self, z, xhist):
         D, As, bs, sigmas = self.D, self.As, self.bs, np.exp(self.inv_sigmas)
         if xhist.shape[0] == 0:
-            return np.sqrt(sigmas[z]) * npr.randn(D)
+            mu_init = self.mu_init
+            sigma_init = np.exp(self.inv_sigma_init)
+            return mu_init + np.sqrt(sigma_init) * npr.randn(D)
         else:
             return As[z].dot(xhist[-1]) + bs[z] + np.sqrt(sigmas[z]) * npr.randn(D)
 
@@ -491,7 +505,35 @@ class InputDriveAutoRegressiveHMM(_AutoRegressiveObservations, _InputDrivenHMM):
 
 
 class RecurrentAutoRegressiveHMM(_AutoRegressiveObservations, _RecurrentHMM):
-    pass
+
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None):
+        """
+        Smarter initialization by clustering the data
+        """
+        data = np.concatenate(datas) 
+        input = np.concatenate(inputs)
+        T = data.shape[0]
+    
+        from sklearn.cluster import KMeans
+        km = KMeans(self.K)
+        km.fit(data)
+        z = km.labels_[:-1]
+
+        # Cluster the data before initializing
+        from sklearn.linear_model import LinearRegression
+        
+        for k in range(self.K):
+            ts = np.where(z == k)[0]
+            x, y = np.column_stack((data[ts], input[ts])), data[ts+1]
+            lr = LinearRegression().fit(x, y)
+            self.As[k] = lr.coef_[:, :self.D]
+            self.Vs[k] = lr.coef_[:, self.D:]
+            self.bs[k] = lr.intercept_
+            
+            resid = y - lr.predict(x)
+            sigmas = np.var(resid, axis=0)
+            self.inv_sigmas[k] = np.log(sigmas)
 
 
 class _SwitchingLDSBase(object):
@@ -520,11 +562,16 @@ class _SwitchingLDSBase(object):
 
     def expected_states(self, variational_param, input=None, mask=None):
         x_mu, x_var = variational_param
+        input = np.zeros((x_mu.shape[0], self.M)) if input is None else input
         mask = np.ones_like(x_mu, dtype=bool) if mask is None else mask
         log_pi0 = self._log_initial_state_distn(x_mu, input, mask)
         log_Ps = self._log_transition_matrices(x_mu, input, mask)
         log_likes = self._log_likelihoods(x_mu, input, mask)
         return hmm_expected_states(log_pi0, log_Ps, log_likes)
+
+    def most_likely_states(self, variational_params, input=None, mask=None):
+        Ez, _ = self.expected_states(variational_params, input, mask)
+        return np.argmax(Ez, axis=1)
 
     def log_likelihood(self, datas, inputs=None, masks=None):
         raise Exception("Cannot compute exact marginal log likelihood for the SLDS. "
@@ -599,6 +646,9 @@ class _SwitchingLDSBase(object):
                 callback=_print_progress,
                 **kwargs)
 
+        # unpack outputs as necessary
+        variational_params = variational_params[0] if \
+            len(variational_params) == 1 else variational_params
         return elbos, variational_params
 
     @ensure_args_are_lists

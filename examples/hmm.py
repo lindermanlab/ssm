@@ -22,17 +22,17 @@ true_ll = true_hmm.log_likelihood(y)
 N_sgd_iters = 1000
 N_em_iters = 100
 
-print("Fitting HMM with SGD")
-hmm = GaussianHMM(K, D)
-hmm_sgd_lls = hmm.fit(y, num_iters=N_sgd_iters, step_size=.1)
-hmm_sgd_test_ll = hmm.log_likelihood(y_test)
-hmm_sgd_smooth = hmm.smooth(y)
+# print("Fitting HMM with SGD")
+# hmm = GaussianHMM(K, D)
+# hmm_sgd_lls = hmm.fit(y, num_iters=N_sgd_iters, step_size=.1)
+# hmm_sgd_test_ll = hmm.log_likelihood(y_test)
+# hmm_sgd_smooth = hmm.smooth(y)
 
-print("Fitting HMM with EM")
-hmm = GaussianHMM(K, D)
-hmm_em_lls = hmm.fit(y, method="em", num_em_iters=N_em_iters, num_iters=100, step_size=.1)
-hmm_em_test_ll = hmm.log_likelihood(y_test)
-hmm_em_smooth = hmm.smooth(y)
+# print("Fitting HMM with EM")
+# hmm = GaussianHMM(K, D)
+# hmm_em_lls = hmm.fit(y, method="em", num_em_iters=N_em_iters, num_iters=100, step_size=.1)
+# hmm_em_test_ll = hmm.log_likelihood(y_test)
+# hmm_em_smooth = hmm.smooth(y)
 
 print("Fitting ARHMM with SGD")
 arhmm = AutoRegressiveHMM(K, D)
