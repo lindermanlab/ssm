@@ -13,6 +13,14 @@ from ssm.util import random_rotation, ensure_args_are_lists, \
 class _HMM(object):
     """
     Base class for hidden Markov models.
+
+    Notation:
+    K: number of discrete latent states
+    D: dimensionality of observations
+    M: dimensionality of inputs
+
+    In the code we will sometimes refer to the discrete
+    latent state sequence as z and the data as x.
     """
     def __init__(self, K, D, M):
         self.K, self.D, self.M = K, D, M
@@ -151,18 +159,15 @@ class _HMM(object):
 
         return lls
 
-    def _fit_em(self, datas, inputs, masks, num_em_iters=100, optimizer="sgd", **kwargs):
+    def _m_step(self, expectations, datas, inputs, masks, optimizer="sgd", **kwargs):
         """
-        Fit the parameters with expectation maximization.
-
-        Compute E[z_t] and E[z_t, z_{t+1}] with message passing;
-        Optimize the objective function E_{p(z | x)} [log p(x, z; theta)]
-        with respect to theta. 
+        The default M step implementation does SGD on the expected log joint. 
+        Base classes can override this with closed form updates if available.
         """
-        optimizers = dict(sgd=sgd, adam=adam)
-        T = sum([data.shape[0] for data in datas])
-    
-        def _elbo(expectations):
+        optimizer = dict(sgd=sgd, adam=adam)[optimizer]
+        
+        # expected log joint
+        def _expected_log_joint(expectations):
             elbo = 0
             for data, input, mask, (expected_states, expected_joints) \
                 in zip(datas, inputs, masks, expectations):
@@ -175,20 +180,32 @@ class _HMM(object):
                 elbo += np.sum(expected_states * log_likes)
             return elbo
 
+        # define optimization target
+        T = sum([data.shape[0] for data in datas])
+        def _objective(params, itr):
+            self.params = params
+            obj = _expected_log_joint(expectations)
+            return -obj / T
+
+        self.params = optimizer(grad(_objective), self.params, **kwargs)
+
+
+    def _fit_em(self, datas, inputs, masks, num_em_iters=100, optimizer="sgd", **kwargs):
+        """
+        Fit the parameters with expectation maximization.
+
+        Compute E[z_t] and E[z_t, z_{t+1}] with message passing;
+        Optimize the objective function E_{p(z | x)} [log p(x, z; theta)]
+        with respect to theta. 
+        """
         lls = []
         for itr in range(num_em_iters):
             # E step: compute expected latent states with current parameters
             expectations = [self.expected_states(data, input, mask) 
                             for data, input, mask in zip(datas, inputs, masks)]
 
-            # M step: maximize expected log joint 
-            def _objective(params, itr):
-                self.params = params
-                obj = _elbo(expectations)
-                return -obj / T
-
-            self.params = \
-                optimizers[optimizer](grad(_objective), self.params, **kwargs)
+            # M step: maximize expected log joint wrt parameters
+            self._m_step(expectations, datas, inputs, masks, optimizer=optimizer, **kwargs)
 
             # Store progress
             lls.append(self.log_likelihood(datas, inputs, masks))
