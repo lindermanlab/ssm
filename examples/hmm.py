@@ -5,7 +5,7 @@ npr.seed(0)
 import matplotlib
 import matplotlib.pyplot as plt
 
-from ssm.models import GaussianHMM, AutoRegressiveHMM
+from ssm.models import GaussianHMM, StudentsTHMM, AutoRegressiveHMM
 
 # Set the parameters of the HMM
 T = 500     # number of time bins
@@ -34,6 +34,12 @@ hmm_em_lls = hmm.fit(y, method="em", num_em_iters=N_em_iters)
 hmm_em_test_ll = hmm.log_likelihood(y_test)
 hmm_em_smooth = hmm.smooth(y)
 
+print("Fitting Student's t HMM with SGD")
+thmm = StudentsTHMM(K, D)
+thmm_sgd_lls = thmm.fit(y, method="sgd", num_iters=N_sgd_iters)
+thmm_sgd_test_ll = thmm.log_likelihood(y_test)
+thmm_sgd_smooth = thmm.smooth(y)
+
 print("Fitting ARHMM with SGD")
 arhmm = AutoRegressiveHMM(K, D)
 arhmm_sgd_lls = arhmm.fit(y, method="sgd", num_iters=N_sgd_iters)
@@ -53,6 +59,7 @@ for d in range(D):
 	plt.plot(y, '-k', lw=2, label="true")
 	plt.plot(hmm_sgd_smooth, '-r', lw=1, label="HMM (SGD)")
 	plt.plot(hmm_em_smooth, ':r', lw=1, label="HMM (EM)")
+	plt.plot(thmm_sgd_smooth, ':g', lw=1, label="tHMM (EM)")
 	plt.plot(arhmm_sgd_smooth, '-b', lw=1, label="ARHMM (SGD)")
 	plt.plot(arhmm_em_smooth, ':b', lw=1, label="ARHMM (EM)")
 	plt.legend(loc="upper right")
@@ -61,6 +68,7 @@ for d in range(D):
 plt.figure()
 plt.plot(hmm_sgd_lls, label="HMM (SGD)")
 plt.plot(hmm_em_lls, label="HMM (EM)")
+plt.plot(thmm_sgd_lls, label="tHMM (SGD)")
 plt.plot(arhmm_sgd_lls, label="ARHMM (SGD)")
 plt.plot(arhmm_em_lls, label="ARHMM (EM)")
 plt.plot(true_ll * np.ones(max(N_em_iters, N_sgd_iters)), ':', label="true")
@@ -70,6 +78,7 @@ print("Test log likelihood")
 print("True: ", true_hmm.log_likelihood(y_test))
 print("HMM (SGD) ", hmm_sgd_test_ll)
 print("HMM (EM) ", hmm_em_test_ll)
+print("tHMM (SGD) ", thmm_sgd_test_ll)
 print("ARHMM (SGD) ", arhmm_sgd_test_ll)
 print("ARHMM (EM) ", arhmm_em_test_ll)
 

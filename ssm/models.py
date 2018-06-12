@@ -4,6 +4,7 @@ from warnings import warn
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.misc import logsumexp
+from autograd.scipy.special import gammaln
 from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
@@ -27,9 +28,9 @@ class _HMM(object):
         self.K, self.D, self.M = K, D, M
         self._fitting_methods = \
             dict(sgd=partial(self._fit_mle, "sgd"),
-                adam=partial(self._fit_mle, "adam"),
-                em=self._fit_em,
-                stochastic_em=self._fit_stochastic_em)
+                 adam=partial(self._fit_mle, "adam"),
+                 em=self._fit_em,
+                 stochastic_em=self._fit_stochastic_em)
 
     @property
     def params(self):
@@ -74,7 +75,6 @@ class _HMM(object):
         raise NotImplementedError
 
     def sample(self, T, input=None):
-        # import ipdb; ipdb.set_trace()
         K, D = self.K, self.D
         data = np.zeros((T, D))
         input = np.zeros((T, self.M)) if input is None else input
@@ -498,6 +498,7 @@ class _RecurrentOnlyHMM(_InputDrivenHMM):
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
 
+# Gaussian models
 class _GaussianObservations(object):
     def __init__(self, K, D, M=0):
         super(_GaussianObservations, self).__init__(K, D, M)
@@ -576,6 +577,116 @@ class RecurrentOnlyGaussianHMM(_GaussianObservations, _RecurrentOnlyHMM):
     pass
 
 
+# Student's t models
+class _StudentsTObservations(object):
+    def __init__(self, K, D, M=0):
+        super(_StudentsTObservations, self).__init__(K, D, M)
+
+        self.D = D
+        self.mus = npr.randn(K, D)
+        self.inv_sigmas = -2 + npr.randn(K, D)
+
+        # Student's t has a degrees of freedom param
+        self.inv_nus = np.log(4) * np.ones(K)
+
+    @property
+    def params(self):
+        return super(_StudentsTObservations, self).params + \
+            (self.mus, self.inv_sigmas, self.inv_nus)
+    
+    @params.setter
+    def params(self, value):
+        self.mus, self.inv_sigmas, self.inv_nus = value[-3:]
+        super(_StudentsTObservations, self.__class__).params.fset(self, value[:-3])
+
+    def permute(self, perm):
+        super(_StudentsTObservations, self).permute(perm)
+        self.mus = self.mus[perm]
+        self.inv_sigmas = self.inv_sigmas[perm]
+        self.inv_nus = self.inv_nus[perm] 
+        
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None):
+        # Initialize with KMeans
+        from sklearn.cluster import KMeans
+        data = np.concatenate(datas)
+        km = KMeans(self.K).fit(data)
+        self.mus = km.cluster_centers_
+        sigmas = np.array([np.var(data[km.labels_ == k], axis=0)
+                           for k in range(self.K)])
+        self.inv_sigmas = np.log(sigmas)
+        self.inv_nus = np.log(4) * np.ones(self.K)
+        
+    def _log_likelihoods(self, data, input, mask):
+        D, mus, sigmas, nus = self.D, self.mus, np.exp(self.inv_sigmas), np.exp(self.inv_nus)
+        mask = np.ones_like(data, dtype=bool) if mask is None else mask
+
+        resid = data[:, None, :] - mus
+        z = resid / sigmas
+        return -0.5 * (nus + D) * np.log(1.0 + (resid * z).sum(axis=2) / nus) + \
+            gammaln((nus + D) / 2.0) - gammaln(nus / 2.0) - D / 2.0 * np.log(nus) \
+            -D / 2.0 * np.log(np.pi) - 0.5 * np.sum(np.log(sigmas), axis=1)
+
+    def _sample_x(self, z, xhist):
+        D, mus, sigmas, nus = self.D, self.mus, np.exp(self.inv_sigmas), np.exp(self.inv_nus)
+        tau = np.random.gamma(nus[z] / 2.0, 2.0 / nus[z])
+        return mus[z] + np.sqrt(sigmas[z] / tau) * npr.randn(D)
+
+    def _m_step_observations(self, expectations, datas, inputs, masks, 
+                             optimizer="adam", num_iters=10, **kwargs):
+        """
+        Max likelihood is not available in closed form. Default to SGD.
+        """
+        optimizer = dict(sgd=sgd, adam=adam)[optimizer]
+        
+        # expected log joint
+        def _expected_log_joint(expectations):
+            elbo = 0
+            for data, input, mask, (expected_states, expected_joints) \
+                in zip(datas, inputs, masks, expectations):
+                lls = self._log_likelihoods(data, input, mask)
+                elbo += np.sum(expected_states * lls)
+            return elbo
+
+        # define optimization target
+        T = sum([data.shape[0] for data in datas])
+        def _objective(params, itr):
+            self.mus, self.inv_sigmas, self.inv_nus = params
+            obj = _expected_log_joint(expectations)
+            return -obj / T
+
+        self.mus, self.inv_sigmas, self.inv_nus = \
+            optimizer(grad(_objective), 
+                (self.mus, self.inv_sigmas, self.inv_nus), 
+                num_iters=num_iters, **kwargs)
+
+    @ensure_args_not_none
+    def smooth(self, data, input=None, mask=None):
+        """
+        Compute the mean observation under the posterior distribution
+        of latent discrete states.
+        """
+        E_z, _ = self.expected_states(data, input, mask)
+        return E_z.dot(self.mus)
+
+
+class StudentsTHMM(_StudentsTObservations, _StationaryHMM):
+    pass
+
+
+class InputDrivenStudentsTHMM(_StudentsTObservations, _InputDrivenHMM):
+    pass
+
+
+class RecurrentStudentsTHMM(_StudentsTObservations, _RecurrentHMM):
+    pass
+
+
+class RecurrentOnlyStudentsTHMM(_StudentsTObservations, _RecurrentOnlyHMM):
+    pass
+
+
+# Autoregressive models
 class _AutoRegressiveObservations(object):
     def __init__(self, K, D, M=0):
         super(_AutoRegressiveObservations, self).__init__(K, D, M)
@@ -697,7 +808,7 @@ class AutoRegressiveHMM(_AutoRegressiveObservations, _StationaryHMM):
     pass
 
 
-class InputDriveAutoRegressiveHMM(_AutoRegressiveObservations, _InputDrivenHMM):
+class InputDrivenAutoRegressiveHMM(_AutoRegressiveObservations, _InputDrivenHMM):
     pass
 
 
@@ -743,6 +854,108 @@ class RecurrentAutoRegressiveHMM(_RecurrentAutoRegressiveHMMMixin,
 class RecurrentOnlyAutoRegressiveHMM(_RecurrentAutoRegressiveHMMMixin,
                                      _AutoRegressiveObservations, 
                                      _RecurrentOnlyHMM):
+    pass
+
+
+# Robust autoregressive models with Student's t noise
+class _RobustAutoRegressiveObservations(_AutoRegressiveObservations):
+    def __init__(self, K, D, M=0):
+        super(_RobustAutoRegressiveObservations, self).__init__(K, D, M)
+        self.inv_nus = np.log(4) * np.ones(K)
+
+    @property
+    def params(self):
+        return super(_RobustAutoRegressiveObservations, self).params + \
+               (self.As, self.bs, self.Vs, self.inv_sigmas, self.inv_nus)
+        
+    @params.setter
+    def params(self, value):
+        self.As, self.bs, self.Vs, self.inv_sigmas, self.inv_nus = value[-5:]
+        super(_RobustAutoRegressiveObservations, self.__class__).params.fset(self, value[:-5])
+
+    def permute(self, perm):
+        super(_RobustAutoRegressiveObservations, self).permute(perm)
+        self.inv_nus = self.inv_nus[perm]
+
+    def _log_likelihoods(self, data, input, mask):
+        D = self.D
+        mus = self._compute_mus(data, input, mask)
+        sigmas = np.exp(self.inv_sigmas)
+        nus = np.exp(self.inv_nus)
+
+        resid = data[:, None, :] - mus
+        z = resid / sigmas
+        return -0.5 * (nus + D) * np.log(1.0 + (resid * z).sum(axis=2) / nus) + \
+            gammaln((nus + D) / 2.0) - gammaln(nus / 2.0) - D / 2.0 * np.log(nus) \
+            -D / 2.0 * np.log(np.pi) - 0.5 * np.sum(np.log(sigmas), axis=1)
+
+    def _m_step_observations(self, expectations, datas, inputs, masks, 
+                             optimizer="adam", num_iters=10, **kwargs):
+        """
+        Max likelihood is not available in closed form. Default to SGD.
+        """
+        optimizer = dict(sgd=sgd, adam=adam)[optimizer]
+        
+        # expected log joint
+        def _expected_log_joint(expectations):
+            elbo = 0
+            for data, input, mask, (expected_states, expected_joints) \
+                in zip(datas, inputs, masks, expectations):
+                lls = self._log_likelihoods(data, input, mask)
+                elbo += np.sum(expected_states * lls)
+            return elbo
+
+        # define optimization target
+        T = sum([data.shape[0] for data in datas])
+        def _objective(params, itr):
+            self.As, self.bs, self.Vs, self.inv_sigmas, self.inv_nus = params
+            obj = _expected_log_joint(expectations)
+            return -obj / T
+
+        self.As, self.bs, self.Vs, self.inv_sigmas, self.inv_nus = \
+            optimizer(grad(_objective), 
+                (self.As, self.bs, self.Vs, self.inv_sigmas, self.inv_nus), 
+                num_iters=num_iters, **kwargs)
+
+    def _sample_x(self, z, xhist):
+        D, As, bs, sigmas, nus = self.D, self.As, self.bs, np.exp(self.inv_sigmas), np.exp(self.inv_nus)
+        if xhist.shape[0] == 0:
+            mu_init = self.mu_init
+            sigma_init = np.exp(self.inv_sigma_init)
+            return mu_init + np.sqrt(sigma_init) * npr.randn(D)
+        else:
+            tau = np.random.gamma(nus[z] / 2.0, 2.0 / nus[z])
+            return As[z].dot(xhist[-1]) + bs[z] + np.sqrt(sigmas[z] / tau) * npr.randn(D)
+
+    @ensure_args_not_none
+    def smooth(self, data, input=None, mask=None):
+        """
+        Compute the mean observation under the posterior distribution
+        of latent discrete states.
+        """
+        mask = np.ones_like(data, dtype=bool) if mask is None else mask
+        E_z, _ = self.expected_states(data, input, mask)
+        mus = self._compute_mus(data, input, mask)
+        return (E_z[:, :, None] * mus).sum(1)
+
+
+class RobustAutoRegressiveHMM(_RobustAutoRegressiveObservations, _StationaryHMM):
+    pass
+
+
+class InputDrivenRobustAutoRegressiveHMM(_RobustAutoRegressiveObservations, _InputDrivenHMM):
+    pass
+
+
+class RecurrentRobustAutoRegressiveHMM(_RecurrentAutoRegressiveHMMMixin,
+                                       _RobustAutoRegressiveObservations, 
+                                       _RecurrentHMM):
+    pass
+
+
+class RecurrentOnlyRobustAutoRegressiveHMM(_RecurrentAutoRegressiveHMMMixin,
+                                           _RobustAutoRegressiveObservations, 
+                                           _RecurrentOnlyHMM):
     pass
 
 
@@ -891,6 +1104,7 @@ class _SwitchingLDSBase(object):
         return self._fitting_methods[method](datas, inputs, masks, learning=False, **kwargs)
 
 
+# Standard SLDS with Gaussian dynamics noise
 class _SwitchingLDS(_SwitchingLDSBase, AutoRegressiveHMM):
     pass
 
@@ -903,6 +1117,20 @@ class _RecurrentOnlySwitchingLDS(_SwitchingLDSBase, RecurrentOnlyAutoRegressiveH
     pass
 
 
+# Robust versions with Student's t dynamics noise
+class _RobustSwitchingLDS(_SwitchingLDSBase, RobustAutoRegressiveHMM):
+    pass
+
+
+class _RecurrentRobustSwitchingLDS(_SwitchingLDSBase, RecurrentRobustAutoRegressiveHMM):
+    pass
+
+
+class _RecurrentOnlyRobustSwitchingLDS(_SwitchingLDSBase, RecurrentOnlyRobustAutoRegressiveHMM):
+    pass
+
+
+# Emissions models
 class _GaussianEmissions(object):
     def __init__(self, N, K, D, *args, single_subspace=True):
         super(_GaussianEmissions, self).__init__(N, K, D, *args)
@@ -957,7 +1185,7 @@ class _GaussianEmissions(object):
         print("Done.")
 
     def initialize_from_arhmm(self, arhmm, pca):
-        for attr in ['As', 'bs', 'inv_sigmas', 
+        for attr in ['As', 'bs', 'inv_sigmas', 'inv_nus',
                      'log_pi0', 'log_Ps', 
                      'Ws', 'Rs', 'r']:
             if hasattr(self, attr) and hasattr(arhmm, attr):
@@ -1009,6 +1237,7 @@ class _GaussianEmissions(object):
         return mus[:,0,:] if self.single_subspace else np.sum(mus * E_z, axis=1)
         
 
+# Standard Gaussian versions
 class GaussianSLDS(_GaussianEmissions, _SwitchingLDS):
     pass
 
@@ -1018,4 +1247,17 @@ class GaussianRecurrentSLDS(_GaussianEmissions, _RecurrentSwitchingLDS):
 
 
 class GaussianRecurrentOnlySLDS(_GaussianEmissions, _RecurrentOnlySwitchingLDS):
+    pass
+
+
+# Robust versions
+class GaussianRobustSLDS(_GaussianEmissions, _RobustSwitchingLDS):
+    pass
+
+
+class GaussianRecurrentRobustSLDS(_GaussianEmissions, _RecurrentRobustSwitchingLDS):
+    pass
+
+
+class GaussianRecurrentOnlyRobustSLDS(_GaussianEmissions, _RecurrentOnlyRobustSwitchingLDS):
     pass
