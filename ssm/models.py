@@ -1,4 +1,5 @@
 from functools import partial
+from warnings import warn
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
@@ -27,7 +28,8 @@ class _HMM(object):
         self._fitting_methods = \
             dict(sgd=partial(self._fit_mle, "sgd"),
                 adam=partial(self._fit_mle, "adam"),
-                em=self._fit_em)
+                em=self._fit_em,
+                stochastic_em=self._fit_stochastic_em)
 
     @property
     def params(self):
@@ -101,6 +103,12 @@ class _HMM(object):
         """
         pass
 
+    def permute(self, perm):
+        """
+        Permute the discrete latent states.
+        """
+        assert np.all(np.sort(perm) == np.arange(self.K))
+
     @ensure_args_not_none
     def expected_states(self, data, input=None, mask=None):
         log_pi0 = self._log_initial_state_distn(data, input, mask)
@@ -165,7 +173,7 @@ class _HMM(object):
 
         return lls
 
-    def _m_step(self, expectations, datas, inputs, masks, optimizer="sgd", **kwargs):
+    def _stochastic_m_step(self, expectations, datas, inputs, masks, optimizer="adam", **kwargs):
         """
         The default M step implementation does SGD on the expected log joint. 
         Base classes can override this with closed form updates if available.
@@ -195,14 +203,12 @@ class _HMM(object):
 
         self.params = optimizer(grad(_objective), self.params, **kwargs)
 
-
-    def _fit_em(self, datas, inputs, masks, num_em_iters=100, optimizer="sgd", **kwargs):
+    def _fit_stochastic_em(self, datas, inputs, masks, num_em_iters=100, optimizer="adam", **kwargs):
         """
-        Fit the parameters with expectation maximization.
+        Fit the parameters with expectation maximization.  
 
-        Compute E[z_t] and E[z_t, z_{t+1}] with message passing;
-        Optimize the objective function E_{p(z | x)} [log p(x, z; theta)]
-        with respect to theta. 
+        E step: compute E[z_t] and E[z_t, z_{t+1}] with message passing;
+        M-step: stochastic gradient ascent on E_{p(z | x)} [log p(x, z; theta)].
         """
         lls = []
         for itr in range(num_em_iters):
@@ -211,11 +217,46 @@ class _HMM(object):
                             for data, input, mask in zip(datas, inputs, masks)]
 
             # M step: maximize expected log joint wrt parameters
-            self._m_step(expectations, datas, inputs, masks, optimizer=optimizer, **kwargs)
+            self._stochastic_m_step(expectations, datas, inputs, masks, optimizer=optimizer, **kwargs)
 
             # Store progress
             lls.append(self.log_likelihood(datas, inputs, masks))
             print("Iteration {}.  LL: {}".format(itr, lls[-1]))
+
+        return lls
+
+    def _m_step_initial_state(self, expectations, datas, inputs, masks, **kwargs):
+        raise NotImplementedError
+
+    def _m_step_transitions(self, expectations, datas, inputs, masks, **kwargs):
+        raise NotImplementedError
+
+    def _m_step_observations(self, expectations, datas, inputs, masks, **kwargs):
+        raise NotImplementedError
+
+    def _fit_em(self, datas, inputs, masks, num_em_iters=100, verbose=True, **kwargs):
+        """
+        Fit the parameters with expectation maximization.
+
+        E step: compute E[z_t] and E[z_t, z_{t+1}] with message passing;
+        M-step: analytical maximization of E_{p(z | x)} [log p(x, z; theta)].
+        """
+        lls = []
+        for itr in range(num_em_iters):
+            # E step: compute expected latent states with current parameters
+            expectations = [self.expected_states(data, input, mask) 
+                            for data, input, mask in zip(datas, inputs, masks)]
+
+            # M step: maximize expected log joint wrt parameters
+            self._m_step_initial_state(expectations, datas, inputs, masks, **kwargs)
+            self._m_step_transitions(expectations, datas, inputs, masks, **kwargs)
+            self._m_step_observations(expectations, datas, inputs, masks, **kwargs)
+
+            # Store progress
+            lls.append(self.log_likelihood(datas, inputs, masks))
+
+            if verbose:
+                print("Iteration {}.  LL: {}".format(itr, lls[-1]))
 
         return lls
 
@@ -254,6 +295,14 @@ class _StationaryHMM(_HMM):
         self.log_pi0, self.log_Ps = value[-2:]
         super(_StationaryHMM, self.__class__).params.fset(self, value[:-2])
 
+    def permute(self, perm):
+        """
+        Permute the discrete latent states.
+        """
+        super(_StationaryHMM, self).permute(perm)
+        self.log_pi0 = self.log_pi0[perm]
+        self.log_Ps = self.log_Ps[np.ix_(perm, perm)]
+
     @property
     def init_state_distn(self):
         return np.exp(self.log_pi0 - logsumexp(self.log_pi0))
@@ -269,6 +318,15 @@ class _StationaryHMM(_HMM):
         T = data.shape[0]
         log_Ps = np.tile(self.log_Ps[None, :, :], (T-1, 1, 1))
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
+
+    def _m_step_initial_state(self, expectations, datas, inputs, masks, **kwargs):
+        pi0 = sum([Ez[0] for Ez, _ in expectations]) + 1e-8
+        self.log_pi0 = np.log(pi0 / pi0.sum())
+
+    def _m_step_transitions(self, expectations, datas, inputs, masks, **kwargs):
+        expected_joints = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1 in expectations]) + 1e-8
+        P = expected_joints / expected_joints.sum(axis=1, keepdims=True)
+        self.log_Ps = np.log(P)
     
 
 class _InputDrivenHMM(_HMM):
@@ -301,6 +359,15 @@ class _InputDrivenHMM(_HMM):
         self.log_pi0, self.log_Ps, self.Ws = value[-3], value[-2], value[-1]
         super(_InputDrivenHMM, self.__class__).params.fset(self, value[:-3])
         
+    def permute(self, perm):
+        """
+        Permute the discrete latent states.
+        """
+        super(_InputDrivenHMM, self).permute(perm)
+        self.log_pi0 = self.log_pi0[perm]
+        self.log_Ps = self.log_Ps[np.ix_(perm, perm)]
+        self.Ws = self.Ws[perm]
+
     @property
     def init_state_distn(self):
         return np.exp(self.log_pi0 - logsumexp(self.log_pi0))
@@ -316,6 +383,34 @@ class _InputDrivenHMM(_HMM):
         # Input effect
         log_Ps = log_Ps + np.dot(input[1:], self.Ws.T)[:, None, :]
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
+
+    def _m_step_initial_state(self, expectations, datas, inputs, masks, **kwargs):
+        pi0 = sum([Ez[0] for Ez, _ in expectations]) + 1e-8
+        self.log_pi0 = np.log(pi0 / pi0.sum())
+
+    def _m_step_transitions(self, expectations, datas, inputs, masks, optimizer="adam", num_iters=10, **kwargs):
+        """
+        Default to using stochastic EM for the transition model
+        """
+        optimizer = dict(sgd=sgd, adam=adam)[optimizer]
+        
+        # expected log joint
+        def _expected_log_joint(expectations):
+            elbo = 0
+            for data, input, mask, (expected_states, expected_joints) \
+                in zip(datas, inputs, masks, expectations):
+                log_Ps = self._log_transition_matrices(data, input, mask)
+                elbo += np.sum(expected_joints * log_Ps)
+            return elbo
+
+        # define optimization target
+        T = sum([data.shape[0] for data in datas])
+        def _objective(params, itr):
+            self.params = params
+            obj = _expected_log_joint(expectations)
+            return -obj / T
+
+        self.params = optimizer(grad(_objective), self.params, num_iters=num_iters, **kwargs)
 
 
 class _RecurrentHMM(_InputDrivenHMM):
@@ -338,6 +433,13 @@ class _RecurrentHMM(_InputDrivenHMM):
         self.Rs = value[-1]
         super(_RecurrentHMM, self.__class__).params.fset(self, value[:-1])
 
+    def permute(self, perm):
+        """
+        Permute the discrete latent states.
+        """
+        super(_RecurrentHMM, self).permute(perm)
+        self.Rs = self.Rs[perm]
+
     def _log_transition_matrices(self, data, input, mask):
         T, D = data.shape
         # Previous state effect
@@ -346,6 +448,53 @@ class _RecurrentHMM(_InputDrivenHMM):
         log_Ps = log_Ps + np.dot(input[1:], self.Ws.T)[:, None, :]
         # Past observations effect
         log_Ps = log_Ps + np.dot(data[:-1], self.Rs.T)[:, None, :]
+        return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
+
+
+class _RecurrentOnlyHMM(_InputDrivenHMM):
+    """
+    Only allow the past observations and inputs to influence the
+    next state.  Get rid of the transition matrix and replace it
+    with a constant bias r.
+    """
+    def __init__(self, K, D, M):
+        super(_RecurrentOnlyHMM, self).__init__(K, D, M)
+
+        # Parameters linking past observations to state distribution
+        self.Rs = npr.randn(K, D)
+        self.r = npr.randn(K)
+
+        # Remove the transition matrix component
+        del(self.log_Ps)
+
+    @property
+    def params(self):
+        return (self.log_pi0, self.Ws, self.Rs, self.r)
+    
+    @params.setter
+    def params(self, value):
+        self.log_pi0, self.Ws, self.Rs, self.r = value
+
+    def permute(self, perm):
+        """
+        Permute the discrete latent states.
+        """
+        self.log_pi0 = self.log_pi0[perm]
+        self.Ws = self.Ws[perm]
+        self.Rs = self.Rs[perm]
+        self.r = self.r[perm]
+
+    def _log_transition_matrices(self, data, input, mask):
+        T, D = data.shape
+        # Input effect
+        log_Ps = np.dot(input[1:], self.Ws.T)[:, None, :]
+        # Past observations effect
+        log_Ps = log_Ps + np.dot(data[:-1], self.Rs.T)[:, None, :] 
+        # Bias
+        log_Ps = log_Ps + self.r
+        # Expand along the previous state dimension
+        log_Ps = np.tile(log_Ps, (1, self.K, 1))
+        # Normalize
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
 
@@ -366,6 +515,11 @@ class _GaussianObservations(object):
         self.mus, self.inv_sigmas = value[-2:]
         super(_GaussianObservations, self.__class__).params.fset(self, value[:-2])
 
+    def permute(self, perm):
+        super(_GaussianObservations, self).permute(perm)
+        self.mus = self.mus[perm]
+        self.inv_sigmas = self.inv_sigmas[perm]
+        
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None):
         # Initialize with KMeans
@@ -388,6 +542,14 @@ class _GaussianObservations(object):
         D, mus, sigmas = self.D, self.mus, np.exp(self.inv_sigmas)
         return mus[z] + np.sqrt(sigmas[z]) * npr.randn(D)
 
+    def _m_step_observations(self, expectations, datas, inputs, masks, **kwargs):
+        x = np.concatenate(datas)
+        weights = np.concatenate([Ez for Ez, _ in expectations])
+        for k in range(self.K):
+            self.mus[k] = np.average(x, axis=0, weights=weights[:,k])
+            sqerr = (x - self.mus[k])**2
+            self.inv_sigmas[k] = np.log(np.average(sqerr, weights=weights[:,k], axis=0))
+
     @ensure_args_not_none
     def smooth(self, data, input=None, mask=None):
         """
@@ -407,6 +569,10 @@ class InputDrivenGaussianHMM(_GaussianObservations, _InputDrivenHMM):
 
 
 class RecurrentGaussianHMM(_GaussianObservations, _RecurrentHMM):
+    pass
+
+
+class RecurrentOnlyGaussianHMM(_GaussianObservations, _RecurrentOnlyHMM):
     pass
 
 
@@ -433,6 +599,13 @@ class _AutoRegressiveObservations(object):
     def params(self, value):
         self.As, self.bs, self.Vs, self.inv_sigmas = value[-4:]
         super(_AutoRegressiveObservations, self.__class__).params.fset(self, value[:-4])
+
+    def permute(self, perm):
+        super(_AutoRegressiveObservations, self).permute(perm)
+        self.As = self.As[perm]
+        self.bs = self.bs[perm]
+        self.Vs = self.Vs[perm]
+        self.inv_sigmas = self.inv_sigmas[perm]
 
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None):
@@ -475,6 +648,30 @@ class _AutoRegressiveObservations(object):
             (np.log(2 * np.pi * sigmas) + (data[:, None, :] - mus)**2 / sigmas) 
             * mask[:, None, :], axis=2)
 
+    def _m_step_observations(self, expectations, datas, inputs, masks, **kwargs):
+        from sklearn.linear_model import LinearRegression
+        D, M = self.D, self.M
+
+        for k in range(self.K):
+            xs, ys, weights = [], [], []
+            for (Ez, _), data, input in zip(expectations, datas, inputs):
+                xs.append(np.hstack((data[:-1], input[:-1])))
+                ys.append(data[1:])
+                weights.append(Ez[1:,k])
+            xs = np.concatenate(xs)
+            ys = np.concatenate(ys)
+            weights = np.concatenate(weights)
+
+            # Fit a weighted linear regression
+            lr = LinearRegression()
+            lr.fit(xs, ys, sample_weight=weights)
+            self.As[k], self.Vs[k], self.bs[k] = lr.coef_[:,:D], lr.coef_[:,D:], lr.intercept_
+
+            # Update the variances
+            yhats = lr.predict(xs)
+            sqerr = (ys - yhats)**2
+            self.inv_sigmas[k] = np.log(np.average(sqerr, weights=weights, axis=0))
+
     def _sample_x(self, z, xhist):
         D, As, bs, sigmas = self.D, self.As, self.bs, np.exp(self.inv_sigmas)
         if xhist.shape[0] == 0:
@@ -504,12 +701,13 @@ class InputDriveAutoRegressiveHMM(_AutoRegressiveObservations, _InputDrivenHMM):
     pass
 
 
-class RecurrentAutoRegressiveHMM(_AutoRegressiveObservations, _RecurrentHMM):
+class _RecurrentAutoRegressiveHMMMixin(object):
 
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None):
         """
-        Smarter initialization by clustering the data
+        Smarter initialization by clustering the data and then 
+        learning linear dynamics. 
         """
         data = np.concatenate(datas) 
         input = np.concatenate(inputs)
@@ -536,6 +734,18 @@ class RecurrentAutoRegressiveHMM(_AutoRegressiveObservations, _RecurrentHMM):
             self.inv_sigmas[k] = np.log(sigmas)
 
 
+class RecurrentAutoRegressiveHMM(_RecurrentAutoRegressiveHMMMixin,
+                                 _AutoRegressiveObservations, 
+                                 _RecurrentHMM):
+    pass
+
+
+class RecurrentOnlyAutoRegressiveHMM(_RecurrentAutoRegressiveHMMMixin,
+                                     _AutoRegressiveObservations, 
+                                     _RecurrentOnlyHMM):
+    pass
+
+
 class _SwitchingLDSBase(object):
     """
     Switching linear dynamical system fit with 
@@ -560,22 +770,22 @@ class _SwitchingLDSBase(object):
         y = self._sample_y(z, x, input=input)
         return z, x, y
 
-    def expected_states(self, variational_param, input=None, mask=None):
-        x_mu, x_var = variational_param
-        input = np.zeros((x_mu.shape[0], self.M)) if input is None else input
-        mask = np.ones_like(x_mu, dtype=bool) if mask is None else mask
-        log_pi0 = self._log_initial_state_distn(x_mu, input, mask)
-        log_Ps = self._log_transition_matrices(x_mu, input, mask)
-        log_likes = self._log_likelihoods(x_mu, input, mask)
+    def expected_states(self, variational_mean, input=None, mask=None):
+        input = np.zeros((variational_mean.shape[0], self.M)) if input is None else input
+        mask = np.ones_like(variational_mean, dtype=bool) if mask is None else mask
+        log_pi0 = self._log_initial_state_distn(variational_mean, input, mask)
+        log_Ps = self._log_transition_matrices(variational_mean, input, mask)
+        log_likes = self._log_likelihoods(variational_mean, input, mask)
         return hmm_expected_states(log_pi0, log_Ps, log_likes)
 
-    def most_likely_states(self, variational_params, input=None, mask=None):
-        Ez, _ = self.expected_states(variational_params, input, mask)
+    def most_likely_states(self, variational_mean, input=None, mask=None):
+        Ez, _ = self.expected_states(variational_mean, input, mask)
         return np.argmax(Ez, axis=1)
 
     def log_likelihood(self, datas, inputs=None, masks=None):
-        raise Exception("Cannot compute exact marginal log likelihood for the SLDS. "
-                         "Compute the ELBO instead")
+        warn("Cannot compute exact marginal log likelihood for the SLDS. "
+             "the ELBO instead.")
+        return np.nan
 
     @ensure_elbo_args_are_lists
     def elbo(self, variational_params, datas, inputs=None, masks=None, n_samples=1):
@@ -617,7 +827,7 @@ class _SwitchingLDSBase(object):
         q_sigma_inv = np.zeros((T, self.D))
         return q_mu, q_sigma_inv
 
-    def _fit_svi(self, datas, inputs, masks, optimizer="sgd", print_intvl=1, **kwargs):
+    def _fit_svi(self, datas, inputs, masks, learning=True, optimizer="adam", print_intvl=1, **kwargs):
         """
         Fit with stochastic variational inference using a 
         mean field Gaussian approximation for the latent states x_{1:T}.
@@ -629,7 +839,11 @@ class _SwitchingLDSBase(object):
                               for data, input, mask in zip(datas, inputs, masks)]
 
         def _objective(params, itr):
-            self.params, variational_params = params
+            if learning:
+                self.params, variational_params = params
+            else:
+                variational_params = params
+
             obj = self.elbo(variational_params, datas, inputs, masks)
             return -obj / T
 
@@ -640,11 +854,17 @@ class _SwitchingLDSBase(object):
                 print("Iteration {}.  ELBO: {}".format(itr, elbos[-1]))
         
         optimizers = dict(sgd=sgd, adam=adam)
-        self.params, variational_params = \
+        initial_params = (self.params, variational_params) if learning else variational_params
+        results = \
             optimizers[optimizer](grad(_objective), 
-                (self.params, variational_params),
+                initial_params,
                 callback=_print_progress,
                 **kwargs)
+
+        if learning:
+            self.params, variational_params = results
+        else:
+            variational_params = results
 
         # unpack outputs as necessary
         variational_params = variational_params[0] if \
@@ -660,8 +880,15 @@ class _SwitchingLDSBase(object):
         if initialize:
             self.initialize(datas, inputs, masks)
 
-        return self._fitting_methods[method](datas, inputs, masks, **kwargs)
+        return self._fitting_methods[method](datas, inputs, masks, learning=True, **kwargs)
 
+    @ensure_args_are_lists
+    def approximate_posterior(self, datas, inputs=None, masks=None, method="svi", **kwargs):
+        if method not in self._fitting_methods:
+            raise Exception("Invalid method: {}. Options are {}".\
+                            format(method, self._fitting_methods.keys()))
+
+        return self._fitting_methods[method](datas, inputs, masks, learning=False, **kwargs)
 
 
 class _SwitchingLDS(_SwitchingLDSBase, AutoRegressiveHMM):
@@ -669,6 +896,10 @@ class _SwitchingLDS(_SwitchingLDSBase, AutoRegressiveHMM):
 
 
 class _RecurrentSwitchingLDS(_SwitchingLDSBase, RecurrentAutoRegressiveHMM):
+    pass
+
+
+class _RecurrentOnlySwitchingLDS(_SwitchingLDSBase, RecurrentOnlyAutoRegressiveHMM):
     pass
 
 
@@ -692,33 +923,58 @@ class _GaussianEmissions(object):
         self.Cs, self.ds, self.inv_etas = value[-3:]
         super(_GaussianEmissions, self.__class__).params.fset(self, value[:-3])
 
+    def permute(self, perm):
+        super(_GaussianEmissions, self).permute(perm)
+
+        if not self.single_subspace:
+            self.Cs = self.Cs[perm]
+            self.ds = self.ds[perm]
+            # self.Vs = self.Vs[perm]
+            self.inv_eta = self.inv_etas[perm]
+
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None):
+    def initialize(self, datas, inputs=None, masks=None, num_em_iters=25):
         # Initialize the subspace with PCA
         from sklearn.decomposition import PCA
         data = np.concatenate(datas)
         pca = PCA(self.D)
-        pca.fit(data)
-
-        # Transform the data and compute residuals
-        x = pca.transform(data)
+        x = pca.fit_transform(data)
         resid = data - pca.inverse_transform(x)
         etas = np.var(resid, axis=0)
+
+        self.Cs[:,...] = pca.components_.T
+        self.ds[:,...] = pca.mean_
+        self.inv_etas[:,...] = np.log(pca.noise_variance_)
+
+        # Initialize the dynamics parameters with the pca embedded data
+        xs = np.split(x, [len(data) for data in datas])
+        xmasks = [np.ones_like(x, dtype=bool) for x in xs]
+        super(_GaussianEmissions, self).initialize(xs, inputs, masks)
+        
+        print("Initializing with an ARHMM fit via ", num_em_iters, " iterations of EM.")
+        super(_GaussianEmissions, self)._fit_em(xs, inputs, xmasks, 
+            num_em_iters=num_em_iters, step_size=1e-2, num_iters=10, verbose=False)
+        print("Done.")
+
+    def initialize_from_arhmm(self, arhmm, pca):
+        for attr in ['As', 'bs', 'inv_sigmas', 
+                     'log_pi0', 'log_Ps', 
+                     'Ws', 'Rs', 'r']:
+            if hasattr(self, attr) and hasattr(arhmm, attr):
+                setattr(self, attr, getattr(arhmm, attr).copy())
+
         
         self.Cs[:,...] = pca.components_.T
         self.ds[:,...] = pca.mean_
-        self.inv_etas[:,...] = np.log(etas)
-
-        # Initialize the dynamics parameters with the pca embedded data
-        xs = np.split(x, [len(data) for data in datas]) if isinstance(data, list) else x
-        super(_GaussianEmissions, self).initialize(xs, inputs, masks)
+        self.inv_etas[:,...] = np.log(pca.noise_variance_)
 
     def _initialize_variational_params(self, data, input, mask):
-        # y = Cx + d + noise; C orthogonal.  xhat = C^T (y-d)
+        # y = Cx + d + noise; C orthogonal.  xhat = (C^T C)^{-1} C^T (y-d)
         T = data.shape[0]
         C, d = self.Cs[0], self.ds[0]
-        q_mu = (data-d).dot(C)
-        q_sigma_inv = -2 * np.ones((T, self.D))
+        C_pseudoinv = np.linalg.solve(C.T.dot(C), C.T).T
+        q_mu = (data-d).dot(C_pseudoinv)
+        q_sigma_inv = -4 * np.ones((T, self.D))
         return q_mu, q_sigma_inv
         
     def _emission_log_likelihoods(self, data, input, mask, x):
@@ -742,16 +998,14 @@ class _GaussianEmissions(object):
         y = mu + np.sqrt(eta) * npr.randn(T, self.N)
         return y
 
-    @ensure_args_not_none
-    def smooth(self, x, input=None, mask=None):
+    def smooth(self, variational_mean, input=None, mask=None):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
-        E_z, _ = self.expected_states(variational_param, input, mask)
-
         Cs, ds = self.Cs, self.ds
-        mus = np.matmul(Cs[None, ...], x[:, None, :, None])[:, :, :, 0] + ds
+        E_z, _ = self.expected_states(variational_mean, input, mask)
+        mus = np.matmul(Cs[None, ...], variational_mean[:, None, :, None])[:, :, :, 0] + ds
         return mus[:,0,:] if self.single_subspace else np.sum(mus * E_z, axis=1)
         
 
@@ -762,3 +1016,6 @@ class GaussianSLDS(_GaussianEmissions, _SwitchingLDS):
 class GaussianRecurrentSLDS(_GaussianEmissions, _RecurrentSwitchingLDS):
     pass
 
+
+class GaussianRecurrentOnlySLDS(_GaussianEmissions, _RecurrentOnlySwitchingLDS):
+    pass

@@ -1,6 +1,23 @@
 import autograd.numpy as np
 import autograd.numpy.random as npr
 
+from scipy.optimize import linear_sum_assignment
+
+def find_permutation(z1, z2):
+    assert z1.dtype == int and z2.dtype == int
+    assert z1.shape == z2.shape
+    assert z1.min() >= 0 and z2.min() >= 0
+    
+    K = max(z1.max(), z2.max()) + 1
+    overlap = np.zeros((K, K))
+    for k1 in range(K):
+        for k2 in range(K):
+            overlap[k1, k2] = np.sum((z1 == k1) & (z2 == k2))
+
+    tmp, perm = linear_sum_assignment(-overlap)
+    assert np.all(tmp == np.arange(K)), "All indices should have been matched!"
+    return perm
+
 def random_rotation(n, theta=None):
     if theta is None:
         # Sample a random, slow rotation
