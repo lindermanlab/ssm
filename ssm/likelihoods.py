@@ -497,8 +497,8 @@ class _RobustAutoRegressiveHMMObservations(_AutoRegressiveHMMObservations):
 
 # Observation models for SLDS
 class _GaussianSLDSObservations(object):
-    def __init__(self, N, K, D, *args, single_subspace=True):
-        super(_GaussianSLDSObservations, self).__init__(N, K, D, *args)
+    def __init__(self, N, K, D, M=0, single_subspace=True, **kwargs):
+        super(_GaussianSLDSObservations, self).__init__(N, K, D, M=M, **kwargs)
 
         # Initialize observation model
         self.single_subspace = single_subspace

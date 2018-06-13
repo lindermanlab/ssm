@@ -6,7 +6,7 @@ from autograd.test_util import check_grads
 
 from ssm.messages import forward_pass, grad_hmm_normalizer
 from ssm.primitives import hmm_normalizer
-from ssm.models import GaussianHMM
+from ssm.models import HMM
 
 from tqdm import trange
 
@@ -76,18 +76,18 @@ def test_hmm_likelihood(T=500, K=5, D=2):
         y[t] = C[z[t]] + np.sqrt(sigma) * npr.randn(D)
 
     # Compare to pyhsmm answer
-    from pyhsmm.models import HMM
+    from pyhsmm.models import HMM as OldHMM
     from pyhsmm.basic.distributions import Gaussian
-    hmm = HMM([Gaussian(mu=C[k], sigma=sigma * np.eye(D)) for k in range(K)],
-              trans_matrix=A,
-              init_state_distn="uniform")
+    hmm = OldHMM([Gaussian(mu=C[k], sigma=sigma * np.eye(D)) for k in range(K)],
+                  trans_matrix=A,
+                  init_state_distn="uniform")
     true_lkhd = hmm.log_likelihood(y)
 
     # Make an HMM with these parameters
-    hmm = GaussianHMM(K, D)
+    hmm = HMM(K, D, observations="gaussian")
     hmm.log_Ps = np.log(A)
     hmm.mus = C
     hmm.inv_sigmas = np.log(sigma) * np.ones((K, D))
-    test_lkhd = hmm.log_likelihood(y)
+    test_lkhd = hmm.log_probability(y)
 
     assert np.allclose(true_lkhd, test_lkhd)

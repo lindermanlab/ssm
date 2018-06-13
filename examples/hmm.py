@@ -5,7 +5,7 @@ npr.seed(0)
 import matplotlib
 import matplotlib.pyplot as plt
 
-from ssm.models import GaussianHMM, StudentsTHMM, AutoRegressiveHMM
+from ssm.models import HMM
 
 # Set the parameters of the HMM
 T = 500     # number of time bins
@@ -13,7 +13,7 @@ K = 5       # number of discrete states
 D = 2       # number of observed dimensions
 
 # Make an HMM with the true parameters
-true_hmm = GaussianHMM(K, D)
+true_hmm = HMM(K, D, observations="gaussian")
 z, y = true_hmm.sample(T)
 z_test, y_test = true_hmm.sample(T)
 true_ll = true_hmm.log_probability(y)
@@ -23,31 +23,31 @@ N_sgd_iters = 1000
 N_em_iters = 100
 
 print("Fitting HMM with SGD")
-hmm = GaussianHMM(K, D)
+hmm = HMM(K, D, observations="gaussian")
 hmm_sgd_lls = hmm.fit(y, method="sgd", num_iters=N_sgd_iters)
 hmm_sgd_test_ll = hmm.log_probability(y_test)
 hmm_sgd_smooth = hmm.smooth(y)
 
 print("Fitting HMM with EM")
-hmm = GaussianHMM(K, D)
+hmm = HMM(K, D, observations="gaussian")
 hmm_em_lls = hmm.fit(y, method="em", num_em_iters=N_em_iters)
 hmm_em_test_ll = hmm.log_probability(y_test)
 hmm_em_smooth = hmm.smooth(y)
 
 print("Fitting Student's t HMM with SGD")
-thmm = StudentsTHMM(K, D)
+thmm = HMM(K, D, observations="studentst")
 thmm_sgd_lls = thmm.fit(y, method="sgd", num_iters=N_sgd_iters)
 thmm_sgd_test_ll = thmm.log_probability(y_test)
 thmm_sgd_smooth = thmm.smooth(y)
 
 print("Fitting ARHMM with SGD")
-arhmm = AutoRegressiveHMM(K, D)
+arhmm = HMM(K, D, observations="ar")
 arhmm_sgd_lls = arhmm.fit(y, method="sgd", num_iters=N_sgd_iters)
 arhmm_sgd_test_ll = arhmm.log_probability(y_test)
 arhmm_sgd_smooth = arhmm.smooth(y)
 
 print("Fitting ARHMM with EM")
-arhmm = AutoRegressiveHMM(K, D)
+arhmm = HMM(K, D, observations="ar")
 arhmm_em_lls = arhmm.fit(y, method="em", num_em_iters=N_em_iters)
 arhmm_em_test_ll = arhmm.log_probability(y_test)
 arhmm_em_smooth = arhmm.smooth(y)

@@ -32,7 +32,7 @@ colors = sns.xkcd_palette(color_names)
 sns.set_style("white")
 sns.set_context("paper")
 
-from ssm.models import GaussianRecurrentOnlySLDS, GaussianRecurrentOnlyRobustSLDS
+from ssm.models import SLDS
 from ssm.util import random_rotation
 
 ### Global parameters
@@ -122,7 +122,11 @@ def make_nascar_model():
     C = npr.randn(1, D_obs, D_latent)
     d = np.zeros((1, D_obs))
 
-    true_rslds = GaussianRecurrentOnlySLDS(D_obs, K, D_latent, single_subspace=True)
+    true_rslds = SLDS(D_obs, K, D_latent, 
+                      observations="gaussian",
+                      single_subspace=True,
+                      robust_dynamics=True,
+                      recurrent_only=True)
     true_rslds.mu_init = np.array([0, 1])
     true_rslds.inv_sigma_init = np.log(1e-4) * np.ones(2)
     true_rslds.As = np.array(As)
@@ -135,17 +139,16 @@ def make_nascar_model():
     true_rslds.inv_etas = np.log(1e-2) * np.ones((1, D_obs))
     return true_rslds
 
-# Sample from the model #
+# Sample from the model
 true_rslds = make_nascar_model()
 z, x, y = true_rslds.sample(T=T)
 
-# Fit a rSLDS with its default initialization
-# rslds = GaussianRecurrentOnlySLDS(D_obs, K, D_latent, single_subspace=True)
-# elbos, (xhat, xvar) = rslds.fit(y, num_iters=1000)
-# zhat = rslds.most_likely_states(xhat)
-
 # Fit a robust rSLDS with its default initialization
-rslds = GaussianRecurrentOnlyRobustSLDS(D_obs, K, D_latent, single_subspace=True)
+rslds = SLDS(D_obs, K, D_latent, 
+             observations="gaussian",
+             single_subspace=True,
+             robust_dynamics=True,
+             recurrent_only=True)
 elbos, (xhat, xvar) = rslds.fit(y, num_iters=1000)
 zhat = rslds.most_likely_states(xhat)
 
