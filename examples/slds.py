@@ -17,7 +17,7 @@ N = 10      # number of observed dimensions
 # Make an SLDS with the true parameters
 true_slds = SLDS(N, K, D, observations="gaussian")
 for k in range(K):
-	true_slds.As[k] = .95 * random_rotation(D, theta=(k+1) * np.pi/20)
+    true_slds.As[k] = .95 * random_rotation(D, theta=(k+1) * np.pi/20)
 z, x, y = true_slds.sample(T)
 z_test, x_test, y_test = true_slds.sample(T)
 

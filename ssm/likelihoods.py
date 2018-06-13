@@ -1,3 +1,5 @@
+import warnings
+
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.special import gammaln
@@ -547,9 +549,11 @@ class _GaussianSLDSObservations(object):
         super(_GaussianSLDSObservations, self).initialize(xs, inputs, masks)
         
         print("Initializing with an ARHMM fit via ", num_em_iters, " iterations of EM.")
-        super(_GaussianSLDSObservations, self)._fit_em(xs, inputs, xmasks, tags,
-            num_em_iters=num_em_iters, step_size=1e-2, num_iters=10, verbose=False)
-        print("Done.")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            super(_GaussianSLDSObservations, self)._fit_em(xs, inputs, xmasks, tags,
+                num_em_iters=num_em_iters, step_size=1e-2, num_iters=10, verbose=False)
+        print("Done.\n")
 
     def initialize_from_arhmm(self, arhmm, pca):
         for attr in ['As', 'bs', 'inv_sigmas', 'inv_nus',
