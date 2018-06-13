@@ -28,7 +28,7 @@ class _GaussianHMMObservations(object):
         self.inv_sigmas = self.inv_sigmas[perm]
         
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None):
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
         # Initialize with KMeans
         from sklearn.cluster import KMeans
         data = np.concatenate(datas)
@@ -38,18 +38,18 @@ class _GaussianHMMObservations(object):
                            for k in range(self.K)])
         self.inv_sigmas = np.log(sigmas)
         
-    def _log_likelihoods(self, data, input, mask):
+    def _log_likelihoods(self, data, input, mask, tag):
         mus, sigmas = self.mus, np.exp(self.inv_sigmas)
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return -0.5 * np.sum(
             (np.log(2 * np.pi * sigmas) + (data[:, None, :] - mus)**2 / sigmas) 
             * mask[:, None, :], axis=2)
 
-    def _sample_x(self, z, xhist):
+    def _sample_x(self, z, xhist, input=None, tag=None):
         D, mus, sigmas = self.D, self.mus, np.exp(self.inv_sigmas)
         return mus[z] + np.sqrt(sigmas[z]) * npr.randn(D)
 
-    def _m_step_observations(self, expectations, datas, inputs, masks, **kwargs):
+    def _m_step_observations(self, expectations, datas, inputs, masks, tags, **kwargs):
         x = np.concatenate(datas)
         weights = np.concatenate([Ez for Ez, _ in expectations])
         for k in range(self.K):
@@ -58,7 +58,7 @@ class _GaussianHMMObservations(object):
             self.inv_sigmas[k] = np.log(np.average(sqerr, weights=weights[:,k], axis=0))
 
     @ensure_args_not_none
-    def smooth(self, data, input=None, mask=None):
+    def smooth(self, data, input=None, mask=None, tag=None):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
@@ -92,7 +92,7 @@ class _StudentsTHMMObservations(object):
         self.inv_nus = self.inv_nus[perm] 
         
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None):
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
         # Initialize with KMeans
         from sklearn.cluster import KMeans
         data = np.concatenate(datas)
@@ -103,9 +103,9 @@ class _StudentsTHMMObservations(object):
         self.inv_sigmas = np.log(sigmas)
         self.inv_nus = np.log(4) * np.ones(self.K)
         
-    def _log_likelihoods(self, data, input, mask):
+    def _log_likelihoods(self, data, input, mask, tag):
         D, mus, sigmas, nus = self.D, self.mus, np.exp(self.inv_sigmas), np.exp(self.inv_nus)
-        mask = np.ones_like(data, dtype=bool) if mask is None else mask
+        # mask = np.ones_like(data, dtype=bool) if mask is None else mask
 
         resid = data[:, None, :] - mus
         z = resid / sigmas
@@ -113,12 +113,12 @@ class _StudentsTHMMObservations(object):
             gammaln((nus + D) / 2.0) - gammaln(nus / 2.0) - D / 2.0 * np.log(nus) \
             -D / 2.0 * np.log(np.pi) - 0.5 * np.sum(np.log(sigmas), axis=1)
 
-    def _sample_x(self, z, xhist):
+    def _sample_x(self, z, xhist, input=None, tag=None):
         D, mus, sigmas, nus = self.D, self.mus, np.exp(self.inv_sigmas), np.exp(self.inv_nus)
         tau = npr.gamma(nus[z] / 2.0, 2.0 / nus[z])
         return mus[z] + np.sqrt(sigmas[z] / tau) * npr.randn(D)
 
-    def _m_step_observations(self, expectations, datas, inputs, masks, 
+    def _m_step_observations(self, expectations, datas, inputs, masks, tags,
                              optimizer="adam", num_iters=10, **kwargs):
         """
         Max likelihood is not available in closed form. Default to SGD.
@@ -128,9 +128,9 @@ class _StudentsTHMMObservations(object):
         # expected log joint
         def _expected_log_joint(expectations):
             elbo = 0
-            for data, input, mask, (expected_states, expected_joints) \
-                in zip(datas, inputs, masks, expectations):
-                lls = self._log_likelihoods(data, input, mask)
+            for data, input, mask, tag, (expected_states, expected_joints) \
+                in zip(datas, inputs, masks, tags, expectations):
+                lls = self._log_likelihoods(data, input, mask, tag)
                 elbo += np.sum(expected_states * lls)
             return elbo
 
@@ -147,12 +147,12 @@ class _StudentsTHMMObservations(object):
                 num_iters=num_iters, **kwargs)
 
     @ensure_args_not_none
-    def smooth(self, data, input=None, mask=None):
+    def smooth(self, data, input=None, mask=None, tag=None):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
-        E_z, _ = self.expected_states(data, input, mask)
+        E_z, _ = self.expected_states(data, input, mask, tag)
         return E_z.dot(self.mus)
 
 
@@ -175,7 +175,7 @@ class _BernoulliHMMObservations(object):
         self.logit_ps = self.logit_ps[perm]
         
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None):
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
         
         # Initialize with KMeans
         from sklearn.cluster import KMeans
@@ -185,18 +185,18 @@ class _BernoulliHMMObservations(object):
         assert np.all((ps > 0) & (ps < 1))
         self.logit_ps = np.log(ps / (1-ps))
         
-    def _log_likelihoods(self, data, input, mask):
+    def _log_likelihoods(self, data, input, mask, tag):
         assert data.dtype == int and data.min() >= 0 and data.max() <= 1
         ps = 1 / (1 + np.exp(self.logit_ps))
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         lls = data[:, None, :] * np.log(ps) + (1 - data[:, None, :]) * np.log(1 - ps)
         return np.sum(lls * mask[:, None, :], axis=2)
 
-    def _sample_x(self, z, xhist):
+    def _sample_x(self, z, xhist, input=None, tag=None):
         ps = 1 / (1 + np.exp(self.logit_ps))
         return npr.rand(self.D) < ps[z]
 
-    def _m_step_observations(self, expectations, datas, inputs, masks, **kwargs):
+    def _m_step_observations(self, expectations, datas, inputs, masks, tags, **kwargs):
         x = np.concatenate(datas)
         weights = np.concatenate([Ez for Ez, _ in expectations])
         for k in range(self.K):
@@ -204,12 +204,12 @@ class _BernoulliHMMObservations(object):
             self.logit_ps[k] = np.log((ps + 1e-8) / (1 - ps + 1e-8))
 
     @ensure_args_not_none
-    def smooth(self, data, input=None, mask=None):
+    def smooth(self, data, input=None, mask=None, tag=None):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
-        E_z, _ = self.expected_states(data, input, mask)
+        E_z, _ = self.expected_states(data, input, mask, tag)
         ps = 1 / (1 + np.exp(self.logit_ps))
         return E_z.dot(ps)
 
@@ -233,7 +233,7 @@ class _PoissonHMMObservations(object):
         self.log_lambdas = self.log_lambdas[perm]
         
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None):
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
         
         # Initialize with KMeans
         from sklearn.cluster import KMeans
@@ -241,30 +241,30 @@ class _PoissonHMMObservations(object):
         km = KMeans(self.K).fit(data)
         self.log_lambdas = np.log(km.cluster_centers_)
         
-    def _log_likelihoods(self, data, input, mask):
+    def _log_likelihoods(self, data, input, mask, tag):
         assert data.dtype == int
         lambdas = np.exp(self.inv_lambdas)
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         lls = -gammaln(data[:,None,:] + 1) -lambdas + data[:,None,:] * np.log(lambdas)
         return np.sum(lls * mask[:, None, :], axis=2)
 
-    def _sample_x(self, z, xhist):
+    def _sample_x(self, z, xhist, input=None, tag=None):
         lambdas = np.exp(self.inv_lambdas)
         return npr.poisson(lambdas[z])
 
-    def _m_step_observations(self, expectations, datas, inputs, masks, **kwargs):
+    def _m_step_observations(self, expectations, datas, inputs, masks, tags, **kwargs):
         x = np.concatenate(datas)
         weights = np.concatenate([Ez for Ez, _ in expectations])
         for k in range(self.K):
             self.inv_lambdas = np.log(np.average(x, axis=0, weights=weights[:,k]) + 1e-8)
 
     @ensure_args_not_none
-    def smooth(self, data, input=None, mask=None):
+    def smooth(self, data, input=None, mask=None, tag=None):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
-        E_z, _ = self.expected_states(data, input, mask)
+        E_z, _ = self.expected_states(data, input, mask, tag)
         return E_z.dot(np.exp(self.inv_lambdas))
 
 
@@ -298,7 +298,7 @@ class _AutoRegressiveHMMObservations(object):
         self.inv_sigmas = self.inv_sigmas[perm]
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None):
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
         # Initialize with linear regressions
         from sklearn.linear_model import LinearRegression
         data = np.concatenate(datas) 
@@ -317,7 +317,7 @@ class _AutoRegressiveHMMObservations(object):
             sigmas = np.var(resid, axis=0)
             self.inv_sigmas[k] = np.log(sigmas)
 
-    def _compute_mus(self, data, input, mask):
+    def _compute_mus(self, data, input, mask, tag):
         assert np.all(mask), "ARHMM cannot handle missing data"
 
         As, bs, Vs = self.As, self.bs, self.Vs
@@ -331,14 +331,14 @@ class _AutoRegressiveHMMObservations(object):
         mus = np.concatenate((self.mu_init * np.ones((1, self.K, self.D)), mus))
         return mus
 
-    def _log_likelihoods(self, data, input, mask):
-        mus = self._compute_mus(data, input, mask)
+    def _log_likelihoods(self, data, input, mask, tag):
+        mus = self._compute_mus(data, input, mask, tag)
         sigmas = np.exp(self.inv_sigmas)
         return -0.5 * np.sum(
             (np.log(2 * np.pi * sigmas) + (data[:, None, :] - mus)**2 / sigmas) 
             * mask[:, None, :], axis=2)
 
-    def _m_step_observations(self, expectations, datas, inputs, masks, **kwargs):
+    def _m_step_observations(self, expectations, datas, inputs, masks, tags, **kwargs):
         from sklearn.linear_model import LinearRegression
         D, M = self.D, self.M
 
@@ -362,7 +362,7 @@ class _AutoRegressiveHMMObservations(object):
             sqerr = (ys - yhats)**2
             self.inv_sigmas[k] = np.log(np.average(sqerr, weights=weights, axis=0))
 
-    def _sample_x(self, z, xhist):
+    def _sample_x(self, z, xhist, input=None, tag=None):
         D, As, bs, sigmas = self.D, self.As, self.bs, np.exp(self.inv_sigmas)
         if xhist.shape[0] == 0:
             mu_init = self.mu_init
@@ -372,14 +372,14 @@ class _AutoRegressiveHMMObservations(object):
             return As[z].dot(xhist[-1]) + bs[z] + np.sqrt(sigmas[z]) * npr.randn(D)
 
     @ensure_args_not_none
-    def smooth(self, data, input=None, mask=None):
+    def smooth(self, data, input=None, mask=None, tag=None):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
-        E_z, _ = self.expected_states(data, input, mask)
-        mus = self._compute_mus(data, input, mask)
+        E_z, _ = self.expected_states(data, input, mask, tag)
+        mus = self._compute_mus(data, input, mask, tag)
         return (E_z[:, :, None] * mus).sum(1)
 
 
@@ -388,7 +388,7 @@ class _RecurrentAutoRegressiveHMMMixin(object):
     A simple mixin to allow for smarter initialization.
     """
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None):
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
         data = np.concatenate(datas) 
         input = np.concatenate(inputs)
         T = data.shape[0]
@@ -434,9 +434,9 @@ class _RobustAutoRegressiveHMMObservations(_AutoRegressiveHMMObservations):
         super(_RobustAutoRegressiveHMMObservations, self).permute(perm)
         self.inv_nus = self.inv_nus[perm]
 
-    def _log_likelihoods(self, data, input, mask):
+    def _log_likelihoods(self, data, input, mask, tag):
         D = self.D
-        mus = self._compute_mus(data, input, mask)
+        mus = self._compute_mus(data, input, mask, tag)
         sigmas = np.exp(self.inv_sigmas)
         nus = np.exp(self.inv_nus)
 
@@ -446,7 +446,7 @@ class _RobustAutoRegressiveHMMObservations(_AutoRegressiveHMMObservations):
             gammaln((nus + D) / 2.0) - gammaln(nus / 2.0) - D / 2.0 * np.log(nus) \
             -D / 2.0 * np.log(np.pi) - 0.5 * np.sum(np.log(sigmas), axis=1)
 
-    def _m_step_observations(self, expectations, datas, inputs, masks, 
+    def _m_step_observations(self, expectations, datas, inputs, masks, tags,
                              optimizer="adam", num_iters=10, **kwargs):
         """
         Max likelihood is not available in closed form. Default to SGD.
@@ -456,9 +456,9 @@ class _RobustAutoRegressiveHMMObservations(_AutoRegressiveHMMObservations):
         # expected log joint
         def _expected_log_joint(expectations):
             elbo = 0
-            for data, input, mask, (expected_states, expected_joints) \
-                in zip(datas, inputs, masks, expectations):
-                lls = self._log_likelihoods(data, input, mask)
+            for data, input, mask, tag, (expected_states, expected_joints) \
+                in zip(datas, inputs, masks, tags, expectations):
+                lls = self._log_likelihoods(data, input, mask, tag)
                 elbo += np.sum(expected_states * lls)
             return elbo
 
@@ -474,7 +474,7 @@ class _RobustAutoRegressiveHMMObservations(_AutoRegressiveHMMObservations):
                 (self.As, self.bs, self.Vs, self.inv_sigmas, self.inv_nus), 
                 num_iters=num_iters, **kwargs)
 
-    def _sample_x(self, z, xhist):
+    def _sample_x(self, z, xhist, input=None, tag=None):
         D, As, bs, sigmas, nus = self.D, self.As, self.bs, np.exp(self.inv_sigmas), np.exp(self.inv_nus)
         if xhist.shape[0] == 0:
             mu_init = self.mu_init
@@ -485,14 +485,13 @@ class _RobustAutoRegressiveHMMObservations(_AutoRegressiveHMMObservations):
             return As[z].dot(xhist[-1]) + bs[z] + np.sqrt(sigmas[z] / tau) * npr.randn(D)
 
     @ensure_args_not_none
-    def smooth(self, data, input=None, mask=None):
+    def smooth(self, data, input=None, mask=None, tag=None):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
-        mask = np.ones_like(data, dtype=bool) if mask is None else mask
-        E_z, _ = self.expected_states(data, input, mask)
-        mus = self._compute_mus(data, input, mask)
+        E_z, _ = self.expected_states(data, input, mask, tag)
+        mus = self._compute_mus(data, input, mask, tag)
         return (E_z[:, :, None] * mus).sum(1)
 
 
@@ -527,7 +526,7 @@ class _GaussianSLDSObservations(object):
             self.inv_eta = self.inv_etas[perm]
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, num_em_iters=25):
+    def initialize(self, datas, inputs=None, masks=None, tags=None, num_em_iters=25):
         # Initialize the subspace with PCA
         from sklearn.decomposition import PCA
         datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
@@ -548,7 +547,7 @@ class _GaussianSLDSObservations(object):
         super(_GaussianSLDSObservations, self).initialize(xs, inputs, masks)
         
         print("Initializing with an ARHMM fit via ", num_em_iters, " iterations of EM.")
-        super(_GaussianSLDSObservations, self)._fit_em(xs, inputs, xmasks, 
+        super(_GaussianSLDSObservations, self)._fit_em(xs, inputs, xmasks, tags,
             num_em_iters=num_em_iters, step_size=1e-2, num_iters=10, verbose=False)
         print("Done.")
 
@@ -564,7 +563,7 @@ class _GaussianSLDSObservations(object):
         self.ds[:,...] = pca.mean_
         self.inv_etas[:,...] = np.log(pca.noise_variance_)
 
-    def _initialize_variational_params(self, data, input, mask):
+    def _initialize_variational_params(self, data, input, mask, tag):
         # y = Cx + d + noise; C orthogonal.  xhat = (C^T C)^{-1} C^T (y-d)
         data = interpolate_data(data, mask)
         T = data.shape[0]
@@ -574,14 +573,14 @@ class _GaussianSLDSObservations(object):
         q_sigma_inv = -4 * np.ones((T, self.D))
         return q_mu, q_sigma_inv
         
-    def _emission_log_likelihoods(self, data, input, mask, x):
+    def _emission_log_likelihoods(self, data, input, mask, tag, x):
         Cs, ds = self.Cs, self.ds
         mus = np.matmul(Cs[None, ...], x[:, None, :, None])[:, :, :, 0] + ds
         etas = np.exp(self.inv_etas)
         lls = -0.5 * np.log(2 * np.pi * etas) - 0.5 * (data[:, None, :] - mus)**2 / etas
         return np.sum(lls * mask[:, None, :], axis=2)
 
-    def _sample_y(self, z, x, input=None):
+    def _sample_y(self, z, x, input=None, tag=None):
         T = z.shape[0]
         Cs, ds = self.Cs, self.ds
         mus = np.matmul(Cs[None, ...], x[:, None, :, None])[:, :, :, 0] + ds
@@ -593,13 +592,13 @@ class _GaussianSLDSObservations(object):
         return y
 
     @ensure_args_not_none
-    def smooth(self, variational_mean, input=None, mask=None):
+    def smooth(self, variational_mean, input=None, mask=None, tag=None):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
         Cs, ds = self.Cs, self.ds
-        E_z, _ = self.expected_states(variational_mean, input, mask)
+        E_z, _ = self.expected_states(variational_mean, input, mask, tag)
         mus = np.matmul(Cs[None, ...], variational_mean[:, None, :, None])[:, :, :, 0] + ds
         return mus[:,0,:] if self.single_subspace else np.sum(mus * E_z, axis=1)
         
