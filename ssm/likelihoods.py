@@ -6,10 +6,10 @@ from autograd import grad
 
 from ssm.util import random_rotation, ensure_args_are_lists, ensure_args_not_none
 
-# Gaussian models
-class _GaussianObservations(object):
+
+class _GaussianHMMObservations(object):
     def __init__(self, K, D, M=0):
-        super(_GaussianObservations, self).__init__(K, D, M)
+        super(_GaussianHMMObservations, self).__init__(K, D, M)
 
         self.D = D
         self.mus = npr.randn(K, D)
@@ -17,15 +17,15 @@ class _GaussianObservations(object):
 
     @property
     def params(self):
-        return super(_GaussianObservations, self).params + (self.mus, self.inv_sigmas)
+        return super(_GaussianHMMObservations, self).params + (self.mus, self.inv_sigmas)
     
     @params.setter
     def params(self, value):
         self.mus, self.inv_sigmas = value[-2:]
-        super(_GaussianObservations, self.__class__).params.fset(self, value[:-2])
+        super(_GaussianHMMObservations, self.__class__).params.fset(self, value[:-2])
 
     def permute(self, perm):
-        super(_GaussianObservations, self).permute(perm)
+        super(_GaussianHMMObservations, self).permute(perm)
         self.mus = self.mus[perm]
         self.inv_sigmas = self.inv_sigmas[perm]
         
@@ -69,10 +69,9 @@ class _GaussianObservations(object):
         return E_z.dot(self.mus)
 
 
-# Student's t models
-class _StudentsTObservations(object):
+class _StudentsTHMMObservations(object):
     def __init__(self, K, D, M=0):
-        super(_StudentsTObservations, self).__init__(K, D, M)
+        super(_StudentsTHMMObservations, self).__init__(K, D, M)
 
         self.D = D
         self.mus = npr.randn(K, D)
@@ -83,16 +82,16 @@ class _StudentsTObservations(object):
 
     @property
     def params(self):
-        return super(_StudentsTObservations, self).params + \
+        return super(_StudentsTHMMObservations, self).params + \
             (self.mus, self.inv_sigmas, self.inv_nus)
     
     @params.setter
     def params(self, value):
         self.mus, self.inv_sigmas, self.inv_nus = value[-3:]
-        super(_StudentsTObservations, self.__class__).params.fset(self, value[:-3])
+        super(_StudentsTHMMObservations, self.__class__).params.fset(self, value[:-3])
 
     def permute(self, perm):
-        super(_StudentsTObservations, self).permute(perm)
+        super(_StudentsTHMMObservations, self).permute(perm)
         self.mus = self.mus[perm]
         self.inv_sigmas = self.inv_sigmas[perm]
         self.inv_nus = self.inv_nus[perm] 
@@ -162,11 +161,123 @@ class _StudentsTObservations(object):
         return E_z.dot(self.mus)
 
 
-
-# Autoregressive models
-class _AutoRegressiveObservations(object):
+class _BernoulliHMMObservations(object):
     def __init__(self, K, D, M=0):
-        super(_AutoRegressiveObservations, self).__init__(K, D, M)
+        super(_BernoulliHMMObservations, self).__init__(K, D, M)
+        self.D = D
+        self.logit_ps = npr.randn(K, D)
+        
+    @property
+    def params(self):
+        return super(_BernoulliHMMObservations, self).params + (self.logit_ps,)
+    
+    @params.setter
+    def params(self, value):
+        self.logit_ps = value[-1:]
+        super(_BernoulliHMMObservations, self.__class__).params.fset(self, value[:-1])
+
+    def permute(self, perm):
+        super(_BernoulliHMMObservations, self).permute(perm)
+        self.logit_ps = self.logit_ps[perm]
+        
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None):
+        
+        # Initialize with KMeans
+        from sklearn.cluster import KMeans
+        data = np.concatenate(datas)
+        km = KMeans(self.K).fit(data)
+        ps = km.cluster_centers_
+        assert np.all((ps > 0) & (ps < 1))
+        self.logit_ps = np.log(ps / (1-ps))
+        
+    def _log_likelihoods(self, data, input, mask):
+        assert data.dtype == int and data.min() >= 0 and data.max() <= 1
+        ps = 1 / (1 + np.exp(self.logit_ps))
+        mask = np.ones_like(data, dtype=bool) if mask is None else mask
+        lls = data[:, None, :] * np.log(ps) + (1 - data[:, None, :]) * np.log(1 - ps)
+        return np.sum(lls * mask[:, None, :], axis=2)
+
+    def _sample_x(self, z, xhist):
+        ps = 1 / (1 + np.exp(self.logit_ps))
+        return npr.rand(self.D) < ps[z]
+
+    def _m_step_observations(self, expectations, datas, inputs, masks, **kwargs):
+        x = np.concatenate(datas)
+        weights = np.concatenate([Ez for Ez, _ in expectations])
+        for k in range(self.K):
+            ps = np.average(x, axis=0, weights=weights[:,k])
+            self.logit_ps[k] = np.log((ps + 1e-8) / (1 - ps + 1e-8))
+
+    @ensure_args_not_none
+    def smooth(self, data, input=None, mask=None):
+        """
+        Compute the mean observation under the posterior distribution
+        of latent discrete states.
+        """
+        E_z, _ = self.expected_states(data, input, mask)
+        ps = 1 / (1 + np.exp(self.logit_ps))
+        return E_z.dot(ps)
+
+
+class _PoissonHMMObservations(object):
+    def __init__(self, K, D, M=0):
+        super(_PoissonHMMObservations, self).__init__(K, D, M)
+        self.D = D
+        self.log_lambdas = npr.randn(K, D)
+        
+    @property
+    def params(self):
+        return super(_PoissonHMMObservations, self).params + (self.log_lambdas,)
+    
+    @params.setter
+    def params(self, value):
+        self.log_lambdas = value[-1:]
+        super(_PoissonHMMObservations, self.__class__).params.fset(self, value[:-1])
+
+    def permute(self, perm):
+        super(_PoissonHMMObservations, self).permute(perm)
+        self.log_lambdas = self.log_lambdas[perm]
+        
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None):
+        
+        # Initialize with KMeans
+        from sklearn.cluster import KMeans
+        data = np.concatenate(datas)
+        km = KMeans(self.K).fit(data)
+        self.log_lambdas = np.log(km.cluster_centers_)
+        
+    def _log_likelihoods(self, data, input, mask):
+        assert data.dtype == int
+        lambdas = np.exp(self.inv_lambdas)
+        mask = np.ones_like(data, dtype=bool) if mask is None else mask
+        lls = -gammaln(data[:,None,:] + 1) -lambdas + data[:,None,:] * np.log(lambdas)
+        return np.sum(lls * mask[:, None, :], axis=2)
+
+    def _sample_x(self, z, xhist):
+        lambdas = np.exp(self.inv_lambdas)
+        return npr.poisson(lambdas[z])
+
+    def _m_step_observations(self, expectations, datas, inputs, masks, **kwargs):
+        x = np.concatenate(datas)
+        weights = np.concatenate([Ez for Ez, _ in expectations])
+        for k in range(self.K):
+            self.inv_lambdas = np.log(np.average(x, axis=0, weights=weights[:,k]) + 1e-8)
+
+    @ensure_args_not_none
+    def smooth(self, data, input=None, mask=None):
+        """
+        Compute the mean observation under the posterior distribution
+        of latent discrete states.
+        """
+        E_z, _ = self.expected_states(data, input, mask)
+        return E_z.dot(np.exp(self.inv_lambdas))
+
+
+class _AutoRegressiveHMMObservations(object):
+    def __init__(self, K, D, M=0):
+        super(_AutoRegressiveHMMObservations, self).__init__(K, D, M)
 
         self.D = D
         # Distribution over initial point
@@ -180,16 +291,16 @@ class _AutoRegressiveObservations(object):
 
     @property
     def params(self):
-        return super(_AutoRegressiveObservations, self).params + \
+        return super(_AutoRegressiveHMMObservations, self).params + \
                (self.As, self.bs, self.Vs, self.inv_sigmas)
         
     @params.setter
     def params(self, value):
         self.As, self.bs, self.Vs, self.inv_sigmas = value[-4:]
-        super(_AutoRegressiveObservations, self.__class__).params.fset(self, value[:-4])
+        super(_AutoRegressiveHMMObservations, self.__class__).params.fset(self, value[:-4])
 
     def permute(self, perm):
-        super(_AutoRegressiveObservations, self).permute(perm)
+        super(_AutoRegressiveHMMObservations, self).permute(perm)
         self.As = self.As[perm]
         self.bs = self.bs[perm]
         self.Vs = self.Vs[perm]
@@ -281,7 +392,6 @@ class _AutoRegressiveObservations(object):
         return (E_z[:, :, None] * mus).sum(1)
 
 
-
 class _RecurrentAutoRegressiveHMMMixin(object):
     """
     A simple mixin to allow for smarter initialization.
@@ -314,23 +424,23 @@ class _RecurrentAutoRegressiveHMMMixin(object):
 
 
 # Robust autoregressive models with Student's t noise
-class _RobustAutoRegressiveObservations(_AutoRegressiveObservations):
+class _RobustAutoRegressiveHMMObservations(_AutoRegressiveHMMObservations):
     def __init__(self, K, D, M=0):
-        super(_RobustAutoRegressiveObservations, self).__init__(K, D, M)
+        super(_RobustAutoRegressiveHMMObservations, self).__init__(K, D, M)
         self.inv_nus = np.log(4) * np.ones(K)
 
     @property
     def params(self):
-        return super(_RobustAutoRegressiveObservations, self).params + \
+        return super(_RobustAutoRegressiveHMMObservations, self).params + \
                (self.As, self.bs, self.Vs, self.inv_sigmas, self.inv_nus)
         
     @params.setter
     def params(self, value):
         self.As, self.bs, self.Vs, self.inv_sigmas, self.inv_nus = value[-5:]
-        super(_RobustAutoRegressiveObservations, self.__class__).params.fset(self, value[:-5])
+        super(_RobustAutoRegressiveHMMObservations, self.__class__).params.fset(self, value[:-5])
 
     def permute(self, perm):
-        super(_RobustAutoRegressiveObservations, self).permute(perm)
+        super(_RobustAutoRegressiveHMMObservations, self).permute(perm)
         self.inv_nus = self.inv_nus[perm]
 
     def _log_likelihoods(self, data, input, mask):
@@ -395,10 +505,10 @@ class _RobustAutoRegressiveObservations(_AutoRegressiveObservations):
         return (E_z[:, :, None] * mus).sum(1)
 
 
-# Emissions models for SLDS
-class _GaussianEmissions(object):
+# Observations models for SLDS
+class _GaussianSLDSObservations(object):
     def __init__(self, N, K, D, *args, single_subspace=True):
-        super(_GaussianEmissions, self).__init__(N, K, D, *args)
+        super(_GaussianSLDSObservations, self).__init__(N, K, D, *args)
 
         # Initialize observation model
         self.single_subspace = single_subspace
@@ -408,16 +518,16 @@ class _GaussianEmissions(object):
 
     @property
     def params(self):
-        return super(_GaussianEmissions, self).params + \
+        return super(_GaussianSLDSObservations, self).params + \
                (self.Cs, self.ds, self.inv_etas)
         
     @params.setter
     def params(self, value):
         self.Cs, self.ds, self.inv_etas = value[-3:]
-        super(_GaussianEmissions, self.__class__).params.fset(self, value[:-3])
+        super(_GaussianSLDSObservations, self.__class__).params.fset(self, value[:-3])
 
     def permute(self, perm):
-        super(_GaussianEmissions, self).permute(perm)
+        super(_GaussianSLDSObservations, self).permute(perm)
 
         if not self.single_subspace:
             self.Cs = self.Cs[perm]
@@ -442,10 +552,10 @@ class _GaussianEmissions(object):
         # Initialize the dynamics parameters with the pca embedded data
         xs = np.split(x, [len(data) for data in datas])
         xmasks = [np.ones_like(x, dtype=bool) for x in xs]
-        super(_GaussianEmissions, self).initialize(xs, inputs, masks)
+        super(_GaussianSLDSObservations, self).initialize(xs, inputs, masks)
         
         print("Initializing with an ARHMM fit via ", num_em_iters, " iterations of EM.")
-        super(_GaussianEmissions, self)._fit_em(xs, inputs, xmasks, 
+        super(_GaussianSLDSObservations, self)._fit_em(xs, inputs, xmasks, 
             num_em_iters=num_em_iters, step_size=1e-2, num_iters=10, verbose=False)
         print("Done.")
 

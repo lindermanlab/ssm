@@ -404,14 +404,11 @@ class _InputDrivenHMM(_HMM):
         # define optimization target
         T = sum([data.shape[0] for data in datas])
         def _objective(params, itr):
-            self.log_pi0, self.log_Ps, self.Ws = params
+            self.params = params
             obj = _expected_log_joint(expectations)
             return -obj / T
 
-        self.log_pi0, self.log_Ps, self.Ws = \
-            optimizer(grad(_objective), 
-                (self.log_pi0, self.log_Ps, self.Ws), 
-                num_iters=num_iters, **kwargs)
+        self.params = optimizer(grad(_objective), self.params, num_iters=num_iters, **kwargs)
 
 
 class _RecurrentHMM(_InputDrivenHMM):
