@@ -3,6 +3,7 @@ from ssm.core import \
     _InputDrivenHMM, \
     _RecurrentHMM, \
     _RecurrentOnlyHMM, \
+    _LDSBase, \
     _SwitchingLDSBase
 
 from ssm.likelihoods import \
@@ -125,9 +126,13 @@ class RecurrentOnlyRobustAutoRegressiveHMM(_RecurrentAutoRegressiveHMMMixin,
     pass
 
 
+# LDS base classes
+class _LDS(_LDSBase, AutoRegressiveHMM):
+    pass
+
+
 # Switching LDS base classes
-class _SwitchingLDS(_SwitchingLDSBase, 
-                    AutoRegressiveHMM):
+class _SwitchingLDS(_SwitchingLDSBase, AutoRegressiveHMM):
     pass
 
 
@@ -140,6 +145,10 @@ class _RecurrentOnlySwitchingLDS(_SwitchingLDSBase, RecurrentOnlyAutoRegressiveH
 
 
 # Robust versions with Student's t dynamics noise
+class _RobustLDS(_LDSBase, RobustAutoRegressiveHMM):
+    pass
+
+
 class _RobustSwitchingLDS(_SwitchingLDSBase, RobustAutoRegressiveHMM):
     pass
 
@@ -151,7 +160,12 @@ class _RecurrentRobustSwitchingLDS(_SwitchingLDSBase, RecurrentRobustAutoRegress
 class _RecurrentOnlyRobustSwitchingLDS(_SwitchingLDSBase, RecurrentOnlyRobustAutoRegressiveHMM):
     pass
 
+
 # Standard Gaussian versions
+class GaussianLDS(_GaussianSLDSObservations, _LDS):
+    pass
+
+
 class GaussianSLDS(_GaussianSLDSObservations, _SwitchingLDS):
     pass
 
@@ -164,6 +178,10 @@ class GaussianRecurrentOnlySLDS(_GaussianSLDSObservations, _RecurrentOnlySwitchi
     pass
 
 # Robust versions
+class GaussianRobustLDS(_GaussianSLDSObservations, _RobustLDS):
+    pass
+
+
 class GaussianRobustSLDS(_GaussianSLDSObservations, _RobustSwitchingLDS):
     pass
 

@@ -484,16 +484,11 @@ class _RecurrentOnlyHMM(_InputDrivenHMM):
 
     def _log_transition_matrices(self, data, input, mask):
         T, D = data.shape
-        # Input effect
-        log_Ps = np.dot(input[1:], self.Ws.T)[:, None, :]
-        # Past observations effect
-        log_Ps = log_Ps + np.dot(data[:-1], self.Rs.T)[:, None, :] 
-        # Bias
-        log_Ps = log_Ps + self.r
-        # Expand along the previous state dimension
-        log_Ps = np.tile(log_Ps, (1, self.K, 1))
-        # Normalize
-        return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
+        log_Ps = np.dot(input[1:], self.Ws.T)[:, None, :]              # inputs
+        log_Ps = log_Ps + np.dot(data[:-1], self.Rs.T)[:, None, :]     # past observations
+        log_Ps = log_Ps + self.r                                       # bias
+        log_Ps = np.tile(log_Ps, (1, self.K, 1))                       # expand
+        return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)       # normalize
 
 
 class _SwitchingLDSBase(object):
@@ -641,4 +636,67 @@ class _SwitchingLDSBase(object):
         return self._fitting_methods[method](datas, inputs, masks, learning=False, **kwargs)
 
 
+class _LDSBase(_SwitchingLDSBase):
+    """
+    Switching linear dynamical system fit with 
+    stochastic variational inference on the marginal model,
+    integrating out the discrete states.
+    """
+    def __init__(self, N, K, D, *args, **kwargs):
+        assert K == 1
+        super(_LDSBase, self).__init__(N, K, D, *args, **kwargs)
+        self.N = N
+
+        # Only allow fitting by SVI
+        self._fitting_methods = dict(svi=self._fit_svi)
+
+    def _emission_log_likelihoods(self, data, input, mask, x):
+        raise NotImplementedError
+
+    def _sample_y(self, z, x, input=None):
+        raise NotImplementedError
+
+    def sample(self, T, input=None):
+        z, x = super(_LDSBase, self).sample(T)
+        y = self._sample_y(z, x, input=input)
+        return z, x, y
+
+    def expected_states(self, variational_mean, input=None, mask=None):
+        return np.ones((variational_mean.shape[0], 1)), \
+               np.ones((variational_mean.shape[0], 1, 1)), 
+
+    def most_likely_states(self, variational_mean, input=None, mask=None):
+        raise NotImplementedError
+
+    def log_likelihood(self, datas, inputs=None, masks=None):
+        warn("Log likelihood of LDS is not yet implemented.")
+        return np.nan
+
+    @ensure_elbo_args_are_lists
+    def elbo(self, variational_params, datas, inputs=None, masks=None, n_samples=1):
+        """
+        Lower bound on the marginal likelihood p(y | theta) 
+        using variational posterior q(x; phi) where phi = variational_params
+        """
+        elbo = 0
+        for data, input, mask, (q_mu, q_sigma_inv) in \
+            zip(datas, inputs, masks, variational_params):
+
+            q_sigma = np.exp(q_sigma_inv)
+            for sample in range(n_samples):
+                # Sample x from the variational posterior
+                x = q_mu + np.sqrt(q_sigma) * npr.randn(data.shape[0], self.D)
+                x_mask = np.ones_like(x, dtype=bool)
+                # Compute log p(x | theta) 
+                elbo += np.sum(self._log_likelihoods(x, input, x_mask))
+                # Compute the log likelihood of the data p(y | x, theta)
+                elbo += np.sum(self._emission_log_likelihoods(data, input, mask, x))
+                
+                # -log q(x)
+                elbo -= np.sum(-0.5 * np.log(2 * np.pi * q_sigma))
+                elbo -= np.sum(-0.5 * (x - q_mu)**2 / q_sigma)
+
+                assert np.isfinite(elbo)
+        
+        return elbo / n_samples
 

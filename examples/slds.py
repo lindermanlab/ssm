@@ -5,11 +5,11 @@ npr.seed(0)
 import matplotlib
 import matplotlib.pyplot as plt
 
-from ssm.models import GaussianSLDS
+from ssm.models import GaussianSLDS, GaussianLDS
 from ssm.util import random_rotation, find_permutation
 
 # Set the parameters of the HMM
-T = 10000   # number of time bins
+T = 1000    # number of time bins
 K = 5       # number of discrete states
 D = 2       # number of latent dimensions
 N = 10      # number of observed dimensions
@@ -21,7 +21,12 @@ for k in range(K):
 z, x, y = true_slds.sample(T)
 z_test, x_test, y_test = true_slds.sample(T)
 
-# Fit models
+# Fit a standard LDS with SVI
+print("Fitting LDS with SVI")
+lds = GaussianLDS(N, 1, D)
+lds_elbos, (lds_x, lds_x_var) = lds.fit(y, num_iters=100)
+
+# Fit SLDS
 print("Fitting SLDS with SVI")
 slds = GaussianSLDS(N, K, D)
 slds_elbos, (slds_x, slds_x_var) = slds.fit(y, num_iters=100)

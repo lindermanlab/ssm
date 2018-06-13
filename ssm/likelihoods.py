@@ -496,7 +496,7 @@ class _RobustAutoRegressiveHMMObservations(_AutoRegressiveHMMObservations):
         return (E_z[:, :, None] * mus).sum(1)
 
 
-# Observations models for SLDS
+# Observation models for SLDS
 class _GaussianSLDSObservations(object):
     def __init__(self, N, K, D, *args, single_subspace=True):
         super(_GaussianSLDSObservations, self).__init__(N, K, D, *args)
@@ -576,10 +576,8 @@ class _GaussianSLDSObservations(object):
         Cs, ds = self.Cs, self.ds
         mus = np.matmul(Cs[None, ...], x[:, None, :, None])[:, :, :, 0] + ds
         etas = np.exp(self.inv_etas)
-
-        return -0.5 * np.sum(
-            (np.log(2 * np.pi * etas) + (data[:, None, :] - mus)**2 / etas) 
-            * mask[:, None, :], axis=2)
+        lls = -0.5 * np.log(2 * np.pi * etas) - 0.5 * (data[:, None, :] - mus)**2 / etas
+        return np.sum(lls * mask[:, None, :], axis=2)
 
     def _sample_y(self, z, x, input=None):
         T = z.shape[0]
