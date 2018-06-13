@@ -48,7 +48,7 @@ def ensure_args_are_lists(f):
         elif not isinstance(masks, list):
             masks = [masks]
 
-        return f(self, datas=datas, inputs=inputs, masks=masks, **kwargs)
+        return f(self, datas, inputs=inputs, masks=masks, **kwargs)
 
     return wrapper
 
@@ -77,5 +77,18 @@ def ensure_args_not_none(f):
         assert data is not None
         input = np.zeros((data.shape[0], self.M)) if input is None else input
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
-        return f(self, data=data, input=input, mask=mask, **kwargs)
+        return f(self, data, input=input, mask=mask, **kwargs)
     return wrapper
+
+
+def interpolate_data(data, mask):
+    assert data.shape == mask.shape and mask.dtype == bool
+    T, N = data.shape
+    interp_data = data.copy()
+    if np.any(~mask):
+        for n in range(N):
+            t_missing = np.arange(T)[~mask[:,n]]
+            t_given = np.arange(T)[mask[:,n]]
+            y_given = data[mask[:,n], n]
+            interp_data[~mask[:,n], n] = np.interp(t_missing, t_given, y_given)
+    return interp_data

@@ -21,15 +21,18 @@ for k in range(K):
 z, x, y = true_slds.sample(T)
 z_test, x_test, y_test = true_slds.sample(T)
 
-# Fit a standard LDS with SVI
-print("Fitting LDS with SVI")
-lds = GaussianLDS(N, 1, D)
-lds_elbos, (lds_x, lds_x_var) = lds.fit(y, num_iters=100)
+# Mask off some data
+mask = npr.rand(T, N) < 0.5
+# mask = np.ones_like(y, dtype=bool)
+# mask[105:110] = False
 
-# Fit SLDS
+# print("Fitting LDS with SVI")
+# lds = GaussianLDS(N, 1, D)
+# lds_elbos, (lds_x, lds_x_var) = lds.fit(y * mask, masks=mask, num_iters=100)
+
 print("Fitting SLDS with SVI")
 slds = GaussianSLDS(N, K, D)
-slds_elbos, (slds_x, slds_x_var) = slds.fit(y, num_iters=100)
+slds_elbos, (slds_x, slds_x_var) = slds.fit(y * mask, masks=mask, num_iters=1000, print_intvl=10)
 
 # Find the permutation that matches the true and inferred states
 slds.permute(find_permutation(z, slds.most_likely_states(slds_x)))

@@ -4,7 +4,7 @@ from autograd.scipy.special import gammaln
 from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
-from ssm.util import random_rotation, ensure_args_are_lists, ensure_args_not_none
+from ssm.util import random_rotation, ensure_args_are_lists, ensure_args_not_none, interpolate_data
 
 
 class _GaussianHMMObservations(object):
@@ -530,7 +530,9 @@ class _GaussianSLDSObservations(object):
     def initialize(self, datas, inputs=None, masks=None, num_em_iters=25):
         # Initialize the subspace with PCA
         from sklearn.decomposition import PCA
+        datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
         data = np.concatenate(datas)
+        
         pca = PCA(self.D)
         x = pca.fit_transform(data)
         resid = data - pca.inverse_transform(x)
@@ -564,6 +566,7 @@ class _GaussianSLDSObservations(object):
 
     def _initialize_variational_params(self, data, input, mask):
         # y = Cx + d + noise; C orthogonal.  xhat = (C^T C)^{-1} C^T (y-d)
+        data = interpolate_data(data, mask)
         T = data.shape[0]
         C, d = self.Cs[0], self.ds[0]
         C_pseudoinv = np.linalg.solve(C.T.dot(C), C.T).T
@@ -572,7 +575,6 @@ class _GaussianSLDSObservations(object):
         return q_mu, q_sigma_inv
         
     def _emission_log_likelihoods(self, data, input, mask, x):
-        mask = np.ones_like(data, dtype=bool) if mask is None else mask
         Cs, ds = self.Cs, self.ds
         mus = np.matmul(Cs[None, ...], x[:, None, :, None])[:, :, :, 0] + ds
         etas = np.exp(self.inv_etas)
@@ -590,6 +592,7 @@ class _GaussianSLDSObservations(object):
         y = mu + np.sqrt(eta) * npr.randn(T, self.N)
         return y
 
+    @ensure_args_not_none
     def smooth(self, variational_mean, input=None, mask=None):
         """
         Compute the mean observation under the posterior distribution
