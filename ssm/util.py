@@ -77,7 +77,6 @@ def ensure_elbo_args_are_lists(f):
         elif not isinstance(tags, list):
             tags = [tags]
 
-
         return f(self, variational_params, datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
 
     return wrapper

@@ -23,8 +23,6 @@ z_test, x_test, y_test = true_slds.sample(T)
 
 # Mask off some data
 mask = npr.rand(T, N) < 0.5
-# mask = np.ones_like(y, dtype=bool)
-# mask[105:110] = False
 
 # print("Fitting LDS with SVI")
 # lds = GaussianLDS(N, 1, D)

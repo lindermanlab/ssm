@@ -40,7 +40,13 @@ class _HMM(object):
         # https://stackoverflow.com/questions/10810369/python-super-and-setting-parent-class-property
         pass
 
-    # Private methods: override in base classes    
+    # Private methods: override in base classes
+    def _log_prior(self):
+        """
+        Compute the log prior probability of the model parameters
+        """  
+        return 0 
+
     def _log_initial_state_distn(self, data, input, mask, tag):
         """
         Compute the initial state distribution.
@@ -125,7 +131,7 @@ class _HMM(object):
         raise NotImplementedError
         
     @ensure_args_are_lists
-    def log_likelihood(self, datas, inputs=None, masks=None, tags=None):
+    def log_probability(self, datas, inputs=None, masks=None, tags=None):
         """
         Compute the log probability of the data under the current 
         model parameters.
@@ -133,14 +139,14 @@ class _HMM(object):
         :param datas: single array or list of arrays of data.
         :return total log probability of the data.
         """
-        ll = 0
+        lp = self._log_prior()
         for data, input, mask, tag in zip(datas, inputs, masks, tags):
             log_pi0 = self._log_initial_state_distn(data, input, mask, tag)
             log_Ps = self._log_transition_matrices(data, input, mask, tag)
             log_likes = self._log_likelihoods(data, input, mask, tag)
-            ll += hmm_normalizer(log_pi0, log_Ps, log_likes)
-            assert np.isfinite(ll)
-        return ll
+            lp += hmm_normalizer(log_pi0, log_Ps, log_likes)
+            assert np.isfinite(lp)
+        return lp
     
     # Model fitting
     def _fit_mle(self, optimizer, datas, inputs, masks, tags, print_intvl=10, **kwargs):
@@ -151,12 +157,12 @@ class _HMM(object):
         
         def _objective(params, itr):
             self.params = params
-            obj = self.log_likelihood(datas, inputs, masks, tags)
+            obj = self.log_probability(datas, inputs, masks, tags)
             return -obj / T
 
         lls = []
         def _print_progress(params, itr, g):
-            lls.append(self.log_likelihood(datas, inputs, masks, tags)._value)
+            lls.append(self.log_probability(datas, inputs, masks, tags)._value)
             if itr % print_intvl == 0:
                 print("Iteration {}.  LL: {}".format(itr, lls[-1]))
         
@@ -213,7 +219,7 @@ class _HMM(object):
             self._stochastic_m_step(expectations, datas, inputs, masks, tags, optimizer=optimizer, **kwargs)
 
             # Store progress
-            lls.append(self.log_likelihood(datas, inputs, masks, tags))
+            lls.append(self.log_probability(datas, inputs, masks, tags))
             print("Iteration {}.  LL: {}".format(itr, lls[-1]))
 
         return lls
@@ -246,7 +252,7 @@ class _HMM(object):
             self._m_step_observations(expectations, datas, inputs, masks, tags, **kwargs)
 
             # Store progress
-            lls.append(self.log_likelihood(datas, inputs, masks, tags))
+            lls.append(self.log_probability(datas, inputs, masks, tags))
 
             if verbose:
                 print("Iteration {}.  LL: {}".format(itr, lls[-1]))
@@ -267,8 +273,7 @@ class _HMM(object):
 
 class _StationaryHMM(_HMM):
     """
-    Standard Hidden Markov Model with fixed initial 
-    distribution and transition matrix. 
+    Standard Hidden Markov Model with fixed initial distribution and transition matrix. 
     """
     def __init__(self, K, D, M=0):
         super(_StationaryHMM, self).__init__(K, D, M)
@@ -408,8 +413,7 @@ class _InputDrivenHMM(_HMM):
 
 class _RecurrentHMM(_InputDrivenHMM):
     """
-    Generalization of the input driven HMM in which 
-    the observations serve as future inputs
+    Generalization of the input driven HMM in which the observations serve as future inputs
     """
     def __init__(self, K, D, M):
         super(_RecurrentHMM, self).__init__(K, D, M)
@@ -522,8 +526,8 @@ class _SwitchingLDSBase(object):
         Ez, _ = self.expected_states(variational_mean, input, mask, tag)
         return np.argmax(Ez, axis=1)
 
-    def log_likelihood(self, datas, inputs=None, masks=None, tags=None):
-        warn("Cannot compute exact marginal log likelihood for the SLDS. "
+    def log_probability(self, datas, inputs=None, masks=None, tags=None):
+        warn("Cannot compute exact marginal log probability for the SLDS. "
              "the ELBO instead.")
         return np.nan
 
@@ -665,8 +669,8 @@ class _LDSBase(_SwitchingLDSBase):
     def most_likely_states(self, variational_mean, input=None, mask=None, tag=None):
         raise NotImplementedError
 
-    def log_likelihood(self, datas, inputs=None, masks=None, tags=None):
-        warn("Log likelihood of LDS is not yet implemented.")
+    def log_probability(self, datas, inputs=None, masks=None, tags=None):
+        warn("Log probability of LDS is not yet implemented.")
         return np.nan
 
     @ensure_elbo_args_are_lists
