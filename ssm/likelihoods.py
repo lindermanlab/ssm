@@ -10,8 +10,6 @@ from ssm.util import random_rotation, ensure_args_are_lists, ensure_args_not_non
 class _GaussianHMMObservations(object):
     def __init__(self, K, D, M=0):
         super(_GaussianHMMObservations, self).__init__(K, D, M)
-
-        self.D = D
         self.mus = npr.randn(K, D)
         self.inv_sigmas = -2 + npr.randn(K, D)
 
@@ -72,12 +70,9 @@ class _GaussianHMMObservations(object):
 class _StudentsTHMMObservations(object):
     def __init__(self, K, D, M=0):
         super(_StudentsTHMMObservations, self).__init__(K, D, M)
-
-        self.D = D
         self.mus = npr.randn(K, D)
         self.inv_sigmas = -2 + npr.randn(K, D)
-
-        # Student's t has a degrees of freedom param
+        # Student's t distribution also has a degrees of freedom parameter
         self.inv_nus = np.log(4) * np.ones(K)
 
     @property
@@ -164,7 +159,6 @@ class _StudentsTHMMObservations(object):
 class _BernoulliHMMObservations(object):
     def __init__(self, K, D, M=0):
         super(_BernoulliHMMObservations, self).__init__(K, D, M)
-        self.D = D
         self.logit_ps = npr.randn(K, D)
         
     @property
@@ -223,7 +217,6 @@ class _BernoulliHMMObservations(object):
 class _PoissonHMMObservations(object):
     def __init__(self, K, D, M=0):
         super(_PoissonHMMObservations, self).__init__(K, D, M)
-        self.D = D
         self.log_lambdas = npr.randn(K, D)
         
     @property
@@ -278,8 +271,6 @@ class _PoissonHMMObservations(object):
 class _AutoRegressiveHMMObservations(object):
     def __init__(self, K, D, M=0):
         super(_AutoRegressiveHMMObservations, self).__init__(K, D, M)
-
-        self.D = D
         # Distribution over initial point
         self.mu_init = np.zeros(D)
         self.inv_sigma_init = np.zeros(D)
