@@ -33,6 +33,9 @@ def HMM(K, D, M=0,
     :param recurrent: whether or not past observations influence transitions probabilities.
     :param recurrent_only: if true, _only_ the past observations influence transitions. 
     """
+
+    # This is the master list of observation classes.  
+    # When you create a new observation class, add it here.
     observation_classes = dict(
         gaussian=_GaussianHMMObservations,
         studentst=_StudentsTHMMObservations,

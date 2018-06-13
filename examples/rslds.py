@@ -10,35 +10,19 @@ import matplotlib.gridspec as gridspec
 from matplotlib.font_manager import FontProperties
 
 import seaborn as sns
-
-color_names = ["windows blue",
-               "red",
-               "amber",
-               "faded green",
-               "dusty purple",
-               "orange",
-               "clay",
-               "pink",
-               "greyish",
-               "mint",
-               "light cyan",
-               "steel blue",
-               "forest green",
-               "pastel purple",
-               "salmon",
-               "dark brown"]
-
+color_names = ["windows blue", "red", "amber", "faded green"]
 colors = sns.xkcd_palette(color_names)
 sns.set_style("white")
-sns.set_context("paper")
+sns.set_context("talk")
 
 from ssm.models import SLDS
 from ssm.util import random_rotation
 
-### Global parameters
-T, K, D_obs, D_latent = 10000, 4, 10, 2
-mask_start, mask_stop = 0, 0
-
+# Global parameters
+T = 10000
+K = 4
+D_obs = 10
+D_latent = 2
 
 # Helper functions for plotting results
 def plot_trajectory(z, x, ax=None, ls="-"):
@@ -56,11 +40,9 @@ def plot_trajectory(z, x, ax=None, ls="-"):
     return ax
 
 
-def plot_most_likely_dynamics(
-    model,
-    xlim=(-4, 4), ylim=(-3, 3), nxpts=50, nypts=50,
-    alpha=0.8,
-    ax=None, figsize=(3, 3)):
+def plot_most_likely_dynamics(model,
+    xlim=(-4, 4), ylim=(-3, 3), nxpts=30, nypts=30,
+    alpha=0.8, ax=None, figsize=(3, 3)):
     
     K = model.K
     assert model.D == 2
@@ -83,7 +65,7 @@ def plot_most_likely_dynamics(
         if zk.sum(0) > 0:
             ax.quiver(xy[zk, 0], xy[zk, 1],
                       dxydt_m[zk, 0], dxydt_m[zk, 1],
-                      color=colors[k], alpha=alpha)
+                      color=colors[k % len(colors)], alpha=alpha)
 
     ax.set_xlabel('$x_1$')
     ax.set_ylabel('$x_2$')
@@ -125,7 +107,6 @@ def make_nascar_model():
     true_rslds = SLDS(D_obs, K, D_latent, 
                       observations="gaussian",
                       single_subspace=True,
-                      robust_dynamics=True,
                       recurrent_only=True)
     true_rslds.mu_init = np.array([0, 1])
     true_rslds.inv_sigma_init = np.log(1e-4) * np.ones(2)
