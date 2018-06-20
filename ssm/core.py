@@ -192,20 +192,19 @@ class _HMM(object):
         return self._fitting_methods[method](datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
 
 
-class _SwitchingLDS(_HMM):
+class _SwitchingLDS(object):
     """
     Switching linear dynamical system fit with 
     stochastic variational inference on the marginal model,
     integrating out the discrete states.
     """
     def __init__(self, N, K, D, M, init_state_distn, transitions, dynamics, emissions):
-        super(_SwitchingLDS, self).__init__(K, D, M, init_state_distn, transitions, dynamics)
-        self.N = N
+        self.N, self.K, self.D, self.M = N, K, D, M
+        self.init_state_distn = init_state_distn
+        self.transitions = transitions
+        self.dynamics = dynamics
         self.emissions = emissions
-
-        # Alias dynamics = observations
-        self.dynamics = self.observations
-
+        
         # Only allow fitting by SVI
         self._fitting_methods = dict(svi=self._fit_svi)
 
@@ -245,8 +244,7 @@ class _SwitchingLDS(_HMM):
 
         self.init_state_distn = copy.deepcopy(arhmm.init_state_distn)
         self.transitions = copy.deepcopy(arhmm.transitions)
-        self.observations = copy.deepcopy(arhmm.observations)
-        self.dynamics = self.observations
+        self.dynamics = copy.deepcopy(arhmm.observations)
         print("Done")
 
     def permute(self, perm):
@@ -269,7 +267,25 @@ class _SwitchingLDS(_HMM):
                self.emissions.log_prior()
 
     def sample(self, T, input=None, tag=None):
-        z, x = super(_SwitchingLDS, self).sample(T, input=input, tag=tag)
+        K, D = self.K, self.D
+        input = np.zeros((T, self.M)) if input is None else input
+        mask = np.ones((T, D), dtype=bool)
+        
+        # Initialize outputs
+        z = np.zeros(T, dtype=int)
+        x = np.zeros((T, D))
+        
+        # Sample discrete and continuous latent states
+        pi0 = np.exp(self.init_state_distn.log_initial_state_distn(x, input, mask, tag))
+        z[0] = npr.choice(self.K, p=pi0)
+        x[0] = self.dynamics.sample_x(z[0], x[:0])
+
+        for t in range(1, T):
+            Pt = np.exp(self.transitions.log_transition_matrices(x[t-1:t+1], input[t-1:t+1], mask=mask[t-1:t+1], tag=tag))[0]
+            z[t] = npr.choice(self.K, p=Pt[z[t-1]])
+            x[t] = self.dynamics.sample_x(z[t], x[:t], input=input[t], tag=tag)
+
+        # Sample observations given latent states
         y = self.emissions.sample_y(z, x, input=input, tag=tag)
         return z, x, y
 
