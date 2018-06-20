@@ -91,6 +91,16 @@ def ensure_args_not_none(f):
     return wrapper
 
 
+def ensure_slds_args_not_none(f):
+    def wrapper(self, variational_mean, data, input=None, mask=None, tag=None, **kwargs):
+        assert variational_mean is not None
+        assert data is not None
+        input = np.zeros((data.shape[0], self.M)) if input is None else input
+        mask = np.ones_like(data, dtype=bool) if mask is None else mask
+        return f(self, variational_mean, data, input=input, mask=mask, tag=tag, **kwargs)
+    return wrapper
+
+
 def interpolate_data(data, mask):
     assert data.shape == mask.shape and mask.dtype == bool
     T, N = data.shape

@@ -15,29 +15,29 @@ D = 2       # number of latent dimensions
 N = 10      # number of observed dimensions
 
 # Make an SLDS with the true parameters
-true_slds = SLDS(N, K, D, observations="gaussian")
+true_slds = SLDS(N, K, D, emissions="gaussian")
 for k in range(K):
-    true_slds.As[k] = .95 * random_rotation(D, theta=(k+1) * np.pi/20)
+    true_slds.dynamics.As[k] = .95 * random_rotation(D, theta=(k+1) * np.pi/20)
 z, x, y = true_slds.sample(T)
 z_test, x_test, y_test = true_slds.sample(T)
 
 # Mask off some data
-mask = npr.rand(T, N) < 0.5
+mask = npr.rand(T, N) < 0.75
 
 # print("Fitting LDS with SVI")
 # lds = LDS(N, D, observations="gaussian")
 # lds_elbos, (lds_x, lds_x_var) = lds.fit(y * mask, masks=mask, num_iters=100)
 
 print("Fitting SLDS with SVI")
-slds = SLDS(N, K, D, observations="gaussian")
+slds = SLDS(N, K, D, emissions="gaussian")
 slds_elbos, (slds_x, slds_x_var) = slds.fit(y * mask, masks=mask, num_iters=1000, print_intvl=10)
 
 # Find the permutation that matches the true and inferred states
-slds.permute(find_permutation(z, slds.most_likely_states(slds_x)))
-slds_z = slds.most_likely_states(slds_x)
+slds.permute(find_permutation(z, slds.most_likely_states(slds_x, y)))
+slds_z = slds.most_likely_states(slds_x, y)
 
 # Smooth the observations
-slds_y = slds.smooth(slds_x)
+slds_y = slds.smooth(slds_x, y)
 
 # Plot the true and inferred states
 plt.figure(figsize=(8,6))

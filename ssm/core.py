@@ -1,5 +1,6 @@
+import copy
+import warnings
 from functools import partial
-from warnings import warn
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
@@ -8,7 +9,7 @@ from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
 from ssm.primitives import hmm_normalizer, hmm_expected_states
-from ssm.util import ensure_args_are_lists, ensure_args_not_none, ensure_elbo_args_are_lists
+from ssm.util import ensure_args_are_lists, ensure_args_not_none, ensure_slds_args_not_none, ensure_elbo_args_are_lists
 
 class _HMM(object):
     """
@@ -22,8 +23,12 @@ class _HMM(object):
     In the code we will sometimes refer to the discrete
     latent state sequence as z and the data as x.
     """
-    def __init__(self, K, D, M):
+    def __init__(self, K, D, M, init_state_distn, transitions, observations):
         self.K, self.D, self.M = K, D, M
+        self.init_state_distn = init_state_distn
+        self.transitions = transitions
+        self.observations = observations
+        
         self._fitting_methods = \
             dict(sgd=partial(self._fit_mle, "sgd"),
                  adam=partial(self._fit_mle, "adam"),
@@ -32,51 +37,41 @@ class _HMM(object):
 
     @property
     def params(self):
-        return ()
+        return self.init_state_distn.params, \
+               self.transitions.params, \
+               self.observations.params
     
     @params.setter
     def params(self, value):
-        # Note that calling the parent's setter is a pain. See this discussion:
-        # https://stackoverflow.com/questions/10810369/python-super-and-setting-parent-class-property
-        pass
+        self.init_state_distn.params = value[0]
+        self.transitions.params = value[1]
+        self.observations.params = value[2]
 
-    # Private methods: override in base classes
-    def _log_prior(self):
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
+        """
+        Optional: initialize parameters given data.
+        """
+        self.init_state_distn.initialize(datas, inputs=inputs, masks=masks, tags=tags)
+        self.transitions.initialize(datas, inputs=inputs, masks=masks, tags=tags)
+        self.observations.initialize(datas, inputs=inputs, masks=masks, tags=tags)
+
+    def permute(self, perm):
+        """
+        Permute the discrete latent states.
+        """
+        assert np.all(np.sort(perm) == np.arange(self.K))
+        self.init_state_distn.permute(perm)
+        self.transitions.permute(perm)
+        self.observations.permute(perm)
+
+    def log_prior(self):
         """
         Compute the log prior probability of the model parameters
         """  
-        return 0 
-
-    def _log_initial_state_distn(self, data, input, mask, tag):
-        """
-        Compute the initial state distribution.
-
-        :return K array of log initial state probabilities.
-        """
-        raise NotImplementedError
-    
-    def _log_transition_matrices(self, data, input, mask, tag):
-        """
-        Compute the transition matrices for each time step.
-
-        :return TxKxK array of log normalized transition matrices.
-        """
-        raise NotImplementedError
-        
-    def _log_likelihoods(self, data, input, mask, tag):
-        """
-        Compute the log likelihood for each time step
-        under each of the K latent states.
-
-        Override this in base classes. 
-
-        :return TxK matrix of log likelihoods.
-        """
-        raise NotImplementedError
-
-    # External facing methods
-    def _sample_x(self, z, xhist, input=None, tag=None):
-        raise NotImplementedError
+        return self.init_state_distn.log_prior() + \
+               self.transitions.log_prior() + \
+               self.observations.log_prior()
 
     def sample(self, T, input=None, tag=None):
         K, D = self.K, self.D
@@ -87,34 +82,21 @@ class _HMM(object):
         # Initialize outputs
         z = np.zeros(T, dtype=int)
         
-        pi0 = np.exp(self._log_initial_state_distn(data, input, mask, tag))
+        pi0 = np.exp(self.init_state_distn.log_initial_state_distn(data, input, mask, tag))
         z[0] = npr.choice(self.K, p=pi0)
-        data[0] = self._sample_x(z[0], data[:0])
+        data[0] = self.observations.sample_x(z[0], data[:0])
 
         for t in range(1, T):
-            Pt = np.exp(self._log_transition_matrices(data[t-1:t+1], input[t-1:t+1], mask=mask[t-1:t+1], tag=tag))[0]
+            Pt = np.exp(self.transitions.log_transition_matrices(data[t-1:t+1], input[t-1:t+1], mask=mask[t-1:t+1], tag=tag))[0]
             z[t] = npr.choice(self.K, p=Pt[z[t-1]])
-            data[t] = self._sample_x(z[t], data[:t], input=input[t], tag=tag)
+            data[t] = self.observations.sample_x(z[t], data[:t], input=input[t], tag=tag)
         return z, data
-
-    @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None):
-        """
-        Optional: initialize parameters given data.
-        """
-        pass
-
-    def permute(self, perm):
-        """
-        Permute the discrete latent states.
-        """
-        assert np.all(np.sort(perm) == np.arange(self.K))
 
     @ensure_args_not_none
     def expected_states(self, data, input=None, mask=None, tag=None):
-        log_pi0 = self._log_initial_state_distn(data, input, mask, tag)
-        log_Ps = self._log_transition_matrices(data, input, mask, tag)
-        log_likes = self._log_likelihoods(data, input, mask, tag)
+        log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
+        log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+        log_likes = self.observations.log_likelihoods(data, input, mask, tag)
         return hmm_expected_states(log_pi0, log_Ps, log_likes)
 
     @ensure_args_not_none
@@ -128,7 +110,8 @@ class _HMM(object):
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
-        raise NotImplementedError
+        Ez, _ = self.expected_states(data, input, mask)
+        return self.observations.smooth(Ez, data, input, tag)
         
     @ensure_args_are_lists
     def log_probability(self, datas, inputs=None, masks=None, tags=None):
@@ -139,11 +122,11 @@ class _HMM(object):
         :param datas: single array or list of arrays of data.
         :return total log probability of the data.
         """
-        lp = self._log_prior()
+        lp = self.log_prior()
         for data, input, mask, tag in zip(datas, inputs, masks, tags):
-            log_pi0 = self._log_initial_state_distn(data, input, mask, tag)
-            log_Ps = self._log_transition_matrices(data, input, mask, tag)
-            log_likes = self._log_likelihoods(data, input, mask, tag)
+            log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
+            log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+            log_likes = self.observations.log_likelihoods(data, input, mask, tag)
             lp += hmm_normalizer(log_pi0, log_Ps, log_likes)
             assert np.isfinite(lp)
         return lp
@@ -185,11 +168,11 @@ class _HMM(object):
             for data, input, mask, tag, (expected_states, expected_joints) \
                 in zip(datas, inputs, masks, tags, expectations):
 
-                log_pi0 = self._log_initial_state_distn(data, input, mask, tag)
+                log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
                 elbo += np.sum(expected_states[0] * log_pi0)
-                log_Ps = self._log_transition_matrices(data, input, mask, tag)
+                log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
                 elbo += np.sum(expected_joints * log_Ps)
-                log_likes = self._log_likelihoods(data, input, mask, tag)
+                log_likes = self.observations.log_likelihoods(data, input, mask, tag)
                 elbo += np.sum(expected_states * log_likes)
             return elbo
 
@@ -224,15 +207,6 @@ class _HMM(object):
 
         return lls
 
-    def _m_step_initial_state(self, expectations, datas, inputs, masks, tags, **kwargs):
-        raise NotImplementedError
-
-    def _m_step_transitions(self, expectations, datas, inputs, masks, tags, **kwargs):
-        raise NotImplementedError
-
-    def _m_step_observations(self, expectations, datas, inputs, masks, tags, **kwargs):
-        raise NotImplementedError
-
     def _fit_em(self, datas, inputs, masks, tags, num_em_iters=100, verbose=True, **kwargs):
         """
         Fit the parameters with expectation maximization.
@@ -247,9 +221,9 @@ class _HMM(object):
                             for data, input, mask, tag in zip(datas, inputs, masks, tags)]
 
             # M step: maximize expected log joint wrt parameters
-            self._m_step_initial_state(expectations, datas, inputs, masks, tags, **kwargs)
-            self._m_step_transitions(expectations, datas, inputs, masks, tags, **kwargs)
-            self._m_step_observations(expectations, datas, inputs, masks, tags, **kwargs)
+            self.init_state_distn.m_step(expectations, datas, inputs, masks, tags, **kwargs)
+            self.transitions.m_step(expectations, datas, inputs, masks, tags, **kwargs)
+            self.observations.m_step(expectations, datas, inputs, masks, tags, **kwargs)
 
             # Store progress
             lls.append(self.log_probability(datas, inputs, masks, tags))
@@ -271,264 +245,113 @@ class _HMM(object):
         return self._fitting_methods[method](datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
 
 
-class _StationaryHMM(_HMM):
-    """
-    Standard Hidden Markov Model with fixed initial distribution and transition matrix. 
-    """
-    def __init__(self, K, D, M=0):
-        super(_StationaryHMM, self).__init__(K, D, M)
-        
-        # Initialize params
-        self.log_pi0 = -np.log(K) * np.ones(K)
-        Ps = .95 * np.eye(K) + .05 * npr.rand(K, K)
-        Ps /= Ps.sum(axis=1, keepdims=True)
-        self.log_Ps = np.log(Ps)
-
-    @property
-    def params(self):
-        return super(_StationaryHMM, self).params + (self.log_pi0, self.log_Ps)
-    
-    @params.setter
-    def params(self, value):
-        self.log_pi0, self.log_Ps = value[-2:]
-        super(_StationaryHMM, self.__class__).params.fset(self, value[:-2])
-
-    def permute(self, perm):
-        """
-        Permute the discrete latent states.
-        """
-        super(_StationaryHMM, self).permute(perm)
-        self.log_pi0 = self.log_pi0[perm]
-        self.log_Ps = self.log_Ps[np.ix_(perm, perm)]
-
-    @property
-    def init_state_distn(self):
-        return np.exp(self.log_pi0 - logsumexp(self.log_pi0))
-    
-    @property
-    def transition_matrix(self):
-        return np.exp(self.log_Ps - logsumexp(self.log_Ps, axis=1, keepdims=True))
-
-    def _log_initial_state_distn(self, data, input, mask, tag):
-        return self.log_pi0 - logsumexp(self.log_pi0)
-    
-    def _log_transition_matrices(self, data, input, mask, tag):
-        T = data.shape[0]
-        log_Ps = np.tile(self.log_Ps[None, :, :], (T-1, 1, 1))
-        return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
-
-    def _m_step_initial_state(self, expectations, datas, inputs, masks, tags, **kwargs):
-        pi0 = sum([Ez[0] for Ez, _ in expectations]) + 1e-8
-        self.log_pi0 = np.log(pi0 / pi0.sum())
-
-    def _m_step_transitions(self, expectations, datas, inputs, masks, tags, **kwargs):
-        expected_joints = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1 in expectations]) + 1e-8
-        P = expected_joints / expected_joints.sum(axis=1, keepdims=True)
-        self.log_Ps = np.log(P)
-    
-
-class _InputDrivenHMM(_HMM):
-    """
-    Hidden Markov Model whose transition probabilities are 
-    determined by a generalized linear model applied to the
-    exogenous input. 
-    """
-    def __init__(self, K, D, M):
-        super(_InputDrivenHMM, self).__init__(K, D, M)
-
-        # Initial state distribution
-        self.log_pi0 = -np.log(K) * np.ones(K)
-
-        # Baseline transition probabilities
-        Ps = .95 * np.eye(K) + .05 * npr.rand(K, K)
-        Ps /= Ps.sum(axis=1, keepdims=True)
-        self.log_Ps = np.log(Ps)
-
-        # Parameters linking input to state distribution
-        self.Ws = npr.randn(K, M)
-
-    @property
-    def params(self):
-        return super(_InputDrivenHMM, self).params + \
-               (self.log_pi0, self.log_Ps, self.Ws)
-    
-    @params.setter
-    def params(self, value):
-        self.log_pi0, self.log_Ps, self.Ws = value[-3], value[-2], value[-1]
-        super(_InputDrivenHMM, self.__class__).params.fset(self, value[:-3])
-        
-    def permute(self, perm):
-        """
-        Permute the discrete latent states.
-        """
-        super(_InputDrivenHMM, self).permute(perm)
-        self.log_pi0 = self.log_pi0[perm]
-        self.log_Ps = self.log_Ps[np.ix_(perm, perm)]
-        self.Ws = self.Ws[perm]
-
-    @property
-    def init_state_distn(self):
-        return np.exp(self.log_pi0 - logsumexp(self.log_pi0))
-
-    def _log_initial_state_distn(self, data, input, mask, tag):
-        return self.log_pi0 - logsumexp(self.log_pi0)
-    
-    def _log_transition_matrices(self, data, input, mask, tag):
-        T = data.shape[0]
-        assert input.shape[0] == T
-        # Previous state effect
-        log_Ps = np.tile(self.log_Ps[None, :, :], (T-1, 1, 1)) 
-        # Input effect
-        log_Ps = log_Ps + np.dot(input[1:], self.Ws.T)[:, None, :]
-        return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
-
-    def _m_step_initial_state(self, expectations, datas, inputs, masks, tags, **kwargs):
-        pi0 = sum([Ez[0] for Ez, _ in expectations]) + 1e-8
-        self.log_pi0 = np.log(pi0 / pi0.sum())
-
-    def _m_step_transitions(self, expectations, datas, inputs, masks, tags, optimizer="adam", num_iters=10, **kwargs):
-        """
-        M-step cannot be done in closed form for the transitions. Default to SGD.
-        """
-        optimizer = dict(sgd=sgd, adam=adam)[optimizer]
-        
-        # expected log joint
-        def _expected_log_joint(expectations):
-            elbo = 0
-            for data, input, mask, tag, (expected_states, expected_joints) \
-                in zip(datas, inputs, masks, tags, expectations):
-                log_Ps = self._log_transition_matrices(data, input, mask, tag)
-                elbo += np.sum(expected_joints * log_Ps)
-            return elbo
-
-        # define optimization target
-        T = sum([data.shape[0] for data in datas])
-        def _objective(params, itr):
-            self.params = params
-            obj = _expected_log_joint(expectations)
-            return -obj / T
-
-        self.params = optimizer(grad(_objective), self.params, num_iters=num_iters, **kwargs)
-
-
-class _RecurrentHMM(_InputDrivenHMM):
-    """
-    Generalization of the input driven HMM in which the observations serve as future inputs
-    """
-    def __init__(self, K, D, M):
-        super(_RecurrentHMM, self).__init__(K, D, M)
-
-        # Parameters linking past observations to state distribution
-        self.Rs = npr.randn(K, D)
-
-    @property
-    def params(self):
-        return super(_RecurrentHMM, self).params + (self.Rs,)
-    
-    @params.setter
-    def params(self, value):
-        self.Rs = value[-1]
-        super(_RecurrentHMM, self.__class__).params.fset(self, value[:-1])
-
-    def permute(self, perm):
-        """
-        Permute the discrete latent states.
-        """
-        super(_RecurrentHMM, self).permute(perm)
-        self.Rs = self.Rs[perm]
-
-    def _log_transition_matrices(self, data, input, mask, tag):
-        T, D = data.shape
-        # Previous state effect
-        log_Ps = np.tile(self.log_Ps[None, :, :], (T-1, 1, 1)) 
-        # Input effect
-        log_Ps = log_Ps + np.dot(input[1:], self.Ws.T)[:, None, :]
-        # Past observations effect
-        log_Ps = log_Ps + np.dot(data[:-1], self.Rs.T)[:, None, :]
-        return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
-
-
-class _RecurrentOnlyHMM(_InputDrivenHMM):
-    """
-    Only allow the past observations and inputs to influence the
-    next state.  Get rid of the transition matrix and replace it
-    with a constant bias r.
-    """
-    def __init__(self, K, D, M):
-        super(_RecurrentOnlyHMM, self).__init__(K, D, M)
-
-        # Parameters linking past observations to state distribution
-        self.Rs = npr.randn(K, D)
-        self.r = npr.randn(K)
-
-        # Remove the transition matrix component
-        del(self.log_Ps)
-
-    @property
-    def params(self):
-        return (self.log_pi0, self.Ws, self.Rs, self.r)
-    
-    @params.setter
-    def params(self, value):
-        self.log_pi0, self.Ws, self.Rs, self.r = value
-
-    def permute(self, perm):
-        """
-        Permute the discrete latent states.
-        """
-        self.log_pi0 = self.log_pi0[perm]
-        self.Ws = self.Ws[perm]
-        self.Rs = self.Rs[perm]
-        self.r = self.r[perm]
-
-    def _log_transition_matrices(self, data, input, mask, tag):
-        T, D = data.shape
-        log_Ps = np.dot(input[1:], self.Ws.T)[:, None, :]              # inputs
-        log_Ps = log_Ps + np.dot(data[:-1], self.Rs.T)[:, None, :]     # past observations
-        log_Ps = log_Ps + self.r                                       # bias
-        log_Ps = np.tile(log_Ps, (1, self.K, 1))                       # expand
-        return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)       # normalize
-
-
-class _SwitchingLDSBase(object):
+class _SwitchingLDS(_HMM):
     """
     Switching linear dynamical system fit with 
     stochastic variational inference on the marginal model,
     integrating out the discrete states.
     """
-    def __init__(self, N, K, D, *args, **kwargs):
-        super(_SwitchingLDSBase, self).__init__(K, D, *args, **kwargs)
+    def __init__(self, N, K, D, M, init_state_distn, transitions, dynamics, emissions):
+        super(_SwitchingLDS, self).__init__(K, D, M, init_state_distn, transitions, dynamics)
         self.N = N
+        self.emissions = emissions
+
+        # Alias dynamics = observations
+        self.dynamics = self.observations
 
         # Only allow fitting by SVI
         self._fitting_methods = dict(svi=self._fit_svi)
 
-    def _emission_log_likelihoods(self, data, input, mask, tag, x):
-        raise NotImplementedError
+    @property
+    def params(self):
+        return self.init_state_distn.params, \
+               self.transitions.params, \
+               self.dynamics.params, \
+               self.emissions.params
+    
+    @params.setter
+    def params(self, value):
+        self.init_state_distn.params = value[0]
+        self.transitions.params = value[1]
+        self.dynamics.params = value[2]
+        self.emissions.params = value[3]
 
-    def _sample_y(self, z, x, input=None, tag=None):
-        raise NotImplementedError
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None, num_em_iters=25):
+        # First initialize the observation model
+        self.emissions.initialize(datas, inputs, masks, tags)
+
+        # Get the initialized variational mean for the data
+        xs = [self.emissions.initialize_variational_params(data, input, mask, tag) [0]
+              for data, input, mask, tag in zip(datas, inputs, masks, tags)]
+        xmasks = [np.ones_like(x, dtype=bool) for x in xs]
+        
+        # Now run a few iterations of EM on a ARHMM with the variational mean
+        print("Initializing with an ARHMM using {} steps of EM.".format(num_em_iters))
+        arhmm = _HMM(self.K, self.D, self.M, 
+                     copy.deepcopy(self.init_state_distn),
+                     copy.deepcopy(self.transitions),
+                     copy.deepcopy(self.dynamics))
+
+        arhmm.fit(xs, inputs=inputs, masks=xmasks, tags=tags, 
+                  method="em", num_em_iters=num_em_iters, num_iters=10, verbose=False)
+
+        self.init_state_distn = copy.deepcopy(arhmm.init_state_distn)
+        self.transitions = copy.deepcopy(arhmm.transitions)
+        self.observations = copy.deepcopy(arhmm.observations)
+        self.dynamics = self.observations
+        print("Done")
+
+    def permute(self, perm):
+        """
+        Permute the discrete latent states.
+        """
+        assert np.all(np.sort(perm) == np.arange(self.K))
+        self.init_state_distn.permute(perm)
+        self.transitions.permute(perm)
+        self.dynamics.permute(perm)
+        self.emissions.permute(perm)
+
+    def log_prior(self):
+        """
+        Compute the log prior probability of the model parameters
+        """  
+        return self.init_state_distn.log_prior() + \
+               self.transitions.log_prior() + \
+               self.dynamics.log_prior() + \
+               self.emissions.log_prior()
 
     def sample(self, T, input=None, tag=None):
-        z, x = super(_SwitchingLDSBase, self).sample(T, input=input, tag=tag)
-        y = self._sample_y(z, x, input=input, tag=tag)
+        z, x = super(_SwitchingLDS, self).sample(T, input=input, tag=tag)
+        y = self.emissions.sample_y(z, x, input=input, tag=tag)
         return z, x, y
 
-    @ensure_args_not_none
-    def expected_states(self, variational_mean, input=None, mask=None, tag=None):
-        log_pi0 = self._log_initial_state_distn(variational_mean, input, mask, tag)
-        log_Ps = self._log_transition_matrices(variational_mean, input, mask, tag)
-        log_likes = self._log_likelihoods(variational_mean, input, mask, tag)
+    @ensure_slds_args_not_none
+    def expected_states(self, variational_mean, data, input=None, mask=None, tag=None):
+        log_pi0 = self.init_state_distn.log_initial_state_distn(variational_mean, input, mask, tag)
+        log_Ps = self.transitions.log_transition_matrices(variational_mean, input, mask, tag)
+        log_likes = self.dynamics.log_likelihoods(variational_mean, input, np.ones_like(variational_mean, dtype=bool), tag)
+        log_likes += self.emissions.log_likelihoods(data, input, mask, tag, variational_mean)
         return hmm_expected_states(log_pi0, log_Ps, log_likes)
 
-    @ensure_args_not_none
-    def most_likely_states(self, variational_mean, input=None, mask=None, tag=None):
-        Ez, _ = self.expected_states(variational_mean, input, mask, tag)
+    @ensure_slds_args_not_none
+    def most_likely_states(self, variational_mean, data, input=None, mask=None, tag=None):
+        Ez, _ = self.expected_states(variational_mean, data, input, mask, tag)
         return np.argmax(Ez, axis=1)
 
+    @ensure_slds_args_not_none
+    def smooth(self, variational_mean, data, input=None, mask=None, tag=None):
+        """
+        Compute the mean observation under the posterior distribution
+        of latent discrete states.
+        """
+        Ez, _ = self.expected_states(variational_mean, data, input, mask)
+        return self.emissions.smooth(Ez, variational_mean, data, input, tag)
+        
+    @ensure_args_are_lists
     def log_probability(self, datas, inputs=None, masks=None, tags=None):
-        warn("Cannot compute exact marginal log probability for the SLDS. "
-             "the ELBO instead.")
+        warnings.warn("Cannot compute exact marginal log probability for the SLDS. "
+                      "the ELBO instead.")
         return np.nan
 
     @ensure_elbo_args_are_lists
@@ -543,18 +366,19 @@ class _SwitchingLDSBase(object):
 
             q_sigma = np.exp(q_sigma_inv)
             for sample in range(n_samples):
+                # log p(theta)
+                elbo += self.log_prior()
+
                 # Sample x from the variational posterior
                 x = q_mu + np.sqrt(q_sigma) * npr.randn(data.shape[0], self.D)
 
                 # Compute log p(x | theta) = log \sum_z p(x, z | theta)
                 # The "mask" for x is all ones
                 x_mask = np.ones_like(x, dtype=bool)
-                log_pi0 = self._log_initial_state_distn(x, input, x_mask, tag)
-                log_Ps = self._log_transition_matrices(x, input, x_mask, tag)
-                log_likes = self._log_likelihoods(x, input, x_mask, tag)
-
-                # Add the log likelihood of the data p(y | x, z, theta)
-                log_likes = log_likes + self._emission_log_likelihoods(data, input, mask, tag, x)
+                log_pi0 = self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
+                log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
+                log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
+                log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
                 elbo += hmm_normalizer(log_pi0, log_Ps, log_likes)
 
                 # -log q(x)
@@ -565,12 +389,6 @@ class _SwitchingLDSBase(object):
         
         return elbo / n_samples
 
-    def _initialize_variational_params(self, data, input, mask, tag):
-        T = data.shape[0]
-        q_mu = np.zeros((T, self.D))
-        q_sigma_inv = np.zeros((T, self.D))
-        return q_mu, q_sigma_inv
-
     def _fit_svi(self, datas, inputs, masks, tags, learning=True, optimizer="adam", print_intvl=1, **kwargs):
         """
         Fit with stochastic variational inference using a 
@@ -579,7 +397,7 @@ class _SwitchingLDSBase(object):
         T = sum([data.shape[0] for data in datas])
 
         # Initialize the variational posterior parameters
-        variational_params = [self._initialize_variational_params(data, input, mask, tag) 
+        variational_params = [self.emissions.initialize_variational_params(data, input, mask, tag) 
                               for data, input, mask, tag in zip(datas, inputs, masks, tags)]
 
         def _objective(params, itr):
@@ -635,42 +453,34 @@ class _SwitchingLDSBase(object):
         return self._fitting_methods[method](datas, inputs, masks, tags, learning=False, **kwargs)
 
 
-class _LDSBase(_SwitchingLDSBase):
+class _LDS(_SwitchingLDS):
     """
     Switching linear dynamical system fit with 
     stochastic variational inference on the marginal model,
     integrating out the discrete states.
     """
-    def __init__(self, N, K, D, *args, **kwargs):
-        assert K == 1
-        super(_LDSBase, self).__init__(N, K, D, *args, **kwargs)
-        self.N = N
-
-        # Only allow fitting by SVI
-        self._fitting_methods = dict(svi=self._fit_svi)
-
-    def _emission_log_likelihoods(self, data, input, mask, tag, x):
-        raise NotImplementedError
-
-    def _sample_y(self, z, x, input=None, tag=None):
-        raise NotImplementedError
-
-    def sample(self, T, input=None, tag=None):
-        z, x = super(_LDSBase, self).sample(T, input=input, tag=tag)
-        y = self._sample_y(z, x, input=input, tag=tag)
-        return z, x, y
-
-    @ensure_args_not_none
-    def expected_states(self, variational_mean, input=None, mask=None, tag=None):
+    def __init__(self, N, D, M, dynamics, emissions):
+        from ssm.init_state_distns import InitialStateDistribution
+        from ssm.transitions import StationaryTransitions
+        init_state_distn = InitialStateDistribution(1, D, M)
+        transitions = StationaryTransitions(1, D, M)
+        super(_LDS, self).__init__(N, 1, D, M, init_state_distn, transitions, dynamics, emissions)
+    
+    @ensure_slds_args_not_none    
+    def expected_states(self, variational_mean, data, input=None, mask=None, tag=None):
         return np.ones((variational_mean.shape[0], 1)), \
                np.ones((variational_mean.shape[0], 1, 1)), 
 
-    @ensure_args_not_none
-    def most_likely_states(self, variational_mean, input=None, mask=None, tag=None):
+    @ensure_slds_args_not_none
+    def most_likely_states(self, variational_mean, data, input=None, mask=None, tag=None):
         raise NotImplementedError
 
+    def log_prior(self):
+        return self.dynamics.log_prior() + self.emissions.log_prior()
+
+    @ensure_args_are_lists
     def log_probability(self, datas, inputs=None, masks=None, tags=None):
-        warn("Log probability of LDS is not yet implemented.")
+        warnings.warn("Log probability of LDS is not yet implemented.")
         return np.nan
 
     @ensure_elbo_args_are_lists
@@ -685,13 +495,15 @@ class _LDSBase(_SwitchingLDSBase):
 
             q_sigma = np.exp(q_sigma_inv)
             for sample in range(n_samples):
+                # log p(theta)
+                elbo += self.log_prior()
+
                 # Sample x from the variational posterior
                 x = q_mu + np.sqrt(q_sigma) * npr.randn(data.shape[0], self.D)
                 x_mask = np.ones_like(x, dtype=bool)
-                # Compute log p(x | theta) 
-                elbo += np.sum(self._log_likelihoods(x, input, x_mask, tag))
-                # Compute the log likelihood of the data p(y | x, theta)
-                elbo += np.sum(self._emission_log_likelihoods(data, input, mask, tag, x))
+                # Compute log p(y, x | theta) 
+                elbo += np.sum(self.dynamics.log_likelihoods(x, input, x_mask, tag))
+                elbo += np.sum(self.emissions.log_likelihoods(data, input, mask, tag, x))
                 
                 # -log q(x)
                 elbo -= np.sum(-0.5 * np.log(2 * np.pi * q_sigma))

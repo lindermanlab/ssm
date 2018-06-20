@@ -52,13 +52,13 @@ def plot_most_likely_dynamics(model,
     xy = np.column_stack((X.ravel(), Y.ravel()))
 
     # Get the probability of each state at each xy location
-    z = np.argmax(xy.dot(model.Rs.T), axis=1)
+    z = np.argmax(xy.dot(model.transitions.Rs.T), axis=1)
 
     if ax is None:
         fig = plt.figure(figsize=figsize)
         ax = fig.add_subplot(111)
 
-    for k, (A, b) in enumerate(zip(model.As, model.bs)):
+    for k, (A, b) in enumerate(zip(model.dynamics.As, model.dynamics.bs)):
         dxydt_m = xy.dot(A.T) + b - xy
 
         zk = z == k
@@ -105,19 +105,22 @@ def make_nascar_model():
     d = np.zeros((1, D_obs))
 
     true_rslds = SLDS(D_obs, K, D_latent, 
-                      observations="gaussian",
-                      single_subspace=True,
-                      recurrent_only=True)
-    true_rslds.mu_init = np.array([0, 1])
-    true_rslds.inv_sigma_init = np.log(1e-4) * np.ones(2)
-    true_rslds.As = np.array(As)
-    true_rslds.bs = np.array(bs)
-    true_rslds.inv_sigmas = np.log(1e-4) * np.ones((K, D_latent))
-    true_rslds.Rs = Rs
-    true_rslds.r = r
-    true_rslds.Cs = C
-    true_rslds.ds = d
-    true_rslds.inv_etas = np.log(1e-2) * np.ones((1, D_obs))
+                      transitions="recurrent_only",
+                      dynamics="gaussian",
+                      emissions="gaussian",
+                      single_subspace=True)
+    true_rslds.dynamics.mu_init = np.array([0, 1])
+    true_rslds.dynamics.inv_sigma_init = np.log(1e-4) * np.ones(2)
+    true_rslds.dynamics.As = np.array(As)
+    true_rslds.dynamics.bs = np.array(bs)
+    true_rslds.dynamics.inv_sigmas = np.log(1e-4) * np.ones((K, D_latent))
+    
+    true_rslds.transitions.Rs = Rs
+    true_rslds.transitions.r = r
+
+    true_rslds.emissions.Cs = C
+    true_rslds.emissions.ds = d
+    true_rslds.emissions.inv_etas = np.log(1e-2) * np.ones((1, D_obs))
     return true_rslds
 
 # Sample from the model
@@ -126,12 +129,12 @@ z, x, y = true_rslds.sample(T=T)
 
 # Fit a robust rSLDS with its default initialization
 rslds = SLDS(D_obs, K, D_latent, 
-             observations="gaussian",
-             single_subspace=True,
-             robust_dynamics=True,
-             recurrent_only=True)
-elbos, (xhat, xvar) = rslds.fit(y, num_iters=1000)
-zhat = rslds.most_likely_states(xhat)
+             transitions="recurrent_only",
+             dynamics="gaussian",
+             emissions="gaussian",
+             single_subspace=True)
+elbos, (xhat, xvar) = rslds.fit(y, num_iters=100)
+zhat = rslds.most_likely_states(xhat, y)
 
 # Plot some results
 plt.figure()

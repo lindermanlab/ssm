@@ -1,26 +1,29 @@
-from ssm.core import \
-    _StationaryHMM, \
-    _InputDrivenHMM, \
-    _RecurrentHMM, \
-    _RecurrentOnlyHMM, \
-    _LDSBase, \
-    _SwitchingLDSBase
+from ssm.core import _HMM, _LDS, _SwitchingLDS
 
-from ssm.likelihoods import \
-    _GaussianHMMObservations, \
-    _BernoulliHMMObservations, \
-    _PoissonHMMObservations, \
-    _StudentsTHMMObservations, \
-    _AutoRegressiveHMMObservations, \
-    _RobustAutoRegressiveHMMObservations, \
-    _RecurrentAutoRegressiveHMMMixin, \
-    _GaussianSLDSObservations
+from ssm.init_state_distns import InitialStateDistribution
 
+from ssm.transitions import \
+    StationaryTransitions, \
+    InputDrivenTransitions, \
+    RecurrentTransitions, \
+    RecurrentOnlyTransitions
+
+from ssm.observations import \
+    GaussianObservations, \
+    BernoulliObservations, \
+    PoissonObservations, \
+    StudentsTObservations, \
+    AutoRegressiveObservations, \
+    RobustAutoRegressiveObservations, \
+    RecurrentAutoRegressiveObservations, \
+    RecurrentRobustAutoRegressiveObservations
+    # HierarchicalAutoRegressiveHMMObservations
+
+from ssm.emissions import GaussianEmissions
 
 def HMM(K, D, M=0,
+        transitions="standard",
         observations="gaussian",
-        recurrent=False,
-        recurrent_only=False,
         **kwargs):
     """
     Construct an HMM object with the appropriate observations 
@@ -34,18 +37,35 @@ def HMM(K, D, M=0,
     :param recurrent_only: if true, _only_ the past observations influence transitions. 
     """
 
+    # Make the initial state distribution
+    init_state_distn = InitialStateDistribution(K, D, M=M)
+
+    # Make the transition model
+    transition_classes = dict(
+        standard=StationaryTransitions,
+        inputdriven=InputDrivenTransitions,
+        recurrent=RecurrentTransitions,
+        recurrent_only=RecurrentOnlyTransitions
+        )
+    if transitions not in transition_classes:
+        raise Exception("Invalid transition model: {}. Must be one of {}".
+            format(transitions, list(transition_classes.keys())))
+    
+    transition_distn = transition_classes[transitions](K, D, M=M)
+
     # This is the master list of observation classes.  
     # When you create a new observation class, add it here.
+    is_recurrent = (transitions.lower() in ["recurrent", "recurrent_only"])
     observation_classes = dict(
-        gaussian=_GaussianHMMObservations,
-        studentst=_StudentsTHMMObservations,
-        t=_StudentsTHMMObservations,
-        poisson=_PoissonHMMObservations,
-        bernoulli=_BernoulliHMMObservations,
-        ar=_AutoRegressiveHMMObservations,
-        autoregressive=_AutoRegressiveHMMObservations,
-        robust_ar=_RobustAutoRegressiveHMMObservations,
-        robust_autoregressive=_RobustAutoRegressiveHMMObservations
+        gaussian=GaussianObservations,
+        studentst=StudentsTObservations,
+        t=StudentsTObservations,
+        poisson=PoissonObservations,
+        bernoulli=BernoulliObservations,
+        ar=RecurrentAutoRegressiveObservations if is_recurrent else AutoRegressiveObservations,
+        autoregressive=RecurrentAutoRegressiveObservations if is_recurrent else AutoRegressiveObservations,
+        robust_ar=RecurrentRobustAutoRegressiveObservations if is_recurrent else RobustAutoRegressiveObservations,
+        robust_autoregressive=RecurrentRobustAutoRegressiveObservations if is_recurrent else RobustAutoRegressiveObservations,
         )
 
     observations = observations.lower()
@@ -53,32 +73,16 @@ def HMM(K, D, M=0,
         raise Exception("Invalid observation model: {}. Must be one of {}".
             format(observations, list(observation_classes.keys())))
 
-    # Make a list of parent classes
-    parents = (observation_classes[observations],)
-    if recurrent_only:
-        parents += (_RecurrentOnlyHMM,)
-    elif recurrent:
-        parents += (_RecurrentHMM,)
-    elif M > 0:
-        parents += (_InputDrivenHMM,)
-    else:
-        parents += (_StationaryHMM,)
+    observation_distn = observation_classes[observations](K, D, M=M)
 
-    # Handle the special case of recurrent ARHMMs
-    arhmm_observations = ["ar", "autoregressive", "robust_ar", "robust_autoregressive"]
-    if (recurrent or recurrent_only) and (observations in arhmm_observations):
-        parents = (_RecurrentAutoRegressiveHMMMixin,) + parents
-
-    # Make the class and return a new instance of it
-    cls = type("HMM", parents, {})
-    return cls(K, D, M)
+    # Make the HMM
+    return _HMM(K, D, M, init_state_distn, transition_distn, observation_distn)
 
 
 def SLDS(N, K, D, M=0,
-         observations="gaussian",
-         robust_dynamics=False,
-         recurrent=False,
-         recurrent_only=False,
+         transitions="standard",
+         dynamics="gaussian",
+         emissions="gaussian",
          single_subspace=True,
          **kwargs):
     """
@@ -95,49 +99,56 @@ def SLDS(N, K, D, M=0,
     :param single_subspace: if true, all discrete states share the same mapping from 
         continuous latent states to observations.
     """
-    observation_classes = dict(
-        gaussian=_GaussianSLDSObservations
+    # Make the initial state distribution
+    init_state_distn = InitialStateDistribution(K, D, M=M)
+
+    # Make the transition model
+    transition_classes = dict(
+        standard=StationaryTransitions,
+        inputdriven=InputDrivenTransitions,
+        recurrent=RecurrentTransitions,
+        recurrent_only=RecurrentOnlyTransitions
+        )
+    if transitions not in transition_classes:
+        raise Exception("Invalid transition model: {}. Must be one of {}".
+            format(transitions, list(transition_classes.keys())))
+    
+    transition_distn = transition_classes[transitions](K, D, M=M)
+
+    # Make the dynamics distn
+    is_recurrent = (transitions.lower() in ["recurrent", "recurrent_only"])
+    dynamics_classes = dict(
+        gaussian=RecurrentAutoRegressiveObservations if is_recurrent else AutoRegressiveObservations,
+        t=RecurrentRobustAutoRegressiveObservations if is_recurrent else RobustAutoRegressiveObservations,
+        studentst=RecurrentRobustAutoRegressiveObservations if is_recurrent else RobustAutoRegressiveObservations,
         )
 
-    observations = observations.lower()
-    if observations not in observation_classes:
-        raise Exception("Invalid observation model: {}. Must be one of {}".
-            format(observations, list(observation_classes.keys())))
+    dynamics = dynamics.lower()
+    if dynamics not in dynamics_classes:
+        raise Exception("Invalid dynamics model: {}. Must be one of {}".
+            format(dynamics, list(dynamics_classes.keys())))
 
-    # Make a list of parent classes, starting with the observation model
-    parents = (observation_classes[observations],)
+    dynamics_distn = dynamics_classes[dynamics](K, D, M=M)
 
-    # Add the SLDS base
-    parents += (_SwitchingLDSBase,)
-    
-    # Inherit from the appropriate ARHMM
-    if recurrent or recurrent_only:
-        parents += (_RecurrentAutoRegressiveHMMMixin,)
+    # Make the emission distn    
+    emission_classes = dict(
+        gaussian=GaussianEmissions
+        )
 
-    # Add the appropriate AR observations
-    if robust_dynamics:
-        parents += (_RobustAutoRegressiveHMMObservations,)
-    else:
-        parents += (_AutoRegressiveHMMObservations,)
+    emissions = emissions.lower()
+    if emissions not in emission_classes:
+        raise Exception("Invalid emission model: {}. Must be one of {}".
+            format(emissions, list(emission_classes.keys())))
 
-    # Add the HMM base class
-    if recurrent_only:
-        parents += (_RecurrentOnlyHMM,)
-    elif recurrent:
-        parents += (_RecurrentHMM,)
-    elif M > 0:
-        parents += (_InputDrivenHMM,)
-    else:
-        parents += (_StationaryHMM,)
+    emission_distn = emission_classes[emissions](N, K, D, M=M, single_subspace=single_subspace)
 
-    # Make the class and return a new instance of it
-    cls = type("SLDS", parents, {})
-    return cls(N, K, D, M=M, single_subspace=single_subspace, **kwargs)
+    # Make the HMM
+    return _SwitchingLDS(N, K, D, M, init_state_distn, transition_distn, dynamics_distn, emission_distn)
 
 
 def LDS(N, D, M=0,
-        observations="gaussian",
-        robust_dynamics=False,
+        dynamics="gaussian",
+        emissions="gaussian",
         **kwargs):
     """
     Construct an LDS object with the appropriate observations, latent states, and dynamics. 
@@ -149,30 +160,34 @@ def LDS(N, D, M=0,
     :param observations: conditional distribution of the data 
     :param robust_dynamics: if true, continuous latent states have Student's t noise.
     """
-    observation_classes = dict(
-        gaussian=_GaussianSLDSObservations
+    # Make the dynamics distn
+    is_recurrent = (transitions.lower() in ["recurrent", "recurrent_only"])
+    dynamics_classes = dict(
+        gaussian=AutoRegressiveObservations,
+        t=RobustAutoRegressiveObservations,
+        studentst=RobustAutoRegressiveObservations,
         )
 
-    observations = observations.lower()
-    if observations not in observation_classes:
-        raise Exception("Invalid observation model: {}. Must be one of {}".
-            format(observations, list(observation_classes.keys())))
+    dynamics = dynamics.lower()
+    if dynamics not in dynamic_classes:
+        raise Exception("Invalid dynamics model: {}. Must be one of {}".
+            format(dynamics, list(dynamic_classes.keys())))
 
-    # Make a list of parent classes, starting with the observation model
-    parents = (observation_classes[observations],)
+    dynamics_distn = dynamics_classes[dynamics](1, D, M=M)
 
-    # Add the LDS base
-    parents += (_LDSBase,)
-    
-    # Add the appropriate AR observations
-    if robust_dynamics:
-        parents += (_RobustAutoRegressiveHMMObservations,)
-    else:
-        parents += (_AutoRegressiveHMMObservations,)
-    
-    # Add the HMM base class
-    parents += (_StationaryHMM,)
+    # Make the emission distn    
+    emission_classes = dict(
+        gaussian=GaussianEmissions
+        )
 
-    # Make the class and return a new instance of it
-    cls = type("LDS", parents, {})
-    return cls(N, K=0, D=D, M=M, single_subspace=True, **kwargs)
+    emissions = emissions.lower()
+    if emissions not in emission_classes:
+        raise Exception("Invalid emission model: {}. Must be one of {}".
+            format(emissions, list(emission_classes.keys())))
+
+    emission_distn = emission_classes[emissions](N, 1, D, M=M)
+
+    # Make the HMM
+    return _LDS(N, D, M, dynamics_distn, emission_distn)
+
+
