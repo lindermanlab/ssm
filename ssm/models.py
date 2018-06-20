@@ -17,7 +17,8 @@ from ssm.observations import \
     RobustAutoRegressiveObservations, \
     RecurrentAutoRegressiveObservations, \
     RecurrentRobustAutoRegressiveObservations
-    # HierarchicalAutoRegressiveHMMObservations
+    
+from ssm.hierarchical import HierarchicalObservations
 
 from ssm.emissions import GaussianEmissions
 
