@@ -85,9 +85,9 @@ def test_hmm_likelihood(T=500, K=5, D=2):
 
     # Make an HMM with these parameters
     hmm = HMM(K, D, observations="gaussian")
-    hmm.log_Ps = np.log(A)
-    hmm.mus = C
-    hmm.inv_sigmas = np.log(sigma) * np.ones((K, D))
+    hmm.transitions.log_Ps = np.log(A)
+    hmm.observations.mus = C
+    hmm.observations.inv_sigmas = np.log(sigma) * np.ones((K, D))
     test_lkhd = hmm.log_probability(y)
 
     assert np.allclose(true_lkhd, test_lkhd)
