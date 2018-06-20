@@ -11,11 +11,6 @@ from ssm.util import ensure_args_are_lists, ensure_args_not_none, ensure_elbo_ar
 
 
 class _Transitions(object):
-    """
-    Hidden Markov Model whose transition probabilities are 
-    determined by a generalized linear model applied to the
-    exogenous input. 
-    """
     def __init__(self, K, D, M=0):
         self.K, self.D, self.M = K, D, M
 
@@ -31,9 +26,6 @@ class _Transitions(object):
         pass
         
     def permute(self, perm):
-        """
-        Permute the discrete latent states.
-        """
         pass
 
     def log_prior(self):
@@ -44,7 +36,7 @@ class _Transitions(object):
 
     def m_step(self, expectations, datas, inputs, masks, tags, optimizer="adam", num_iters=10, **kwargs):
         """
-        M-step cannot be done in closed form for the transitions. Default to SGD.
+        If M-step cannot be done in closed form for the transitions, default to SGD.
         """
         optimizer = dict(sgd=sgd, adam=adam)[optimizer]
         

@@ -41,7 +41,7 @@ class _Observations(object):
     def m_step(self, expectations, datas, inputs, masks, tags, 
                optimizer="adam", num_iters=10, **kwargs):
         """
-        Max likelihood is not available in closed form. Default to SGD.
+        If M-step cannot be done in closed form for the transitions, default to SGD.
         """
         optimizer = dict(sgd=sgd, adam=adam)[optimizer]
         

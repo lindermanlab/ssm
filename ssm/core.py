@@ -30,10 +30,9 @@ class _HMM(object):
         self.observations = observations
         
         self._fitting_methods = \
-            dict(sgd=partial(self._fit_mle, "sgd"),
-                 adam=partial(self._fit_mle, "adam"),
-                 em=self._fit_em,
-                 stochastic_em=self._fit_stochastic_em)
+            dict(sgd=partial(self._fit_sgd, "sgd"),
+                 adam=partial(self._fit_sgd, "adam"),
+                 em=self._fit_em)
 
     @property
     def params(self):
@@ -50,7 +49,7 @@ class _HMM(object):
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         """
-        Optional: initialize parameters given data.
+        Initialize parameters given data.
         """
         self.init_state_distn.initialize(datas, inputs=inputs, masks=masks, tags=tags)
         self.transitions.initialize(datas, inputs=inputs, masks=masks, tags=tags)
@@ -132,7 +131,7 @@ class _HMM(object):
         return lp
     
     # Model fitting
-    def _fit_mle(self, optimizer, datas, inputs, masks, tags, print_intvl=10, **kwargs):
+    def _fit_sgd(self, optimizer, datas, inputs, masks, tags, print_intvl=10, **kwargs):
         """
         Fit the model with maximum marginal likelihood.
         """
@@ -152,58 +151,6 @@ class _HMM(object):
         optimizers = dict(sgd=sgd, adam=adam)
         self.params = \
             optimizers[optimizer](grad(_objective), self.params, callback=_print_progress, **kwargs)
-
-        return lls
-
-    def _stochastic_m_step(self, expectations, datas, inputs, masks, tags, optimizer="adam", **kwargs):
-        """
-        The default M step implementation does SGD on the expected log joint. 
-        Base classes can override this with closed form updates if available.
-        """
-        optimizer = dict(sgd=sgd, adam=adam)[optimizer]
-        
-        # expected log joint
-        def _expected_log_joint(expectations):
-            elbo = 0
-            for data, input, mask, tag, (expected_states, expected_joints) \
-                in zip(datas, inputs, masks, tags, expectations):
-
-                log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
-                elbo += np.sum(expected_states[0] * log_pi0)
-                log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
-                elbo += np.sum(expected_joints * log_Ps)
-                log_likes = self.observations.log_likelihoods(data, input, mask, tag)
-                elbo += np.sum(expected_states * log_likes)
-            return elbo
-
-        # define optimization target
-        T = sum([data.shape[0] for data in datas])
-        def _objective(params, itr):
-            self.params = params
-            obj = _expected_log_joint(expectations)
-            return -obj / T
-
-        self.params = optimizer(grad(_objective), self.params, **kwargs)
-
-    def _fit_stochastic_em(self, datas, inputs, masks, tags, num_em_iters=100, optimizer="adam", **kwargs):
-        """
-        Fit the parameters with expectation maximization.  
-
-        E step: compute E[z_t] and E[z_t, z_{t+1}] with message passing;
-        M-step: stochastic gradient ascent on E_{p(z | x)} [log p(x, z; theta)].
-        """
-        lls = []
-        for itr in range(num_em_iters):
-            # E step: compute expected latent states with current parameters
-            expectations = [self.expected_states(data, input, mask, tag) 
-                            for data, input, mask in zip(datas, inputs, masks, tags)]
-
-            # M step: maximize expected log joint wrt parameters
-            self._stochastic_m_step(expectations, datas, inputs, masks, tags, optimizer=optimizer, **kwargs)
-
-            # Store progress
-            lls.append(self.log_probability(datas, inputs, masks, tags))
-            print("Iteration {}.  LL: {}".format(itr, lls[-1]))
 
         return lls
 
@@ -347,7 +294,7 @@ class _SwitchingLDS(_HMM):
         """
         Ez, _ = self.expected_states(variational_mean, data, input, mask)
         return self.emissions.smooth(Ez, variational_mean, data, input, tag)
-        
+
     @ensure_args_are_lists
     def log_probability(self, datas, inputs=None, masks=None, tags=None):
         warnings.warn("Cannot compute exact marginal log probability for the SLDS. "
