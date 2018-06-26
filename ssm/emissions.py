@@ -50,6 +50,7 @@ class _Emissions(object):
         """
         raise NotImplementedError
 
+
 # Observation models for SLDS
 class GaussianEmissions(_Emissions):
     def __init__(self, N, K, D, M=0, single_subspace=True, **kwargs):

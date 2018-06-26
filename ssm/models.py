@@ -18,13 +18,19 @@ from ssm.observations import \
     RecurrentAutoRegressiveObservations, \
     RecurrentRobustAutoRegressiveObservations
     
-from ssm.hierarchical import HierarchicalObservations
+from ssm.hierarchical import \
+    HierarchicalInitialStateDistribution, \
+    HierarchicalTransitions, \
+    HierarchicalObservations, \
+    HierarchicalEmissions
 
 from ssm.emissions import GaussianEmissions
 
 def HMM(K, D, M=0,
         transitions="standard",
+        hierarchical_transition_tags=None,
         observations="gaussian",
+        hierarchical_observation_tags=None,
         **kwargs):
     """
     Construct an HMM object with the appropriate observations 
@@ -52,7 +58,11 @@ def HMM(K, D, M=0,
         raise Exception("Invalid transition model: {}. Must be one of {}".
             format(transitions, list(transition_classes.keys())))
     
-    transition_distn = transition_classes[transitions](K, D, M=M)
+    transition_distn = \
+        HierarchicalTransitions(transition_classes[transitions], K, D, M=M, 
+                                tags=hierarchical_transition_tags) \
+        if hierarchical_transition_tags is not None \
+        else transition_classes[transitions](K, D, M=M)
 
     # This is the master list of observation classes.  
     # When you create a new observation class, add it here.
@@ -74,7 +84,11 @@ def HMM(K, D, M=0,
         raise Exception("Invalid observation model: {}. Must be one of {}".
             format(observations, list(observation_classes.keys())))
 
-    observation_distn = observation_classes[observations](K, D, M=M)
+    observation_distn = \
+        HierarchicalObservations(observation_classes[observations], K, D, M=M, 
+                                 tags=hierarchical_observation_tags) \
+        if hierarchical_observation_tags is not None \
+        else observation_classes[observations](K, D, M=M)
 
     # Make the HMM
     return _HMM(K, D, M, init_state_distn, transition_distn, observation_distn)
@@ -82,8 +96,11 @@ def HMM(K, D, M=0,
 
 def SLDS(N, K, D, M=0,
          transitions="standard",
+         hierarchical_transition_tags=None,
          dynamics="gaussian",
+         hierarchical_dynamics_tags=None,
          emissions="gaussian",
+         hierarchical_emission_tags=None,
          single_subspace=True,
          **kwargs):
     """
@@ -114,7 +131,11 @@ def SLDS(N, K, D, M=0,
         raise Exception("Invalid transition model: {}. Must be one of {}".
             format(transitions, list(transition_classes.keys())))
     
-    transition_distn = transition_classes[transitions](K, D, M=M)
+    transition_distn = \
+        HierarchicalTransitions(transition_classes[transitions], K, D, M, 
+                                tags=hierarchical_transition_tags) \
+        if hierarchical_transition_tags is not None\
+        else transition_classes[transitions](K, D, M=M)
 
     # Make the dynamics distn
     is_recurrent = (transitions.lower() in ["recurrent", "recurrent_only"])
@@ -129,7 +150,11 @@ def SLDS(N, K, D, M=0,
         raise Exception("Invalid dynamics model: {}. Must be one of {}".
             format(dynamics, list(dynamics_classes.keys())))
 
-    dynamics_distn = dynamics_classes[dynamics](K, D, M=M)
+    dynamics_distn = \
+        HierarchicalDynamics(dynamics_classes[dynamics], K, D, M, 
+                             tags=hierarchical_dynamics_tags) \
+        if hierarchical_dynamics_tags is not None \
+        else dynamics_classes[dynamics](K, D, M=M)
 
     # Make the emission distn    
     emission_classes = dict(
@@ -141,7 +166,12 @@ def SLDS(N, K, D, M=0,
         raise Exception("Invalid emission model: {}. Must be one of {}".
             format(emissions, list(emission_classes.keys())))
 
-    emission_distn = emission_classes[emissions](N, K, D, M=M, single_subspace=single_subspace)
+    emission_distn = \
+        HierarchicalEmissions(emission_classes[emissions], N, K, D, M, 
+                              tags=hierarchical_emission_tags, 
+                              single_subspace=single_subspace) \
+        if hierarchical_emission_tags is not None \
+        else emission_classes[emissions](N, K, D, M=M, single_subspace=single_subspace)
 
     # Make the HMM
     return _SwitchingLDS(N, K, D, M, init_state_distn, transition_distn, dynamics_distn, emission_distn)
@@ -149,7 +179,9 @@ def SLDS(N, K, D, M=0,
 
 def LDS(N, D, M=0,
         dynamics="gaussian",
+        hierarchical_dynamics_tags=None,
         emissions="gaussian",
+        hierarchical_emission_tags=None,
         **kwargs):
     """
     Construct an LDS object with the appropriate observations, latent states, and dynamics. 
@@ -174,7 +206,11 @@ def LDS(N, D, M=0,
         raise Exception("Invalid dynamics model: {}. Must be one of {}".
             format(dynamics, list(dynamic_classes.keys())))
 
-    dynamics_distn = dynamics_classes[dynamics](1, D, M=M)
+    dynamics_distn = \
+        HierarchicalDynamics(dynamics_classes[dynamics], 1, D, M, 
+                             tags=hierarchical_dynamics_tags) \
+        if hierarchical_dynamics_tags is not None \
+        else dynamics_classes[dynamics](1, D, M=M)
 
     # Make the emission distn    
     emission_classes = dict(
@@ -186,7 +222,12 @@ def LDS(N, D, M=0,
         raise Exception("Invalid emission model: {}. Must be one of {}".
             format(emissions, list(emission_classes.keys())))
 
-    emission_distn = emission_classes[emissions](N, 1, D, M=M)
+    emission_distn = \
+        HierarchicalEmissions(emission_classes[emissions], N, 1, D, M, 
+                              tags=hierarchical_emission_tags) \
+        if hierarchical_emissions is not None \
+        else emission_classes[emissions](N, 1, D, M=M)
+
 
     # Make the HMM
     return _LDS(N, D, M, dynamics_distn, emission_distn)
