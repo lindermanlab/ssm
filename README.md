@@ -4,10 +4,13 @@ This package has fast and flexible code for simulating, learning, and performing
 Currently, it supports:
 
 - Hidden Markov Models (HMM)
+- Auto-regressive HMMs (ARHMM)
+- Input-output HMMs (IOHMM)
 - Linear Dynamical Systems (LDS)
 - Switching Linear Dynamical Systems (SLDS)
-
-Moreover, it allows for input-driven transition probabilities, missing data, and "recurrent" dynamics in which the data or continuous latent states modulate transition probabilities. 
+- Recurrent SLDS (rSLDS)
+- Hierarchical extensions of the above
+- Partial observations and missing data
 
 We support the following observation models:
 
@@ -15,8 +18,8 @@ We support the following observation models:
 - Student's t
 - Bernoulli
 - Poisson
-- Auto-regressios with Gaussian noise
-- "Robust" auto-regressions with Student's t noise
+
+HMM inference is done with either expectation maximization (EM) or stochastic gradient descent (SGD).  For SLDS, we use stochastic variational inference (SVI). 
 
 # Examples
 Here's a snippet to illustrate how we simulate from an HMM.
