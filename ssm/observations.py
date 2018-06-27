@@ -191,7 +191,7 @@ class BernoulliObservations(_Observations):
     
     @params.setter
     def params(self, value):
-        self.logit_ps = value[0]
+        self.logit_ps = value
         
     def permute(self, perm):
         self.logit_ps = self.logit_ps[perm]
@@ -245,7 +245,7 @@ class PoissonObservations(_Observations):
     
     @params.setter
     def params(self, value):
-        self.log_lambdas = value[0]
+        self.log_lambdas = value
         
     def permute(self, perm):
         self.log_lambdas = self.log_lambdas[perm]
