@@ -4,6 +4,7 @@ from ssm.init_state_distns import InitialStateDistribution
 
 from ssm.transitions import \
     StationaryTransitions, \
+    StickyTransitions, \
     InputDrivenTransitions, \
     RecurrentTransitions, \
     RecurrentOnlyTransitions
@@ -24,7 +25,13 @@ from ssm.hierarchical import \
     HierarchicalObservations, \
     HierarchicalEmissions
 
-from ssm.emissions import GaussianEmissions
+from ssm.emissions import \
+    GaussianEmissions, \
+    BernoulliEmissions, \
+    PoissonEmissions, \
+    StudentsTEmissions, \
+    AutoRegressiveEmissions
+
 
 def HMM(K, D, M=0,
         transitions="standard",
@@ -50,6 +57,7 @@ def HMM(K, D, M=0,
     # Make the transition model
     transition_classes = dict(
         standard=StationaryTransitions,
+        sticky=StickyTransitions,
         inputdriven=InputDrivenTransitions,
         recurrent=RecurrentTransitions,
         recurrent_only=RecurrentOnlyTransitions
@@ -123,6 +131,7 @@ def SLDS(N, K, D, M=0,
     # Make the transition model
     transition_classes = dict(
         standard=StationaryTransitions,
+        sticky=StickyTransitions,
         inputdriven=InputDrivenTransitions,
         recurrent=RecurrentTransitions,
         recurrent_only=RecurrentOnlyTransitions
@@ -158,7 +167,13 @@ def SLDS(N, K, D, M=0,
 
     # Make the emission distn    
     emission_classes = dict(
-        gaussian=GaussianEmissions
+        gaussian=GaussianEmissions,
+        studentst=StudentsTEmissions,
+        t=StudentsTEmissions,
+        poisson=PoissonEmissions,
+        bernoulli=BernoulliEmissions,
+        ar=AutoRegressiveEmissions,
+        autoregressive=AutoRegressiveEmissions
         )
 
     emissions = emissions.lower()

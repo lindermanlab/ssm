@@ -76,11 +76,33 @@ class _LinearEmissions(_Emissions):
     def compute_mus(self, x):
         return np.matmul(self.Cs[None, ...], x[:, None, :, None])[:, :, :, 0] + self.ds
 
-    def _initialize_with_pca(self, datas):
+    def _initialize_with_pca(self, datas, masks, num_iters=25):
         from sklearn.decomposition import PCA
-        pca = PCA(self.D).fit(np.concatenate(datas))
+
+        data = np.concatenate(datas)
+        mask = np.concatenate(masks)
+        
+        if np.any(~mask):
+            print("Running PCA with missing data imputation to initialize emissions.")
+            # Fill in missing data with mean to start
+            fulldata = data.copy()
+            for n in range(self.N):
+                fulldata[~mask[:,n], n] = fulldata[mask[:,n], n].mean()
+
+            for itr in range(num_iters):
+                # Run PCA on imputed data
+                pca = PCA(self.D)
+                x = pca.fit_transform(fulldata)
+                
+                # Fill in missing data with PCA predictions
+                pred = pca.inverse_transform(x)
+                fulldata[~mask] = pred[~mask]
+        else:
+            pca = PCA(self.D).fit(data)
+
         self.Cs[:,...] = pca.components_.T
         self.ds[:,...] = pca.mean_
+            
         return pca
         
     def _initialize_variational_params(self, data, input, mask, tag):
@@ -117,7 +139,7 @@ class GaussianEmissions(_LinearEmissions):
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
-        pca = self._initialize_with_pca(datas)
+        pca = self._initialize_with_pca(datas, masks)
         self.inv_etas[:,...] = np.log(pca.noise_variance_)
 
     def initialize_variational_params(self, data, input, mask, tag):
@@ -153,7 +175,6 @@ class StudentsTEmissions(_LinearEmissions):
         
     @params.setter
     def params(self, value):
-        self.inv_etas, self.inv_nus = value[-2]
         super(StudentsTEmissions, self.__class__).params.fset(self, value[:-2])
 
     def permute(self, perm):
@@ -165,7 +186,7 @@ class StudentsTEmissions(_LinearEmissions):
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
-        pca = self._initialize_with_pca(datas)
+        pca = self._initialize_with_pca(datas, masks)
         self.inv_etas[:,...] = np.log(pca.noise_variance_)
 
     def initialize_variational_params(self, data, input, mask, tag):
@@ -212,7 +233,7 @@ class BernoulliEmissions(_LinearEmissions):
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
         logits = [self.link(np.clip(d, .25, .75)) for d in datas]
-        self._initialize_with_pca(datas)
+        self._initialize_with_pca(datas, masks)
 
     def initialize_variational_params(self, data, input, mask, tag):
         logit = self.link(np.clip(data, .25, .75))
@@ -256,7 +277,7 @@ class PoissonEmissions(_LinearEmissions):
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
         logrates = [self.link(np.clip(d, .25, np.inf)) for d in datas]
-        self._initialize_with_pca(datas)
+        self._initialize_with_pca(datas, masks)
 
     def initialize_variational_params(self, data, input, mask, tag):
         lograte = self.link(np.clip(data, .25, np.inf))
@@ -298,7 +319,7 @@ class AutoRegressiveEmissions(_LinearEmissions):
         
     @params.setter
     def params(self, value):
-        self.As, self.inv_etas = value[-2]
+        self.As, self.inv_etas = value[-2:]
         super(AutoRegressiveEmissions, self.__class__).params.fset(self, value[:-2])
 
     def permute(self, perm):
@@ -322,21 +343,23 @@ class AutoRegressiveEmissions(_LinearEmissions):
             self.As[:,n] = lr.coef_[0]
 
         # Compute the residuals of the AR model
-        mus = [np.concatenate([np.zeros(self.N), self.As[0] * d[:-1]]) for d in datas]
+        pad = np.zeros((1,self.N))
+        mus = [np.concatenate((pad, self.As[0] * d[:-1])) for d in datas]
         residuals = [data - mu for data, mu in zip(datas, mus)]
 
         # Run PCA on the residuals to initialize C and d
-        pca = self._initialize_with_pca(residuals)
+        pca = self._initialize_with_pca(residuals, masks)
         self.inv_etas[:,...] = np.log(pca.noise_variance_)
 
     def initialize_variational_params(self, data, input, mask, tag):
         data = interpolate_data(data, mask)
-        residual = np.concatenate((data[0], self.As[0] * data[:-1]))
+        residual = np.concatenate((data[:1], self.As[0] * data[:-1]))
         return self._initialize_variational_params(residual, input, mask, tag)
         
     def log_likelihoods(self, data, input, mask, tag, x):
         mus = self.compute_mus(x)
-        mus[1:] = mus[1:] + self.As[None, :, :] * data[:-1, None, :]
+        pad = np.zeros((1, 1, self.N)) if self.single_subspace else np.zeros((1, self.K, self.N))
+        mus = mus + np.concatenate((pad, self.As[None, :, :] * data[:-1, None, :])) 
         
         etas = np.exp(self.inv_etas)
         lls = -0.5 * np.log(2 * np.pi * etas) - 0.5 * (data[:, None, :] - mus)**2 / etas
@@ -356,6 +379,6 @@ class AutoRegressiveEmissions(_LinearEmissions):
 
     def smooth(self, expected_states, variational_mean, data, input=None, mask=None, tag=None):
         mus = self.compute_mus(variational_mean)
-        mus[1:] += self.As[None, :, :] * data[:, None, :]
+        mus[1:] += self.As[None, :, :] * data[:-1, None, :]
         return mus[:,0,:] if self.single_subspace else np.sum(mus * expected_states, axis=1)
         

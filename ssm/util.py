@@ -16,6 +16,7 @@ def find_permutation(z1, z2):
 
     tmp, perm = linear_sum_assignment(-overlap)
     assert np.all(tmp == np.arange(K)), "All indices should have been matched!"
+    assert len(perm) == K
     return perm
 
 def random_rotation(n, theta=None):
@@ -107,8 +108,12 @@ def interpolate_data(data, mask):
     interp_data = data.copy()
     if np.any(~mask):
         for n in range(N):
-            t_missing = np.arange(T)[~mask[:,n]]
-            t_given = np.arange(T)[mask[:,n]]
-            y_given = data[mask[:,n], n]
-            interp_data[~mask[:,n], n] = np.interp(t_missing, t_given, y_given)
+            if np.sum(mask[:,n]) >= 2:
+                t_missing = np.arange(T)[~mask[:,n]]
+                t_given = np.arange(T)[mask[:,n]]
+                y_given = data[mask[:,n], n]
+                interp_data[~mask[:,n], n] = np.interp(t_missing, t_given, y_given)
+            else:
+                # Can't do much if we don't see anything... just set it to zero
+                interp_data[~mask[:,n], n] = 0
     return interp_data

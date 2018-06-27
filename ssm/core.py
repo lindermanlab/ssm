@@ -392,8 +392,7 @@ class _SwitchingLDS(object):
             variational_params = results
 
         # unpack outputs as necessary
-        variational_params = variational_params[0] if \
-            len(variational_params) == 1 else variational_params
+        variational_params = variational_params[0] if len(variational_params) == 1 else variational_params
         return elbos, variational_params
 
     @ensure_args_are_lists

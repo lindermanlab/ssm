@@ -4,6 +4,7 @@ from warnings import warn
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.misc import logsumexp
+from autograd.scipy.stats import dirichlet
 from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
@@ -96,6 +97,28 @@ class StationaryTransitions(_Transitions):
         expected_joints = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1 in expectations]) + 1e-8
         P = expected_joints / expected_joints.sum(axis=1, keepdims=True)
         self.log_Ps = np.log(P)
+
+
+class StickyTransitions(StationaryTransitions):
+    """
+    Upweight the self transition prior. 
+
+    pi_k ~ Dir(alpha + kappa * e_k)
+    """
+    def __init__(self, K, D, M=0, alpha=1, kappa=100):
+        super(StickyTransitions, self).__init__(K, D, M=M)
+        self.alpha = alpha
+        self.kappa = kappa
+
+    def log_prior(self):
+        K = self.K
+        Ps = np.exp(self.log_Ps - logsumexp(self.log_Ps, axis=1, keepdims=True))
+        
+        lp = 0
+        for k in range(K):
+            alpha = self.alpha * np.ones(K) + self.kappa * (np.arange(K) == k)
+            lp += dirichlet.logpdf(Ps[k], alpha)
+        return lp
     
 
 class InputDrivenTransitions(_Transitions):
@@ -152,18 +175,18 @@ class RecurrentTransitions(InputDrivenTransitions):
 
     @property
     def params(self):
-        return super(_RecurrentHMM, self).params + (self.Rs,)
+        return super(RecurrentTransitions, self).params + (self.Rs,)
     
     @params.setter
     def params(self, value):
         self.Rs = value[-1]
-        super(_RecurrentHMM, self.__class__).params.fset(self, value[:-1])
+        super(RecurrentTransitions, self.__class__).params.fset(self, value[:-1])
 
     def permute(self, perm):
         """
         Permute the discrete latent states.
         """
-        super(_RecurrentHMM, self).permute(perm)
+        super(RecurrentTransitions, self).permute(perm)
         self.Rs = self.Rs[perm]
 
     def log_transition_matrices(self, data, input, mask, tag):
