@@ -50,7 +50,7 @@ class _Observations(object):
             elbo = 0
             for data, input, mask, tag, (expected_states, expected_joints) \
                 in zip(datas, inputs, masks, tags, expectations):
-                lls = self._log_likelihoods(data, input, mask, tag)
+                lls = self.log_likelihoods(data, input, mask, tag)
                 elbo += np.sum(expected_states * lls)
             return elbo
 
