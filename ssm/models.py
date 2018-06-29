@@ -131,6 +131,7 @@ def SLDS(N, K, D, M=0,
     # Make the transition model
     transition_classes = dict(
         standard=StationaryTransitions,
+        stationary=StationaryTransitions,
         sticky=StickyTransitions,
         inputdriven=InputDrivenTransitions,
         recurrent=RecurrentTransitions,
@@ -149,6 +150,7 @@ def SLDS(N, K, D, M=0,
     # Make the dynamics distn
     is_recurrent = (transitions.lower() in ["recurrent", "recurrent_only"])
     dynamics_classes = dict(
+        none=GaussianObservations,
         gaussian=RecurrentAutoRegressiveObservations if is_recurrent else AutoRegressiveObservations,
         t=RecurrentRobustAutoRegressiveObservations if is_recurrent else RobustAutoRegressiveObservations,
         studentst=RecurrentRobustAutoRegressiveObservations if is_recurrent else RobustAutoRegressiveObservations,

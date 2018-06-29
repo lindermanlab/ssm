@@ -100,10 +100,6 @@ def make_nascar_model():
     Rs = np.row_stack((100*w1, 100*w2, 10*w3,10*w4))
     r = np.concatenate((100*b1, 100*b2, 10*b3, 10*b4))
     
-    # emission model
-    C = npr.randn(1, D_obs, D_latent)
-    d = np.zeros((1, D_obs))
-
     true_rslds = SLDS(D_obs, K, D_latent, 
                       transitions="recurrent_only",
                       dynamics="gaussian",
@@ -118,8 +114,6 @@ def make_nascar_model():
     true_rslds.transitions.Rs = Rs
     true_rslds.transitions.r = r
 
-    true_rslds.emissions.Cs = C
-    true_rslds.emissions.ds = d
     true_rslds.emissions.inv_etas = np.log(1e-2) * np.ones((1, D_obs))
     return true_rslds
 
@@ -133,7 +127,7 @@ rslds = SLDS(D_obs, K, D_latent,
              dynamics="gaussian",
              emissions="gaussian",
              single_subspace=True)
-elbos, (xhat, xvar) = rslds.fit(y, num_iters=100)
+elbos, (xhat, xvar) = rslds.fit(y, num_iters=1000)
 zhat = rslds.most_likely_states(xhat, y)
 
 # Plot some results

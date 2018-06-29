@@ -228,10 +228,10 @@ class _SwitchingLDS(object):
         self.emissions.initialize(datas, inputs, masks, tags)
 
         # Get the initialized variational mean for the data
-        xs = [self.emissions.initialize_variational_params(data, input, mask, tag) [0]
+        xs = [self.emissions.initialize_variational_params(data, input, mask, tag)[0]
               for data, input, mask, tag in zip(datas, inputs, masks, tags)]
         xmasks = [np.ones_like(x, dtype=bool) for x in xs]
-        
+
         # Now run a few iterations of EM on a ARHMM with the variational mean
         print("Initializing with an ARHMM using {} steps of EM.".format(num_em_iters))
         arhmm = _HMM(self.K, self.D, self.M, 

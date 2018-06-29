@@ -4,10 +4,11 @@ import warnings
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.special import gammaln
+from autograd.scipy.stats import norm, gamma
 from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
-from ssm.util import random_rotation, ensure_args_are_lists, ensure_args_not_none, interpolate_data
+from ssm.util import random_rotation, ensure_args_are_lists, ensure_args_not_none, interpolate_data, logistic, logit
 
 
 class _Observations(object):
@@ -47,7 +48,7 @@ class _Observations(object):
         
         # expected log joint
         def _expected_log_joint(expectations):
-            elbo = 0
+            elbo = self.log_prior()
             for data, input, mask, tag, (expected_states, expected_joints) \
                 in zip(datas, inputs, masks, tags, expectations):
                 lls = self.log_likelihoods(data, input, mask, tag)
@@ -95,7 +96,7 @@ class GaussianObservations(_Observations):
         self.mus = km.cluster_centers_
         sigmas = np.array([np.var(data[km.labels_ == k], axis=0)
                            for k in range(self.K)])
-        self.inv_sigmas = np.log(sigmas)
+        self.inv_sigmas = np.log(sigmas + 1e-8)
         
     def log_likelihoods(self, data, input, mask, tag):
         mus, sigmas = self.mus, np.exp(self.inv_sigmas)
@@ -154,7 +155,7 @@ class StudentsTObservations(_Observations):
         self.mus = km.cluster_centers_
         sigmas = np.array([np.var(data[km.labels_ == k], axis=0)
                            for k in range(self.K)])
-        self.inv_sigmas = np.log(sigmas)
+        self.inv_sigmas = np.log(sigmas + 1e-8)
         self.inv_nus = np.log(4) * np.ones(self.K)
         
     def log_likelihoods(self, data, input, mask, tag):
@@ -305,7 +306,7 @@ class AutoRegressiveObservations(_Observations):
     @params.setter
     def params(self, value):
         self.As, self.bs, self.Vs, self.inv_sigmas = value
-
+        
     def permute(self, perm):
         self.As = self.As[perm]
         self.bs = self.bs[perm]
@@ -329,8 +330,8 @@ class AutoRegressiveObservations(_Observations):
             
             resid = y - lr.predict(x)
             sigmas = np.var(resid, axis=0)
-            self.inv_sigmas[k] = np.log(sigmas)
-
+            self.inv_sigmas[k] = np.log(sigmas + 1e-8)
+        
     def _compute_mus(self, data, input, mask, tag):
         assert np.all(mask), "ARHMM cannot handle missing data"
 
@@ -375,7 +376,7 @@ class AutoRegressiveObservations(_Observations):
             yhats = lr.predict(xs)
             sqerr = (ys - yhats)**2
             self.inv_sigmas[k] = np.log(np.average(sqerr, weights=weights, axis=0))
-
+        
     def sample_x(self, z, xhist, input=None, tag=None):
         D, As, bs, sigmas = self.D, self.As, self.bs, np.exp(self.inv_sigmas)
         if xhist.shape[0] == 0:
@@ -464,7 +465,9 @@ class _RecurrentAutoRegressiveObservationsMixin(AutoRegressiveObservations):
             
             resid = y - lr.predict(x)
             sigmas = np.var(resid, axis=0)
-            self.inv_sigmas[k] = np.log(sigmas)
+            self.inv_sigmas[k] = np.log(sigmas + 1e-8)
+            assert np.all(np.isfinite(self.inv_sigmas))
+
 
 
 class RecurrentAutoRegressiveObservations(

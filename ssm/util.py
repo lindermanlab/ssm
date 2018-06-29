@@ -3,7 +3,7 @@ import autograd.numpy.random as npr
 
 from scipy.optimize import linear_sum_assignment
 
-def find_permutation(z1, z2):
+def compute_state_overlap(z1, z2):
     assert z1.dtype == int and z2.dtype == int
     assert z1.shape == z2.shape
     assert z1.min() >= 0 and z2.min() >= 0
@@ -13,10 +13,21 @@ def find_permutation(z1, z2):
     for k1 in range(K):
         for k2 in range(K):
             overlap[k1, k2] = np.sum((z1 == k1) & (z2 == k2))
+    return overlap
 
+def find_permutation(z1, z2, K=None):
+    overlap = compute_state_overlap(z1, z2)
+    K_data = overlap.shape[0]
+    
     tmp, perm = linear_sum_assignment(-overlap)
-    assert np.all(tmp == np.arange(K)), "All indices should have been matched!"
-    assert len(perm) == K
+    assert np.all(tmp == np.arange(K_data)), "All indices should have been matched!"
+    assert len(perm) == K_data
+
+    # Check if the overlap matrix is smaller than K
+    # If so, pad as necessary
+    if K is not None and K_data < K:
+        perm = np.concatenate((perm, np.arange(K_data, K)))
+
     return perm
 
 def random_rotation(n, theta=None):
@@ -117,3 +128,21 @@ def interpolate_data(data, mask):
                 # Can't do much if we don't see anything... just set it to zero
                 interp_data[~mask[:,n], n] = 0
     return interp_data
+
+
+def logistic(x):
+    return 1. / (1 + np.exp(-x))
+
+
+def logit(p):
+    return np.log(p / (1 - p))
+
+
+def softplus(x):
+    return np.log(1 + np.exp(x))
+
+
+def inv_softplus(y):
+    return np.log(np.exp(y) - 1)
+
+

@@ -1,7 +1,8 @@
 import autograd.numpy as np
 import autograd.numpy.random as npr
 
-from ssm.util import ensure_args_are_lists, ensure_args_not_none, interpolate_data
+from ssm.util import ensure_args_are_lists, ensure_args_not_none, interpolate_data, \
+    logistic, logit, softplus, inv_softplus
 
 
 # Observation models for SLDS
@@ -57,26 +58,68 @@ class _LinearEmissions(_Emissions):
         super(_LinearEmissions, self).__init__(N, K, D, M=M, single_subspace=single_subspace)
 
         # Initialize linear layer
-        self.Cs = npr.randn(1, N, D) if single_subspace else npr.randn(K, N, D)
+        # Use the rational Cayley transform to parameterize an orthogonal emission matrix
+        assert N > D
+        self._Ms = npr.randn(1, D, D) if single_subspace else npr.randn(K, D, D)
+        self._As = npr.randn(1, N-D, D) if single_subspace else npr.randn(K, N-D, D)
         self.ds = npr.randn(1, N) if single_subspace else npr.randn(K, N)
 
     @property
+    def Cs(self):
+        # See https://pubs.acs.org/doi/pdf/10.1021/acs.jpca.5b02015
+        # for a derivation of the rational Cayley transform.
+        D = self.D
+        T = lambda X: np.swapaxes(X, -1, -2)
+        
+        Bs = 0.5 * (self._Ms - T(self._Ms))    # Bs is skew symmetric
+        Fs = np.matmul(T(self._As), self._As) - Bs
+        trm1 = np.concatenate((np.eye(D) - Fs, 2 * self._As), axis=1)
+        trm2 = np.eye(D) + Fs
+        Cs = T(np.linalg.solve(T(trm2), T(trm1)))
+        assert np.allclose(
+            np.matmul(T(Cs), Cs), 
+            np.tile(np.eye(D)[None, :, :], (Cs.shape[0], 1, 1))
+            )
+        return Cs
+
+    @Cs.setter
+    def Cs(self, value):
+        N, D = self.N, self.D
+        T = lambda X: np.swapaxes(X, -1, -2)
+        
+        # Make sure value is the right shape and orthogonal
+        Keff = 1 if self.single_subspace else self.K
+        assert value.shape == (Keff, N, D)
+        assert np.allclose(
+            np.matmul(T(value), value), 
+            np.tile(np.eye(D)[None, :, :], (Keff, 1, 1))
+            )
+
+        Q1s, Q2s = value[:, :D, :], value[:, D:, :]
+        Fs = T(np.linalg.solve(T(np.eye(D) + Q1s), T(np.eye(D) - Q1s)))
+        # Bs = 0.5 * (T(Fs) - Fs) = 0.5 * (self._Ms - T(self._Ms)) -> _Ms = T(Fs)
+        self._Ms = T(Fs)
+        self._As = 0.5 * np.matmul(Q2s, np.eye(D) + Fs)
+        assert np.allclose(self.Cs, value)
+
+    @property
     def params(self):
-        return self.Cs, self.ds
+        return self._As, self._Ms, self.ds
         
     @params.setter
     def params(self, value):
-        self.Cs, self.ds = value
+        self._As, self._Ms, self.ds = value
 
     def permute(self, perm):
         if not self.single_subspace:
-            self.Cs = self.Cs[perm]
+            self._As = self._As[perm]
+            self._Ms = self._Bs[perm]
             self.ds = self.ds[perm]
 
     def compute_mus(self, x):
         return np.matmul(self.Cs[None, ...], x[:, None, :, None])[:, :, :, 0] + self.ds
 
-    def _initialize_with_pca(self, datas, masks, num_iters=25):
+    def _initialize_with_pca(self, datas, masks, num_iters=20):
         from sklearn.decomposition import PCA
 
         data = np.concatenate(datas)
@@ -100,8 +143,9 @@ class _LinearEmissions(_Emissions):
         else:
             pca = PCA(self.D).fit(data)
 
-        self.Cs[:,...] = pca.components_.T
-        self.ds[:,...] = pca.mean_
+        Keff = 1 if self.single_subspace else self.K
+        self.Cs = np.tile(pca.components_.T[None, :, :], (Keff, 1, 1))
+        self.ds = np.tile(pca.mean_[None, :], (Keff, 1))
             
         return pca
         
@@ -112,6 +156,8 @@ class _LinearEmissions(_Emissions):
         C, d = self.Cs[0], self.ds[0]
         C_pseudoinv = np.linalg.solve(C.T.dot(C), C.T).T
         q_mu = (data-d).dot(C_pseudoinv)
+
+        # Set a low posterior variance
         q_sigma_inv = -4 * np.ones((T, self.D))
         return q_mu, q_sigma_inv
 
@@ -156,7 +202,7 @@ class GaussianEmissions(_LinearEmissions):
         z = np.zeros_like(z, dtype=int) if self.single_subspace else z
         mus = self.compute_mus(x)
         etas = np.exp(self.inv_etas)
-        return mus[:, z, :] + np.sqrt(etas[z]) * npr.randn(T, self.N)
+        return mus[np.arange(T), z, :] + np.sqrt(etas[z]) * npr.randn(T, self.N)
         
     def smooth(self, expected_states, variational_mean, data, input=None, mask=None, tag=None):
         mus = self.compute_mus(variational_mean)
@@ -220,12 +266,12 @@ class BernoulliEmissions(_LinearEmissions):
         super(BernoulliEmissions, self).__init__(N, K, D, M, single_subspace=single_subspace)
 
         mean_functions = dict(
-            logit=lambda x: 1./(1+np.exp(-x))
+            logit=logistic
             )
         self.mean = mean_functions[link]
 
         link_functions = dict(
-            logit=lambda p: np.log(p / (1-p))
+            logit=logit
             )
         self.link = link_functions[link]
         
@@ -263,13 +309,13 @@ class PoissonEmissions(_LinearEmissions):
         
         mean_functions = dict(
             log=lambda x: np.exp(x),
-            softplus=lambda x: np.log(1 + np.exp(x))
+            softplus=softplus
             )
         self.mean = mean_functions[link]
 
         link_functions = dict(
             log=lambda rate: np.log(rate),
-            softplus=lambda rate: np.log(np.exp(rate) - 1)
+            softplus=inv_softplus
             )
         self.link = link_functions[link]
     
@@ -353,7 +399,8 @@ class AutoRegressiveEmissions(_LinearEmissions):
 
     def initialize_variational_params(self, data, input, mask, tag):
         data = interpolate_data(data, mask)
-        residual = np.concatenate((data[:1], self.As[0] * data[:-1]))
+        mu = np.concatenate((np.zeros((1, self.N)), self.As[0] * data[:-1]))
+        residual = data - mu
         return self._initialize_variational_params(residual, input, mask, tag)
         
     def log_likelihoods(self, data, input, mask, tag, x):
