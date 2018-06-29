@@ -162,8 +162,8 @@ def SLDS(N, K, D, M=0,
             format(dynamics, list(dynamics_classes.keys())))
 
     dynamics_distn = \
-        HierarchicalDynamics(dynamics_classes[dynamics], K, D, M, 
-                             tags=hierarchical_dynamics_tags) \
+        HierarchicalObservations(dynamics_classes[dynamics], K, D, M, 
+                                 tags=hierarchical_dynamics_tags) \
         if hierarchical_dynamics_tags is not None \
         else dynamics_classes[dynamics](K, D, M=M)
 

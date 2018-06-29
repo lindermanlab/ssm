@@ -3,6 +3,7 @@ import warnings
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
+from autograd.scipy.stats import norm
 
 from ssm.util import ensure_args_are_lists
 
@@ -12,7 +13,7 @@ class _Hierarchical(object):
     Base class for hierarchical models.  Maintains a parent class and a 
     bunch of children with their own perturbed parameters. 
     """
-    def __init__(self, base_class, *args, tags=(None,), lmbda=1.0, **kwargs):
+    def __init__(self, base_class, *args, tags=(None,), lmbda=0.01, **kwargs):
         # How similar should parent and child params be
         self.lmbda = lmbda
 
@@ -57,10 +58,10 @@ class _Hierarchical(object):
     def log_prior(self):
         lp = self.parent.log_prior()
 
-        # Gaussian likelihood on each child param given parent param
+        # # Gaussian likelihood on each child param given parent param
         for tag in self.tags:
             for pprm, cprm in zip(self.parent.params, self.children[tag].params):
-                lp += -0.5 * np.sum(np.log(2 * np.pi * self.lmbda) + (cprm - pprm)**2 / self.lmbda)
+                lp = lp + np.sum(norm.logpdf(cprm, pprm, self.lmbda))
         return lp
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
@@ -85,7 +86,6 @@ class _Hierarchical(object):
         for i in range(len(self.parent.params)):
             avg_params += (np.mean([self.children[tag].params[i] for tag in self.tags], axis=0),)
         self.parent.params = avg_params
-
 
 
 class HierarchicalInitialStateDistribution(_Hierarchical):
