@@ -176,7 +176,7 @@ class _HMM(object):
             lls.append(self.log_probability(datas, inputs, masks, tags))
 
             if verbose:
-                print("Iteration {}.  LL: {}".format(itr, lls[-1]))
+                print("Iteration {}.  LL: {:.1f}".format(itr, lls[-1]))
 
         return lls
 
@@ -278,7 +278,7 @@ class _SwitchingLDS(object):
         # Sample discrete and continuous latent states
         pi0 = np.exp(self.init_state_distn.log_initial_state_distn(x, input, mask, tag))
         z[0] = npr.choice(self.K, p=pi0)
-        x[0] = self.dynamics.sample_x(z[0], x[:0])
+        x[0] = self.dynamics.sample_x(z[0], x[:0], tag=tag)
 
         for t in range(1, T):
             Pt = np.exp(self.transitions.log_transition_matrices(x[t-1:t+1], input[t-1:t+1], mask=mask[t-1:t+1], tag=tag))[0]
@@ -308,7 +308,7 @@ class _SwitchingLDS(object):
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
-        Ez, _ = self.expected_states(variational_mean, data, input, mask)
+        Ez, _ = self.expected_states(variational_mean, data, input, mask, tag)
         return self.emissions.smooth(Ez, variational_mean, data, input, tag)
 
     @ensure_args_are_lists

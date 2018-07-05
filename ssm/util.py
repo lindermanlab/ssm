@@ -1,32 +1,61 @@
 import autograd.numpy as np
 import autograd.numpy.random as npr
+from autograd.misc.optimizers import unflatten_optimizer
 
 from scipy.optimize import linear_sum_assignment
 
-def compute_state_overlap(z1, z2):
+@unflatten_optimizer
+def adam_with_convergence_check(grad, x, callback=None, 
+    step_size=0.001, b1=0.9, b2=0.999, eps=10**-8, tol=1e-2,
+    ):
+    """Adam as described in http://arxiv.org/pdf/1412.6980.pdf.
+    It's basically RMSprop with momentum and some correction terms."""
+    m = np.zeros(len(x))
+    v = np.zeros(len(x))
+    for i in range(num_iters):
+        g = grad(x, i)
+        if callback: 
+            callback(x, i, g)
+
+        m = (1 - b1) * g      + b1 * m  # First  moment estimate.
+        v = (1 - b2) * (g**2) + b2 * v  # Second moment estimate.
+        mhat = m / (1 - b1**(i + 1))    # Bias correction.
+        vhat = v / (1 - b2**(i + 1))
+        dx = -step_size*mhat/(np.sqrt(vhat) + eps)
+        x = x + dx
+
+        # check for convergence
+        if np.mean(abs(dx)) < tol:
+            break 
+
+    return x
+
+def compute_state_overlap(z1, z2, K1=None, K2=None):
     assert z1.dtype == int and z2.dtype == int
     assert z1.shape == z2.shape
     assert z1.min() >= 0 and z2.min() >= 0
     
-    K = max(z1.max(), z2.max()) + 1
-    overlap = np.zeros((K, K))
-    for k1 in range(K):
-        for k2 in range(K):
+    K1 = z1.max() + 1 if K1 is None else K1
+    K2 = z2.max() + 1 if K2 is None else K2
+
+    overlap = np.zeros((K1, K2))
+    for k1 in range(K1):
+        for k2 in range(K2):
             overlap[k1, k2] = np.sum((z1 == k1) & (z2 == k2))
     return overlap
 
-def find_permutation(z1, z2, K=None):
-    overlap = compute_state_overlap(z1, z2)
-    K_data = overlap.shape[0]
+def find_permutation(z1, z2, K1=None, K2=None):
+    overlap = compute_state_overlap(z1, z2, K1=K1, K2=K2)
+    K1, K2 = overlap.shape
+    assert K1 <= K2, "Can only find permutation from more states to fewer"
     
     tmp, perm = linear_sum_assignment(-overlap)
-    assert np.all(tmp == np.arange(K_data)), "All indices should have been matched!"
-    assert len(perm) == K_data
-
-    # Check if the overlap matrix is smaller than K
-    # If so, pad as necessary
-    if K is not None and K_data < K:
-        perm = np.concatenate((perm, np.arange(K_data, K)))
+    assert np.all(tmp == np.arange(K1)), "All indices should have been matched!"
+    
+    # Pad permutation if K1 < K2
+    if K1 < K2:
+        unused = np.array(list(set(np.arange(K2)) - set(perm)))
+        perm = np.concatenate((perm, unused))
 
     return perm
 
@@ -111,23 +140,6 @@ def ensure_slds_args_not_none(f):
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return f(self, variational_mean, data, input=input, mask=mask, tag=tag, **kwargs)
     return wrapper
-
-
-def interpolate_data(data, mask):
-    assert data.shape == mask.shape and mask.dtype == bool
-    T, N = data.shape
-    interp_data = data.copy()
-    if np.any(~mask):
-        for n in range(N):
-            if np.sum(mask[:,n]) >= 2:
-                t_missing = np.arange(T)[~mask[:,n]]
-                t_given = np.arange(T)[mask[:,n]]
-                y_given = data[mask[:,n], n]
-                interp_data[~mask[:,n], n] = np.interp(t_missing, t_given, y_given)
-            else:
-                # Can't do much if we don't see anything... just set it to zero
-                interp_data[~mask[:,n], n] = 0
-    return interp_data
 
 
 def logistic(x):

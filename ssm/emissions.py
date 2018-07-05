@@ -1,8 +1,8 @@
 import autograd.numpy as np
 import autograd.numpy.random as npr
 
-from ssm.util import ensure_args_are_lists, ensure_args_not_none, interpolate_data, \
-    logistic, logit, softplus, inv_softplus
+from ssm.util import ensure_args_are_lists, ensure_args_not_none, logistic, logit, softplus, inv_softplus
+from ssm.preprocessing import interpolate_data, pca_with_imputation
 
 
 # Observation models for SLDS
@@ -119,30 +119,8 @@ class _LinearEmissions(_Emissions):
     def compute_mus(self, x):
         return np.matmul(self.Cs[None, ...], x[:, None, :, None])[:, :, :, 0] + self.ds
 
-    def _initialize_with_pca(self, datas, masks, num_iters=20):
-        from sklearn.decomposition import PCA
-
-        data = np.concatenate(datas)
-        mask = np.concatenate(masks)
-        
-        if np.any(~mask):
-            print("Running PCA with missing data imputation to initialize emissions.")
-            # Fill in missing data with mean to start
-            fulldata = data.copy()
-            for n in range(self.N):
-                fulldata[~mask[:,n], n] = fulldata[mask[:,n], n].mean()
-
-            for itr in range(num_iters):
-                # Run PCA on imputed data
-                pca = PCA(self.D)
-                x = pca.fit_transform(fulldata)
-                
-                # Fill in missing data with PCA predictions
-                pred = pca.inverse_transform(x)
-                fulldata[~mask] = pred[~mask]
-        else:
-            pca = PCA(self.D).fit(data)
-
+    def _initialize_with_pca(self, datas, masks, num_iters=25):
+        pca, xs = pca_with_imputation(self.D, datas, masks, num_iters=num_iters)
         Keff = 1 if self.single_subspace else self.K
         self.Cs = np.tile(pca.components_.T[None, :, :], (Keff, 1, 1))
         self.ds = np.tile(pca.mean_[None, :], (Keff, 1))
@@ -153,9 +131,15 @@ class _LinearEmissions(_Emissions):
         # y = Cx + d + noise; C orthogonal.  xhat = (C^T C)^{-1} C^T (y-d)
         data = interpolate_data(data, mask)
         T = data.shape[0]
+        
         C, d = self.Cs[0], self.ds[0]
         C_pseudoinv = np.linalg.solve(C.T.dot(C), C.T).T
-        q_mu = (data-d).dot(C_pseudoinv)
+        
+        # We would like to find the PCA coordinates in the face of missing data
+        # To do so, alternate between running PCA and imputing the missing entries
+        for itr in range(25):
+            q_mu = (data-d).dot(C_pseudoinv)
+            data[:, ~mask[0]] = (q_mu.dot(C.T) + d)[:, ~mask[0]]
 
         # Set a low posterior variance
         q_sigma_inv = -4 * np.ones((T, self.D))
@@ -231,7 +215,7 @@ class StudentsTEmissions(_LinearEmissions):
         
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
-        datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
+        # datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
         pca = self._initialize_with_pca(datas, masks)
         self.inv_etas[:,...] = np.log(pca.noise_variance_)
 

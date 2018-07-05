@@ -4,6 +4,8 @@ import warnings
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.stats import norm
+from autograd.misc.optimizers import sgd, adam
+from autograd import grad
 
 from ssm.util import ensure_args_are_lists
 
@@ -14,13 +16,13 @@ class _Hierarchical(object):
     bunch of children with their own perturbed parameters. 
     """
     def __init__(self, base_class, *args, tags=(None,), lmbda=0.01, **kwargs):
-        # How similar should parent and child params be
+        # Variance of child params around parent params
         self.lmbda = lmbda
 
-        # Top-level AR parameters (parent mean)
+        # Top-level parameters (parent)
         self.parent = base_class(*args, **kwargs)
 
-        # Make AR models for each tag
+        # Make models for each tag
         self.tags = tags
         self.children = dict()
         for tag in tags:
@@ -48,44 +50,73 @@ class _Hierarchical(object):
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         self.parent.initialize(datas, inputs=inputs, masks=masks, tags=tags)
-
         for tag in self.tags:
-            cprm = copy.deepcopy(self.parent.params)
-            for prm in cprm:
-                prm += np.sqrt(self.lmbda) + npr.randn(*prm.shape)
-            self.children[tag].params = cprm
+            self.children[tag].params = copy.deepcopy(self.parent.params)
 
     def log_prior(self):
         lp = self.parent.log_prior()
 
-        # # Gaussian likelihood on each child param given parent param
+        # Gaussian likelihood on each child param given parent param
         for tag in self.tags:
             for pprm, cprm in zip(self.parent.params, self.children[tag].params):
-                lp = lp + np.sum(norm.logpdf(cprm, pprm, self.lmbda))
+                lp += np.sum(norm.logpdf(cprm, pprm, self.lmbda))
         return lp
 
-    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        warnings.warn("m_step for does not include the global prior. "
-                      "We still need to implement this feature.")
+    def m_step(self, expectations, datas, inputs, masks, tags, optimizer="adam", num_iters=25, **kwargs):
+        # for tag in tags:
+        #     if not tag in self.tags:
+        #         raise Exception("Invalid tag: ".format(tag))
+
+        # warnings.warn("m_step for does not include the global prior. "
+        #               "We still need to implement this feature.")
         
-        for tag in tags:
-            if not tag in self.tags:
-                raise Exception("Invalid tag: ".format(tag))
+        # for tag in self.tags:
+        #     self.children[tag].m_step(
+        #         [e for e,t in zip(expectations, tags) if t == tag],
+        #         [d for d,t in zip(datas, tags) if t == tag],
+        #         [i for i,t in zip(inputs, tags) if t == tag],
+        #         [m for m,t in zip(masks, tags) if t == tag],
+        #         [t for t in tags if t == tag],
+        #         **kwargs)
 
-        for tag in self.tags:
-            self.children[tag].m_step(
-                [e for e,t in zip(expectations, tags) if t == tag],
-                [d for d,t in zip(datas, tags) if t == tag],
-                [i for i,t in zip(inputs, tags) if t == tag],
-                [m for m,t in zip(masks, tags) if t == tag],
-                [t for t in tags if t == tag],
-                **kwargs)
+        # # Set the parent params to the average of the child params
+        # avg_params = ()
+        # for i in range(len(self.parent.params)):
+        #     avg_params += (np.mean([self.children[tag].params[i] for tag in self.tags], axis=0),)
+        # self.parent.params = avg_params
 
-        # Set the parent params to the average of the child params
-        avg_params = ()
-        for i in range(len(self.parent.params)):
-            avg_params += (np.mean([self.children[tag].params[i] for tag in self.tags], axis=0),)
-        self.parent.params = avg_params
+        # Optimize parent and child parameters at the same time with SGD
+        optimizer = dict(sgd=sgd, adam=adam)[optimizer]
+        
+        # expected log joint
+        def _expected_log_joint(expectations):
+            elbo = self.log_prior()
+            for data, input, mask, tag, (expected_states, expected_joints) \
+                in zip(datas, inputs, masks, tags, expectations):
+
+                if hasattr(self.children[tag], 'log_initial_state_distn'):
+                    log_pi0 = self.children[tag].log_initial_state_distn(data, input, mask, tag)
+                    elbo += np.sum(expected_states[0] * log_pi0)
+                
+                if hasattr(self.children[tag], 'log_transition_matrices'):
+                    log_Ps = self.children[tag].log_transition_matrices(data, input, mask, tag)
+                    elbo += np.sum(expected_joints * log_Ps)
+
+                if hasattr(self.children[tag], 'log_likelihoods'):
+                    lls = self.children[tag].log_likelihoods(data, input, mask, tag)
+                    elbo += np.sum(expected_states * lls)
+
+            return elbo
+
+        # define optimization target
+        T = sum([data.shape[0] for data in datas])
+        def _objective(params, itr):
+            self.params = params
+            obj = _expected_log_joint(expectations)
+            return -obj / T
+
+        self.params = \
+            optimizer(grad(_objective), self.params, num_iters=num_iters, **kwargs)
 
 
 class HierarchicalInitialStateDistribution(_Hierarchical):

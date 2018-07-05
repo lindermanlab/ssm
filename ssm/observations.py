@@ -8,7 +8,8 @@ from autograd.scipy.stats import norm, gamma
 from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
-from ssm.util import random_rotation, ensure_args_are_lists, ensure_args_not_none, interpolate_data, logistic, logit
+from ssm.util import random_rotation, ensure_args_are_lists, ensure_args_not_none, logistic, logit
+from ssm.preprocessing import interpolate_data
 
 
 class _Observations(object):
@@ -286,7 +287,7 @@ class PoissonObservations(_Observations):
 
 
 class AutoRegressiveObservations(_Observations):
-    def __init__(self, K, D, M=0):
+    def __init__(self, K, D, M=0, lags=1):
         super(AutoRegressiveObservations, self).__init__(K, D, M)
         
         # Distribution over initial point
@@ -294,7 +295,11 @@ class AutoRegressiveObservations(_Observations):
         self.inv_sigma_init = np.zeros(D)
         
         # AR parameters
-        self.As = .95 * np.array([random_rotation(D) for _ in range(K)])
+        assert lags > 0 
+        self.lags = lags
+        self.As = .95 * np.array([
+                np.column_stack([random_rotation(D), np.zeros((D, (lags-1) * D))]) 
+            for _ in range(K)])
         self.bs = npr.randn(K, D)
         self.Vs = npr.randn(K, D, M)
         self.inv_sigmas = -4 + npr.randn(K, D)
@@ -321,11 +326,12 @@ class AutoRegressiveObservations(_Observations):
         T = data.shape[0]
 
         for k in range(self.K):
-            ts = npr.choice(T-1, replace=False, size=T//2)
-            x, y = np.column_stack((data[ts], input[ts])), data[ts+1]
+            ts = npr.choice(T-self.lags, replace=False, size=T//self.K)
+            x = np.column_stack([data[ts + l] for l in range(self.lags)] + [input[ts]])
+            y = data[ts+self.lags]
             lr = LinearRegression().fit(x, y)
-            self.As[k] = lr.coef_[:, :self.D]
-            self.Vs[k] = lr.coef_[:, self.D:]
+            self.As[k] = lr.coef_[:, :self.D * self.lags]
+            self.Vs[k] = lr.coef_[:, self.D * self.lags:]
             self.bs[k] = lr.intercept_
             
             resid = y - lr.predict(x)
@@ -334,16 +340,24 @@ class AutoRegressiveObservations(_Observations):
         
     def _compute_mus(self, data, input, mask, tag):
         assert np.all(mask), "ARHMM cannot handle missing data"
-
+        T, D = data.shape
         As, bs, Vs = self.As, self.bs, self.Vs
 
-        # linear function of preceding data, current input, and bias
-        mus = np.matmul(As[None, ...], data[:-1, None, :, None])[:, :, :, 0]
-        mus = mus + np.matmul(Vs[None, ...], input[1:, None, :, None])[:, :, :, 0]
+        # Instantaneous inputs
+        mus = np.matmul(Vs[None, ...], input[self.lags:, None, :, None])[:, :, :, 0]
+
+        # Lagged data
+        for l in range(self.lags):
+            mus = mus + np.matmul(As[None, :, :, l*D:(l+1)*D], 
+                                  data[self.lags-l-1:-l-1, None, :, None])[:, :, :, 0]
+
+        # Bias
         mus = mus + bs
 
         # Pad with the initial condition
-        mus = np.concatenate((self.mu_init * np.ones((1, self.K, self.D)), mus))
+        mus = np.concatenate((self.mu_init * np.ones((self.lags, self.K, self.D)), mus))
+
+        assert mus.shape == (T, self.K, D)
         return mus
 
     def log_likelihoods(self, data, input, mask, tag):
@@ -360,9 +374,9 @@ class AutoRegressiveObservations(_Observations):
         for k in range(self.K):
             xs, ys, weights = [], [], []
             for (Ez, _), data, input in zip(expectations, datas, inputs):
-                xs.append(np.hstack((data[:-1], input[:-1])))
-                ys.append(data[1:])
-                weights.append(Ez[1:,k])
+                xs.append(np.hstack([data[self.lags-l-1:-l-1] for l in range(self.lags)] + [input[self.lags:]]))
+                ys.append(data[self.lags:])
+                weights.append(Ez[self.lags:,k])
             xs = np.concatenate(xs)
             ys = np.concatenate(ys)
             weights = np.concatenate(weights)
@@ -370,7 +384,7 @@ class AutoRegressiveObservations(_Observations):
             # Fit a weighted linear regression
             lr = LinearRegression()
             lr.fit(xs, ys, sample_weight=weights)
-            self.As[k], self.Vs[k], self.bs[k] = lr.coef_[:,:D], lr.coef_[:,D:], lr.intercept_
+            self.As[k], self.Vs[k], self.bs[k] = lr.coef_[:,:D*self.lags], lr.coef_[:,D*self.lags:], lr.intercept_
 
             # Update the variances
             yhats = lr.predict(xs)
@@ -379,12 +393,15 @@ class AutoRegressiveObservations(_Observations):
         
     def sample_x(self, z, xhist, input=None, tag=None):
         D, As, bs, sigmas = self.D, self.As, self.bs, np.exp(self.inv_sigmas)
-        if xhist.shape[0] == 0:
+        if xhist.shape[0] < self.lags:
             mu_init = self.mu_init
             sigma_init = np.exp(self.inv_sigma_init)
             return mu_init + np.sqrt(sigma_init) * npr.randn(D)
         else:
-            return As[z].dot(xhist[-1]) + bs[z] + np.sqrt(sigmas[z]) * npr.randn(D)
+            mu = bs[z]
+            for l in range(self.lags):
+                mu += As[z][:,l*D:(l+1)*D].dot(xhist[-l-1])
+            return np.sqrt(sigmas[z]) * npr.randn(D)
 
     def smooth(self, expectations, data, input, tag):
         """
@@ -399,8 +416,8 @@ class AutoRegressiveObservations(_Observations):
 
 # Robust autoregressive models with Student's t noise
 class RobustAutoRegressiveObservations(AutoRegressiveObservations):
-    def __init__(self, K, D, M=0):
-        super(RobustAutoRegressiveObservations, self).__init__(K, D, M)
+    def __init__(self, K, D, M=0, lags=1):
+        super(RobustAutoRegressiveObservations, self).__init__(K, D, M=M, lags=lags)
         self.inv_nus = np.log(4) * np.ones(K)
 
     @property
@@ -429,13 +446,17 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
 
     def sample_x(self, z, xhist, input=None, tag=None):
         D, As, bs, sigmas, nus = self.D, self.As, self.bs, np.exp(self.inv_sigmas), np.exp(self.inv_nus)
-        if xhist.shape[0] == 0:
+        if xhist.shape[0] < self.lags:
             mu_init = self.mu_init
             sigma_init = np.exp(self.inv_sigma_init)
             return mu_init + np.sqrt(sigma_init) * npr.randn(D)
         else:
+            mu = bs[z]
+            for l in range(self.lags):
+                mu += As[z][:,l*D:(l+1)*D].dot(xhist[-l-1])
+
             tau = npr.gamma(nus[z] / 2.0, 2.0 / nus[z])
-            return As[z].dot(xhist[-1]) + bs[z] + np.sqrt(sigmas[z] / tau) * npr.randn(D)
+            return mu + np.sqrt(sigmas[z] / tau) * npr.randn(D)
 
 
 class _RecurrentAutoRegressiveObservationsMixin(AutoRegressiveObservations):
@@ -444,23 +465,26 @@ class _RecurrentAutoRegressiveObservationsMixin(AutoRegressiveObservations):
     """
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         data = np.concatenate(datas) 
+        ddata = np.concatenate([np.gradient(d, axis=0) for d in datas])
+        ddata = (ddata - ddata.mean(0)) / ddata.std(0)
         input = np.concatenate(inputs)
         T = data.shape[0]
     
+        # Cluster the data and its gradient before initializing
         from sklearn.cluster import KMeans
         km = KMeans(self.K)
-        km.fit(data)
-        z = km.labels_[:-1]
+        km.fit(np.column_stack((data, ddata)))
+        z = km.labels_[:-self.lags]
 
-        # Cluster the data before initializing
         from sklearn.linear_model import LinearRegression
         
         for k in range(self.K):
-            ts = np.where(z == k)[0]
-            x, y = np.column_stack((data[ts], input[ts])), data[ts+1]
+            ts = np.where(z == k)[0]    
+            x = np.column_stack([data[ts + l] for l in range(self.lags)] + [input[ts]])
+            y = data[ts+self.lags]
             lr = LinearRegression().fit(x, y)
-            self.As[k] = lr.coef_[:, :self.D]
-            self.Vs[k] = lr.coef_[:, self.D:]
+            self.As[k] = lr.coef_[:, :self.D * self.lags]
+            self.Vs[k] = lr.coef_[:, self.D * self.lags:]
             self.bs[k] = lr.intercept_
             
             resid = y - lr.predict(x)
