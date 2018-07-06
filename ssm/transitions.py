@@ -8,7 +8,8 @@ from autograd.scipy.stats import dirichlet
 from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
-from ssm.util import ensure_args_are_lists, ensure_args_not_none, ensure_elbo_args_are_lists
+from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
+    ensure_elbo_args_are_lists, adam_with_convergence_check
 
 
 class _Transitions(object):
@@ -39,7 +40,7 @@ class _Transitions(object):
         """
         If M-step cannot be done in closed form for the transitions, default to SGD.
         """
-        optimizer = dict(sgd=sgd, adam=adam)[optimizer]
+        optimizer = dict(sgd=sgd, adam=adam, adam_with_convergence_check=adam_with_convergence_check)[optimizer]
         
         # expected log joint
         def _expected_log_joint(expectations):

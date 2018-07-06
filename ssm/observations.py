@@ -8,7 +8,8 @@ from autograd.scipy.stats import norm, gamma
 from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
-from ssm.util import random_rotation, ensure_args_are_lists, ensure_args_not_none, logistic, logit
+from ssm.util import random_rotation, ensure_args_are_lists, ensure_args_not_none, \
+    logistic, logit, adam_with_convergence_check
 from ssm.preprocessing import interpolate_data
 
 
@@ -45,7 +46,7 @@ class _Observations(object):
         """
         If M-step cannot be done in closed form for the transitions, default to SGD.
         """
-        optimizer = dict(sgd=sgd, adam=adam)[optimizer]
+        optimizer = dict(sgd=sgd, adam=adam, adam_with_convergence_check=adam_with_convergence_check)[optimizer]
         
         # expected log joint
         def _expected_log_joint(expectations):
@@ -326,7 +327,7 @@ class AutoRegressiveObservations(_Observations):
         T = data.shape[0]
 
         for k in range(self.K):
-            ts = npr.choice(T-self.lags, replace=False, size=T//self.K)
+            ts = npr.choice(T-self.lags, replace=False, size=(T-self.lags)//self.K)
             x = np.column_stack([data[ts + l] for l in range(self.lags)] + [input[ts]])
             y = data[ts+self.lags]
             lr = LinearRegression().fit(x, y)
@@ -473,7 +474,8 @@ class _RecurrentAutoRegressiveObservationsMixin(AutoRegressiveObservations):
         # Cluster the data and its gradient before initializing
         from sklearn.cluster import KMeans
         km = KMeans(self.K)
-        km.fit(np.column_stack((data, ddata)))
+        # km.fit(np.column_stack((data, ddata)))
+        km.fit(data)
         z = km.labels_[:-self.lags]
 
         from sklearn.linear_model import LinearRegression

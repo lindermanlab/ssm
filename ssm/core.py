@@ -9,7 +9,8 @@ from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
 from ssm.primitives import hmm_normalizer, hmm_expected_states
-from ssm.util import ensure_args_are_lists, ensure_args_not_none, ensure_slds_args_not_none, ensure_elbo_args_are_lists
+from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
+    ensure_slds_args_not_none, ensure_elbo_args_are_lists, adam_with_convergence_check
 
 class _HMM(object):
     """
@@ -148,7 +149,7 @@ class _HMM(object):
             if itr % print_intvl == 0:
                 print("Iteration {}.  LL: {}".format(itr, lls[-1]))
         
-        optimizers = dict(sgd=sgd, adam=adam)
+        optimizers = dict(sgd=sgd, adam=adam, adam_with_convergence_check=adam_with_convergence_check)
         self.params = \
             optimizers[optimizer](grad(_objective), self.params, callback=_print_progress, **kwargs)
 
@@ -376,9 +377,9 @@ class _SwitchingLDS(object):
         def _print_progress(params, itr, g):
             elbos.append(-_objective(params, itr) * T)
             if itr % print_intvl == 0:
-                print("Iteration {}.  ELBO: {}".format(itr, elbos[-1]))
+                print("Iteration {}.  ELBO: {:.1f}".format(itr, elbos[-1]))
         
-        optimizers = dict(sgd=sgd, adam=adam)
+        optimizers = dict(sgd=sgd, adam=adam, adam_with_convergence_check=adam_with_convergence_check)
         initial_params = (self.params, variational_params) if learning else variational_params
         results = \
             optimizers[optimizer](grad(_objective), 

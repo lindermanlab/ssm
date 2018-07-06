@@ -1,3 +1,5 @@
+from warnings import warn
+
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.misc.optimizers import unflatten_optimizer
@@ -5,14 +7,15 @@ from autograd.misc.optimizers import unflatten_optimizer
 from scipy.optimize import linear_sum_assignment
 
 @unflatten_optimizer
-def adam_with_convergence_check(grad, x, callback=None, 
-    step_size=0.001, b1=0.9, b2=0.999, eps=10**-8, tol=1e-2,
+def adam_with_convergence_check(grad, x, callback=None, max_iters=10000, 
+    step_size=0.001, b1=0.9, b2=0.999, eps=10**-8, tol=1e-6,
     ):
     """Adam as described in http://arxiv.org/pdf/1412.6980.pdf.
     It's basically RMSprop with momentum and some correction terms."""
+    converged = False
     m = np.zeros(len(x))
     v = np.zeros(len(x))
-    for i in range(num_iters):
+    for i in range(max_iters):
         g = grad(x, i)
         if callback: 
             callback(x, i, g)
@@ -26,7 +29,11 @@ def adam_with_convergence_check(grad, x, callback=None,
 
         # check for convergence
         if np.mean(abs(dx)) < tol:
+            converged = True
             break 
+
+    if not converged:
+        warn("Adam failed to converge in {} iterations.".format(max_iters))
 
     return x
 

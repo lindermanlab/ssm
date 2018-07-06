@@ -63,27 +63,9 @@ class _Hierarchical(object):
         return lp
 
     def m_step(self, expectations, datas, inputs, masks, tags, optimizer="adam", num_iters=25, **kwargs):
-        # for tag in tags:
-        #     if not tag in self.tags:
-        #         raise Exception("Invalid tag: ".format(tag))
-
-        # warnings.warn("m_step for does not include the global prior. "
-        #               "We still need to implement this feature.")
-        
-        # for tag in self.tags:
-        #     self.children[tag].m_step(
-        #         [e for e,t in zip(expectations, tags) if t == tag],
-        #         [d for d,t in zip(datas, tags) if t == tag],
-        #         [i for i,t in zip(inputs, tags) if t == tag],
-        #         [m for m,t in zip(masks, tags) if t == tag],
-        #         [t for t in tags if t == tag],
-        #         **kwargs)
-
-        # # Set the parent params to the average of the child params
-        # avg_params = ()
-        # for i in range(len(self.parent.params)):
-        #     avg_params += (np.mean([self.children[tag].params[i] for tag in self.tags], axis=0),)
-        # self.parent.params = avg_params
+        for tag in tags:
+            if not tag in self.tags:
+                raise Exception("Invalid tag: ".format(tag))
 
         # Optimize parent and child parameters at the same time with SGD
         optimizer = dict(sgd=sgd, adam=adam)[optimizer]

@@ -214,8 +214,10 @@ def SLDS(N, K, D, M=0,
 
 def LDS(N, D, M=0,
         dynamics="gaussian",
+        dynamics_kwargs=None,
         hierarchical_dynamics_tags=None,
         emissions="gaussian",
+        emission_kwargs=None,
         hierarchical_emission_tags=None,
         **kwargs):
     """
@@ -229,7 +231,6 @@ def LDS(N, D, M=0,
     :param robust_dynamics: if true, continuous latent states have Student's t noise.
     """
     # Make the dynamics distn
-    is_recurrent = (transitions.lower() in ["recurrent", "recurrent_only"])
     dynamics_classes = dict(
         gaussian=AutoRegressiveObservations,
         t=RobustAutoRegressiveObservations,
@@ -237,19 +238,27 @@ def LDS(N, D, M=0,
         )
 
     dynamics = dynamics.lower()
-    if dynamics not in dynamic_classes:
+    if dynamics not in dynamics_classes:
         raise Exception("Invalid dynamics model: {}. Must be one of {}".
             format(dynamics, list(dynamic_classes.keys())))
 
+    dynamics_kwargs = dynamics_kwargs or {}
     dynamics_distn = \
         HierarchicalDynamics(dynamics_classes[dynamics], 1, D, M, 
-                             tags=hierarchical_dynamics_tags) \
+                             tags=hierarchical_dynamics_tags,
+                             **dynamics_kwargs) \
         if hierarchical_dynamics_tags is not None \
-        else dynamics_classes[dynamics](1, D, M=M)
+        else dynamics_classes[dynamics](1, D, M=M, **dynamics_kwargs)
 
     # Make the emission distn    
     emission_classes = dict(
-        gaussian=GaussianEmissions
+        gaussian=GaussianEmissions,
+        studentst=StudentsTEmissions,
+        t=StudentsTEmissions,
+        poisson=PoissonEmissions,
+        bernoulli=BernoulliEmissions,
+        ar=AutoRegressiveEmissions,
+        autoregressive=AutoRegressiveEmissions
         )
 
     emissions = emissions.lower()
@@ -257,11 +266,13 @@ def LDS(N, D, M=0,
         raise Exception("Invalid emission model: {}. Must be one of {}".
             format(emissions, list(emission_classes.keys())))
 
+    emission_kwargs = emission_kwargs or {}
     emission_distn = \
         HierarchicalEmissions(emission_classes[emissions], N, 1, D, M, 
-                              tags=hierarchical_emission_tags) \
-        if hierarchical_emissions is not None \
-        else emission_classes[emissions](N, 1, D, M=M)
+                              tags=hierarchical_emission_tags,
+                              **emission_kwargs) \
+        if hierarchical_emission_tags is not None \
+        else emission_classes[emissions](N, 1, D, M=M, **emission_kwargs)
 
 
     # Make the HMM
