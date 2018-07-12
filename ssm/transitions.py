@@ -238,3 +238,48 @@ class RecurrentOnlyTransitions(_Transitions):
         log_Ps = log_Ps + self.r                                       # bias
         log_Ps = np.tile(log_Ps, (1, self.K, 1))                       # expand
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)       # normalize
+
+
+# Allow general nonlinear emission models with neural networks
+class _NeuralNetworkRecurrentTransitions(_Transitions):
+    def __init__(self, K, D, M=0, hidden_layer_sizes=(50,)):
+        super(_NeuralNetworkRecurrentTransitions, self).__init__(K, D, M=M, single_subspace=True)
+
+        # Baseline transition probabilities
+        Ps = .95 * np.eye(K) + .05 * npr.rand(K, K)
+        Ps /= Ps.sum(axis=1, keepdims=True)
+        self.log_Ps = np.log(Ps)
+
+        # Initialize the NN weights
+        assert N > D
+        layer_sizes = (D + M,) + hidden_layer_sizes + (K,)
+        self.weights = [npr.randn(m, n) for m, n in zip(layer_sizes[:-1], layer_sizes[1:])]
+        self.biases = [npr.randn(n) for n in layer_sizes[1:]]
+
+    @property
+    def params(self):
+        return self.log_Ps, self.weights, self.biases
+        
+    @params.setter
+    def params(self, value):
+        self.log_Ps, self.weights, self.biases = value
+
+    def permute(self, perm):
+        self.log_Ps = self.log_Ps[np.ix_(perm, perm)]
+        self.weights[-1] = self.weights[-1][:,perm]
+        self.biases[-1] = self.biases[-1][perm]
+
+    def log_transition_matrices(self, data, input, mask, tag):
+        # Pass the data and inputs through the neural network 
+        x = np.hstack((data[:-1], input[1:]))
+        for W, b in zip(self.weights, self.biases):
+            y = np.dot(x, W) + b
+            x = np.tanh(y)
+        
+        # Add the baseline transition biases
+        log_Ps = self.log_Ps[None, :, :] + y[:, None, :]
+
+        # Normalize
+        return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
+
+

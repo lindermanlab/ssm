@@ -419,7 +419,7 @@ class _NeuralNetworkEmissions(_Emissions):
     def __init__(self, N, K, D, M=0, hidden_layer_sizes=(50,)):
         super(_NeuralNetworkEmissions, self).__init__(N, K, D, M=M, single_subspace=True)
 
-        # Use the rational Cayley transform to parameterize an orthogonal emission matrix
+        # Initialize the neural network weights
         assert N > D
         layer_sizes = (D,) + hidden_layer_sizes + (N,)
         self.weights = [npr.randn(m, n) for m, n in zip(layer_sizes[:-1], layer_sizes[1:])]
