@@ -413,3 +413,70 @@ class AutoRegressiveEmissions(_LinearEmissions):
         mus[1:] += self.As[None, :, :] * data[:-1, None, :]
         return mus[:,0,:] if self.single_subspace else np.sum(mus * expected_states, axis=1)
         
+
+# Allow general nonlinear emission models with neural networks
+class _NeuralNetworkEmissions(_Emissions):
+    def __init__(self, N, K, D, M=0, hidden_layer_sizes=(50,)):
+        super(_NeuralNetworkEmissions, self).__init__(N, K, D, M=M, single_subspace=True)
+
+        # Use the rational Cayley transform to parameterize an orthogonal emission matrix
+        assert N > D
+        layer_sizes = (D,) + hidden_layer_sizes + (N,)
+        self.weights = [npr.randn(m, n) for m, n in zip(layer_sizes[:-1], layer_sizes[1:])]
+        self.biases = [npr.randn(n) for n in layer_sizes[1:]]
+
+    @property
+    def params(self):
+        return self.weights, self.biases
+        
+    @params.setter
+    def params(self, value):
+        self.weights, self.biases = value
+
+    def permute(self, perm):
+        pass
+
+    def compute_mus(self, x):
+        inputs = x
+        for W, b in zip(self.weights, self.biases):
+            outputs = np.dot(inputs, W) + b
+            inputs = np.tanh(outputs)
+        return outputs
+    
+    def initialize_variational_params(self, data, input, mask, tag):
+        T = data.shape[0]
+        q_mu = npr.randn(T, self.D)
+        q_sigma_inv = np.zeros((T, self.D))
+        return q_mu, q_sigma_inv
+
+
+# Observation models for SLDS
+class GaussianNeuralNetworkEmissions(_NeuralNetworkEmissions):
+    def __init__(self, N, K, D, M=0):
+        super(GaussianNeuralNetworkEmissions, self).__init__(N, K, D, M=M)
+        self.inv_etas = -4 + npr.randn(N)
+
+    @property
+    def params(self):
+        return super(GaussianNeuralNetworkEmissions, self).params + (self.inv_etas,)
+        
+    @params.setter
+    def params(self, value):
+        self.inv_etas = value[-1]
+        super(GaussianNeuralNetworkEmissions, self.__class__).params.fset(self, value[:-1])
+
+    def log_likelihoods(self, data, input, mask, tag, x):
+        mus = self.compute_mus(x)
+        etas = np.exp(self.inv_etas)
+        lls = -0.5 * np.log(2 * np.pi * etas) - 0.5 * (data - mus)**2 / etas
+        return np.sum(lls * mask, axis=1)[:, None]
+
+    def sample_y(self, z, x, input=None, tag=None):
+        mus = self.compute_mus(x)
+        etas = np.exp(self.inv_etas)
+        return mus + np.sqrt(etas) * npr.randn(*mus.shape)
+        
+    def smooth(self, expected_states, variational_mean, data, input=None, mask=None, tag=None):
+        mus = self.compute_mus(variational_mean)
+        return mus
+        

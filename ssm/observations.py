@@ -42,7 +42,7 @@ class _Observations(object):
         raise NotImplementedError
 
     def m_step(self, expectations, datas, inputs, masks, tags, 
-               optimizer="adam", num_iters=10, **kwargs):
+               optimizer="adam", **kwargs):
         """
         If M-step cannot be done in closed form for the transitions, default to SGD.
         """
@@ -65,7 +65,7 @@ class _Observations(object):
             return -obj / T
 
         self.params = \
-            optimizer(grad(_objective), self.params, num_iters=num_iters, **kwargs)
+            optimizer(grad(_objective), self.params, **kwargs)
 
     def smooth(self, expectations, data, input, tag):
         raise NotImplementedError
@@ -211,8 +211,10 @@ class BernoulliObservations(_Observations):
         self.logit_ps = np.log(ps / (1-ps))
         
     def log_likelihoods(self, data, input, mask, tag):
-        assert data.dtype == int and data.min() >= 0 and data.max() <= 1
-        ps = 1 / (1 + np.exp(self.logit_ps))
+        assert (data.dtype == int or data.dtype == bool)
+        assert data.ndim == 2 and data.shape[1] == self.D
+        assert data.min() >= 0 and data.max() <= 1
+        ps = logistic(self.logit_ps)
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         lls = data[:, None, :] * np.log(ps) + (1 - data[:, None, :]) * np.log(1 - ps)
         return np.sum(lls * mask[:, None, :], axis=2)

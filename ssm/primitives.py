@@ -59,3 +59,21 @@ def hmm_expected_states(log_pi0, log_Ps, ll):
     expected_joints = np.exp(expected_joints)
     
     return expected_states, expected_joints
+
+
+def hmm_filter(log_pi0, log_Ps, ll):
+    T, K = ll.shape
+    # Forward pass gets the predicted state at time t given
+    # observations up to and including those from time t
+    alphas = np.zeros((T, K))
+    forward_pass(log_pi0, log_Ps, ll, alphas)
+
+    # Predict forward with the transition matrix
+    pz_tt = np.exp(alphas - logsumexp(alphas, axis=1, keepdims=True))
+    pz_tp1t = np.matmul(pz_tt[:-1,None,:], np.exp(log_Ps))[:,0,:]
+
+    # Include the initial state distribution
+    pz_tp1t = np.row_stack((np.exp(log_pi0 - logsumexp(log_pi0)), pz_tp1t))
+
+    assert np.allclose(np.sum(pz_tp1t, axis=1), 1.0)
+    return pz_tp1t

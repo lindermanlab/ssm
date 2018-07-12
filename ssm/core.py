@@ -8,7 +8,7 @@ from autograd.scipy.misc import logsumexp
 from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
-from ssm.primitives import hmm_normalizer, hmm_expected_states
+from ssm.primitives import hmm_normalizer, hmm_expected_states, hmm_filter
 from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
     ensure_slds_args_not_none, ensure_elbo_args_are_lists, adam_with_convergence_check
 
@@ -101,8 +101,15 @@ class _HMM(object):
 
     @ensure_args_not_none
     def most_likely_states(self, data, input=None, mask=None, tag=None):
-        Ez, _ = self.expected_states(data, input, mask)
+        Ez, _ = self.expected_states(data, input, mask, tag)
         return np.argmax(Ez, axis=1)
+
+    @ensure_args_not_none
+    def filter(self, data, input=None, mask=None, tag=None):
+        log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
+        log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+        log_likes = self.observations.log_likelihoods(data, input, mask, tag)
+        return hmm_filter(log_pi0, log_Ps, log_likes)
 
     @ensure_args_not_none
     def smooth(self, data, input=None, mask=None, tag=None):

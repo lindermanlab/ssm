@@ -30,7 +30,8 @@ from ssm.emissions import \
     BernoulliEmissions, \
     PoissonEmissions, \
     StudentsTEmissions, \
-    AutoRegressiveEmissions
+    AutoRegressiveEmissions, \
+    GaussianNeuralNetworkEmissions
 
 
 def HMM(K, D, M=0,
@@ -258,7 +259,8 @@ def LDS(N, D, M=0,
         poisson=PoissonEmissions,
         bernoulli=BernoulliEmissions,
         ar=AutoRegressiveEmissions,
-        autoregressive=AutoRegressiveEmissions
+        autoregressive=AutoRegressiveEmissions,
+        gaussian_nn=GaussianNeuralNetworkEmissions
         )
 
     emissions = emissions.lower()
