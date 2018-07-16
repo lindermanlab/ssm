@@ -168,9 +168,11 @@ def inv_softplus(y):
 def one_hot(z, K):
     z = np.atleast_1d(z).astype(int)
     assert np.all(z >= 0) and np.all(z < K)
-    N = z.shape[0]
+    shp = z.shape
+    N = z.size
     zoh = np.zeros((N, K))
-    zoh[np.arange(N), np.arange(K)[z]] = 1
+    zoh[np.arange(N), np.arange(K)[np.ravel(z)]] = 1
+    zoh = np.reshape(zoh, shp + (K,))
     return zoh
 
 

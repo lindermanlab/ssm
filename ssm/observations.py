@@ -3,13 +3,14 @@ import warnings
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
+from autograd.scipy.misc import logsumexp
 from autograd.scipy.special import gammaln
 from autograd.scipy.stats import norm, gamma
 from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
 from ssm.util import random_rotation, ensure_args_are_lists, ensure_args_not_none, \
-    logistic, logit, adam_with_convergence_check
+    logistic, logit, adam_with_convergence_check, one_hot
 from ssm.preprocessing import interpolate_data
 
 
@@ -192,7 +193,7 @@ class BernoulliObservations(_Observations):
         
     @property
     def params(self):
-        return (self.logit_ps,)
+        return self.logit_ps
     
     @params.setter
     def params(self, value):
@@ -208,9 +209,8 @@ class BernoulliObservations(_Observations):
         from sklearn.cluster import KMeans
         data = np.concatenate(datas)
         km = KMeans(self.K).fit(data)
-        ps = km.cluster_centers_
-        assert np.all((ps > 0) & (ps < 1))
-        self.logit_ps = np.log(ps / (1-ps))
+        ps = np.clip(km.cluster_centers_, 1e-3, 1-1e-3)
+        self.logit_ps = logit(ps)
         
     def log_likelihoods(self, data, input, mask, tag):
         assert (data.dtype == int or data.dtype == bool)
@@ -229,8 +229,8 @@ class BernoulliObservations(_Observations):
         x = np.concatenate(datas)
         weights = np.concatenate([Ez for Ez, _ in expectations])
         for k in range(self.K):
-            ps = np.average(x, axis=0, weights=weights[:,k])
-            self.logit_ps[k] = np.log((ps + 1e-8) / (1 - ps + 1e-8))
+            ps = np.clip(np.average(x, axis=0, weights=weights[:,k]), 1e-3, 1-1e-3)
+            self.logit_ps[k] = logit(ps)
 
     def smooth(self, expectations, data, input, tag):
         """
@@ -248,7 +248,7 @@ class PoissonObservations(_Observations):
         
     @property
     def params(self):
-        return (self.log_lambdas,)
+        return self.log_lambdas
     
     @params.setter
     def params(self, value):
@@ -264,13 +264,14 @@ class PoissonObservations(_Observations):
         from sklearn.cluster import KMeans
         data = np.concatenate(datas)
         km = KMeans(self.K).fit(data)
-        self.log_lambdas = np.log(km.cluster_centers_)
+        self.log_lambdas = np.log(km.cluster_centers_ + 1e-3)
         
     def log_likelihoods(self, data, input, mask, tag):
         assert data.dtype == int
-        lambdas = np.exp(self.inv_lambdas)
+        lambdas = np.exp(self.log_lambdas)
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
-        lls = -gammaln(data[:,None,:] + 1) -lambdas + data[:,None,:] * np.log(lambdas)
+        lls = -gammaln(data[:,None,:] + 1) - lambdas + data[:,None,:] * np.log(lambdas)
+        assert lls.shape == (data.shape[0], self.K, self.D)
         return np.sum(lls * mask[:, None, :], axis=2)
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
@@ -281,14 +282,69 @@ class PoissonObservations(_Observations):
         x = np.concatenate(datas)
         weights = np.concatenate([Ez for Ez, _ in expectations])
         for k in range(self.K):
-            self.inv_lambdas = np.log(np.average(x, axis=0, weights=weights[:,k]) + 1e-8)
+            self.log_lambdas[k] = np.log(np.average(x, axis=0, weights=weights[:,k]) + 1e-8)
 
     def smooth(self, expectations, data, input, tag):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
-        return expectations.dot(np.exp(self.inv_lambdas))
+        return expectations.dot(np.exp(self.log_lambdas))
+
+
+class CategoricalObservations(_Observations):
+    def __init__(self, K, D, M=0, C=2):
+        """
+        @param C:  number of classes in the categorical observations 
+        """
+        super(CategoricalObservations, self).__init__(K, D, M)
+        self.C = C
+        self.logits = npr.randn(K, D, C)
+        
+    @property
+    def params(self):
+        return self.logits
+    
+    @params.setter
+    def params(self, value):
+        self.logits = value
+        
+    def permute(self, perm):
+        self.logits = self.logits[perm]
+        
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
+        pass
+        
+    def log_likelihoods(self, data, input, mask, tag):
+        assert (data.dtype == int or data.dtype == bool)
+        assert data.ndim == 2 and data.shape[1] == self.D
+        assert data.min() >= 0 and data.max() < self.C
+        logits = self.logits - logsumexp(self.logits, axis=2, keepdims=True)  # K x D x C
+        x = one_hot(data, self.C)                                             # T x D x C
+        lls = np.sum(x[:, None, :, :] * logits, axis=3)                       # T x K x D
+        mask = np.ones_like(data, dtype=bool) if mask is None else mask       # T x D
+        return np.sum(lls * mask[:, None, :], axis=2)                         # T x K
+
+    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
+        raise NotImplementedError
+
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        x = np.concatenate(datas)
+        weights = np.concatenate([Ez for Ez, _ in expectations])
+        for k in range(self.K):
+            # compute weighted histogram of the class assignments
+            xoh = one_hot(x, self.C)                                          # T x D x C
+            ps = np.average(xoh, axis=0, weights=weights[:, k]) + 1e-3        # D x C
+            ps /= np.sum(ps, axis=-1, keepdims=True)
+            self.logits[k] = np.log(ps)
+
+    def smooth(self, expectations, data, input, tag):
+        """
+        Compute the mean observation under the posterior distribution
+        of latent discrete states.
+        """
+        raise NotImplementedError
 
 
 class AutoRegressiveObservations(_Observations):

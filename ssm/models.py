@@ -14,6 +14,7 @@ from ssm.observations import \
     GaussianObservations, \
     BernoulliObservations, \
     PoissonObservations, \
+    CategoricalObservations, \
     StudentsTObservations, \
     AutoRegressiveObservations, \
     RobustAutoRegressiveObservations, \
@@ -87,8 +88,9 @@ def HMM(K, D, M=0,
         gaussian=GaussianObservations,
         studentst=StudentsTObservations,
         t=StudentsTObservations,
-        poisson=PoissonObservations,
         bernoulli=BernoulliObservations,
+        categorical=CategoricalObservations,
+        poisson=PoissonObservations,
         ar=RecurrentAutoRegressiveObservations if is_recurrent else AutoRegressiveObservations,
         autoregressive=RecurrentAutoRegressiveObservations if is_recurrent else AutoRegressiveObservations,
         robust_ar=RecurrentRobustAutoRegressiveObservations if is_recurrent else RobustAutoRegressiveObservations,
