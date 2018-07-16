@@ -73,24 +73,40 @@ class _HMM(object):
                self.transitions.log_prior() + \
                self.observations.log_prior()
 
-    def sample(self, T, input=None, tag=None):
+    def sample(self, T, prefix=None, input=None, tag=None, with_noise=True):
         K, D = self.K, self.D
-        data = np.zeros((T, D))
-        input = np.zeros((T, self.M)) if input is None else input
-        mask = np.ones((T, D), dtype=bool)
-        
-        # Initialize outputs
-        z = np.zeros(T, dtype=int)
-        
-        pi0 = np.exp(self.init_state_distn.log_initial_state_distn(data, input, mask, tag))
-        z[0] = npr.choice(self.K, p=pi0)
-        data[0] = self.observations.sample_x(z[0], data[:0])
 
-        for t in range(1, T):
+        # If prefix is given, pad the output with it
+        if prefix is None:
+            pad = 1
+            z = np.zeros(T+1, dtype=int)
+            data = np.zeros((T+1, D))
+            input = np.zeros((T+1, self.M)) if input is None else input
+            mask = np.ones((T+1, D), dtype=bool)
+
+            # Sample the first state from the initial distribution
+            pi0 = np.exp(self.init_state_distn.log_initial_state_distn(data, input, mask, tag))
+            z[0] = npr.choice(self.K, p=pi0)
+            data[0] = self.observations.sample_x(z[0], data[:0], with_noise=with_noise)
+        
+        else:
+            zhist, xhist = prefix
+            pad = len(zhist)
+            assert zhist.dtype == int and zhist.min() >= 0 and zhist.max() < K
+            assert xhist.shape == (pad, D)
+
+            z = np.concatenate((zhist, np.zeros(T, dtype=int)))
+            data = np.concatenate((xhist, np.zeros((T, D))))
+            input = np.zeros((T+pad, self.M)) if input is None else input
+            mask = np.ones((T+pad, D), dtype=bool)
+
+        # Fill in the rest of the data
+        for t in range(pad, pad+T):
             Pt = np.exp(self.transitions.log_transition_matrices(data[t-1:t+1], input[t-1:t+1], mask=mask[t-1:t+1], tag=tag))[0]
             z[t] = npr.choice(self.K, p=Pt[z[t-1]])
-            data[t] = self.observations.sample_x(z[t], data[:t], input=input[t], tag=tag)
-        return z, data
+            data[t] = self.observations.sample_x(z[t], data[:t], input=input[t], tag=tag, with_noise=with_noise)
+
+        return z[pad:], data[pad:]
 
     @ensure_args_not_none
     def expected_states(self, data, input=None, mask=None, tag=None):

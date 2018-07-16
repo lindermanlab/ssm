@@ -7,7 +7,8 @@ from ssm.transitions import \
     StickyTransitions, \
     InputDrivenTransitions, \
     RecurrentTransitions, \
-    RecurrentOnlyTransitions
+    RecurrentOnlyTransitions, \
+    NeuralNetworkRecurrentTransitions
 
 from ssm.observations import \
     GaussianObservations, \
@@ -64,7 +65,8 @@ def HMM(K, D, M=0,
         sticky=StickyTransitions,
         inputdriven=InputDrivenTransitions,
         recurrent=RecurrentTransitions,
-        recurrent_only=RecurrentOnlyTransitions
+        recurrent_only=RecurrentOnlyTransitions,
+        nn_recurrent=NeuralNetworkRecurrentTransitions
         )
     if transitions not in transition_classes:
         raise Exception("Invalid transition model: {}. Must be one of {}".
@@ -80,7 +82,7 @@ def HMM(K, D, M=0,
 
     # This is the master list of observation classes.  
     # When you create a new observation class, add it here.
-    is_recurrent = (transitions.lower() in ["recurrent", "recurrent_only"])
+    is_recurrent = (transitions.lower() in ["recurrent", "recurrent_only", "nn_recurrent"])
     observation_classes = dict(
         gaussian=GaussianObservations,
         studentst=StudentsTObservations,
@@ -146,7 +148,8 @@ def SLDS(N, K, D, M=0,
         sticky=StickyTransitions,
         inputdriven=InputDrivenTransitions,
         recurrent=RecurrentTransitions,
-        recurrent_only=RecurrentOnlyTransitions
+        recurrent_only=RecurrentOnlyTransitions,
+        nn_recurrent=NeuralNetworkRecurrentTransitions
         )
 
     transitions = transitions.lower()
@@ -163,7 +166,7 @@ def SLDS(N, K, D, M=0,
         else transition_classes[transitions](K, D, M=M, **transition_kwargs)
 
     # Make the dynamics distn
-    is_recurrent = (transitions.lower() in ["recurrent", "recurrent_only"])
+    is_recurrent = (transitions.lower() in ["recurrent", "recurrent_only", "nn_recurrent"])
     dynamics_classes = dict(
         none=GaussianObservations,
         gaussian=RecurrentAutoRegressiveObservations if is_recurrent else AutoRegressiveObservations,

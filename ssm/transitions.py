@@ -9,7 +9,8 @@ from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
 from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
-    ensure_elbo_args_are_lists, adam_with_convergence_check
+    ensure_elbo_args_are_lists, adam_with_convergence_check, one_hot, \
+    logistic
 
 
 class _Transitions(object):
@@ -120,6 +121,12 @@ class StickyTransitions(StationaryTransitions):
             alpha = self.alpha * np.ones(K) + self.kappa * (np.arange(K) == k)
             lp += dirichlet.logpdf(Ps[k], alpha)
         return lp
+
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        expected_joints = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1 in expectations]) + 1e-8
+        expected_joints += self.kappa * np.eye(self.K)
+        P = expected_joints / expected_joints.sum(axis=1, keepdims=True)
+        self.log_Ps = np.log(P)
     
 
 class InputDrivenTransitions(_Transitions):
@@ -200,6 +207,53 @@ class RecurrentTransitions(InputDrivenTransitions):
         log_Ps = log_Ps + np.dot(data[:-1], self.Rs.T)[:, None, :]
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
+    def m_step(self, expectations, datas, inputs, masks, tags, optimizer="adam", num_iters=10, **kwargs):
+        """
+        Fit a logistic regression for the transitions.
+        
+        Technically, this is a stochastic M-step since the states 
+        are sampled from their posterior marginals.
+        """
+        from sklearn.linear_model import LogisticRegression
+        K, M, D = self.K, self.M, self.D
+
+        zps, zns = [], []
+        for Ez, _ in expectations:
+            z = np.array([np.random.choice(K, p=p) for p in Ez])
+            zps.append(z[:-1])
+            zns.append(z[1:])
+
+
+        X = np.vstack([np.hstack((one_hot(zp, K), input[1:], data[:-1])) 
+                       for zp, input, data in zip(zps, inputs, datas)])
+        y = np.concatenate(zns)
+
+        # Fit the logistic regression
+        lr = LogisticRegression(fit_intercept=False, multi_class="multinomial", solver="sag")
+        lr.fit(X, y)
+
+        # Extract the coefficients
+        log_P = lr.coef_[:, :K]
+        W = lr.coef_[:, K:K+M]
+        R = lr.coef_[:, K+M:]
+
+        if lr.coef_.shape[0] == K:
+            self.log_Ps = log_P.T
+            self.Ws = W
+            self.Rs = R
+        
+        elif lr.coef_.shape[0] == 1:
+            # lr thought there were only two classes
+            self.log_Ps = np.zeros((K, K))
+            self.log_Ps[:,1] = lr.coef_[0, :K]
+            self.Ws = np.zeros((K, M))
+            self.Ws[1] = lr.coef_[0,K:K+M]
+            self.Rs = np.zeros((K, D))
+            self.Rs[1] = lr.coef_[0,K+M:]
+
+        else:
+            raise Exception("Expected coef to either be Kx... or 1x...")
+
 
 class RecurrentOnlyTransitions(_Transitions):
     """
@@ -240,10 +294,58 @@ class RecurrentOnlyTransitions(_Transitions):
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)       # normalize
 
 
+    def m_step(self, expectations, datas, inputs, masks, tags, optimizer="adam", num_iters=10, **kwargs):
+        """
+        Fit a logistic regression for the transitions.
+        
+        Technically, this is a stochastic M-step since the states 
+        are sampled from their posterior marginals.
+        """
+        from sklearn.linear_model import LogisticRegression
+        K, M, D = self.K, self.M, self.D
+
+        zps, zns = [], []
+        for Ez, _ in expectations:
+            z = np.array([np.random.choice(K, p=p) for p in Ez])
+            zps.append(z[:-1])
+            zns.append(z[1:])
+
+
+        X = np.vstack([np.hstack((input[1:], data[:-1])) 
+                       for input, data in zip(inputs, datas)])
+        y = np.concatenate(zns)
+
+        # Fit the logistic regression
+        lr = LogisticRegression(fit_intercept=True, multi_class="multinomial", solver="sag")
+        lr.fit(X, y)
+
+        # Extract the coefficients
+        W = lr.coef_[:, :M]
+        R = lr.coef_[:, M:]
+
+        if lr.coef_.shape[0] == K:
+            self.Ws = W
+            self.Rs = R
+        
+        elif lr.coef_.shape[0] == 1:
+            # lr thought there were only two classes
+            self.Ws = np.zeros((K, M))
+            self.Ws[1] = lr.coef_[0,:M]
+            self.Rs = np.zeros((K, D))
+            self.Rs[1] = lr.coef_[0,M:]
+
+        else:
+            raise Exception("Expected coef to either be Kx... or 1x...")
+
+
+        # Set the intercept
+        self.r = lr.intercept_
+
+
 # Allow general nonlinear emission models with neural networks
-class _NeuralNetworkRecurrentTransitions(_Transitions):
-    def __init__(self, K, D, M=0, hidden_layer_sizes=(50,)):
-        super(_NeuralNetworkRecurrentTransitions, self).__init__(K, D, M=M, single_subspace=True)
+class NeuralNetworkRecurrentTransitions(_Transitions):
+    def __init__(self, K, D, M=0, hidden_layer_sizes=(50,), nonlinearity="relu"):
+        super(NeuralNetworkRecurrentTransitions, self).__init__(K, D, M=M)
 
         # Baseline transition probabilities
         Ps = .95 * np.eye(K) + .05 * npr.rand(K, K)
@@ -251,10 +353,15 @@ class _NeuralNetworkRecurrentTransitions(_Transitions):
         self.log_Ps = np.log(Ps)
 
         # Initialize the NN weights
-        assert N > D
         layer_sizes = (D + M,) + hidden_layer_sizes + (K,)
         self.weights = [npr.randn(m, n) for m, n in zip(layer_sizes[:-1], layer_sizes[1:])]
         self.biases = [npr.randn(n) for n in layer_sizes[1:]]
+
+        nonlinearities = dict(
+            relu=lambda x: np.maximum(0, x),
+            tanh=np.tanh,
+            sigmoid=logistic)
+        self.nonlinearity = nonlinearities[nonlinearity]
 
     @property
     def params(self):
@@ -274,7 +381,7 @@ class _NeuralNetworkRecurrentTransitions(_Transitions):
         x = np.hstack((data[:-1], input[1:]))
         for W, b in zip(self.weights, self.biases):
             y = np.dot(x, W) + b
-            x = np.tanh(y)
+            x = self.nonlinearity(y)
         
         # Add the baseline transition biases
         log_Ps = self.log_Ps[None, :, :] + y[:, None, :]

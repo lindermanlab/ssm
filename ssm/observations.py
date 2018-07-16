@@ -38,7 +38,7 @@ class _Observations(object):
     def log_likelihoods(self, data, input, mask, tag):
         raise NotImplementedError
 
-    def sample_x(self, z, xhist, input=None, tag=None):
+    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         raise NotImplementedError
 
     def m_step(self, expectations, datas, inputs, masks, tags, 
@@ -107,8 +107,9 @@ class GaussianObservations(_Observations):
             (np.log(2 * np.pi * sigmas) + (data[:, None, :] - mus)**2 / sigmas) 
             * mask[:, None, :], axis=2)
 
-    def sample_x(self, z, xhist, input=None, tag=None):
-        D, mus, sigmas = self.D, self.mus, np.exp(self.inv_sigmas)
+    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
+        D, mus = self.D, self.mus
+        sigmas = np.exp(self.inv_sigmas) if with_noise else np.zeros((self.K, self.D))
         return mus[z] + np.sqrt(sigmas[z]) * npr.randn(D)
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
@@ -170,10 +171,11 @@ class StudentsTObservations(_Observations):
             gammaln((nus + D) / 2.0) - gammaln(nus / 2.0) - D / 2.0 * np.log(nus) \
             -D / 2.0 * np.log(np.pi) - 0.5 * np.sum(np.log(sigmas), axis=1)
 
-    def sample_x(self, z, xhist, input=None, tag=None):
+    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, mus, sigmas, nus = self.D, self.mus, np.exp(self.inv_sigmas), np.exp(self.inv_nus)
         tau = npr.gamma(nus[z] / 2.0, 2.0 / nus[z])
-        return mus[z] + np.sqrt(sigmas[z] / tau) * npr.randn(D)
+        sigma = sigmas[z] / tau if with_noise else 0
+        return mus[z] + np.sqrt(sigma) * npr.randn(D)
 
     def smooth(self, expectations, data, input, tag):
         """
@@ -219,7 +221,7 @@ class BernoulliObservations(_Observations):
         lls = data[:, None, :] * np.log(ps) + (1 - data[:, None, :]) * np.log(1 - ps)
         return np.sum(lls * mask[:, None, :], axis=2)
 
-    def sample_x(self, z, xhist, input=None, tag=None):
+    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         ps = 1 / (1 + np.exp(self.logit_ps))
         return npr.rand(self.D) < ps[z]
 
@@ -271,7 +273,7 @@ class PoissonObservations(_Observations):
         lls = -gammaln(data[:,None,:] + 1) -lambdas + data[:,None,:] * np.log(lambdas)
         return np.sum(lls * mask[:, None, :], axis=2)
 
-    def sample_x(self, z, xhist, input=None, tag=None):
+    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         lambdas = np.exp(self.inv_lambdas)
         return npr.poisson(lambdas[z])
 
@@ -389,22 +391,27 @@ class AutoRegressiveObservations(_Observations):
             lr.fit(xs, ys, sample_weight=weights)
             self.As[k], self.Vs[k], self.bs[k] = lr.coef_[:,:D*self.lags], lr.coef_[:,D*self.lags:], lr.intercept_
 
+            assert np.all(np.isfinite(self.As))
+            assert np.all(np.isfinite(self.Vs))
+            assert np.all(np.isfinite(self.bs))
+
             # Update the variances
             yhats = lr.predict(xs)
             sqerr = (ys - yhats)**2
             self.inv_sigmas[k] = np.log(np.average(sqerr, weights=weights, axis=0))
         
-    def sample_x(self, z, xhist, input=None, tag=None):
+    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, As, bs, sigmas = self.D, self.As, self.bs, np.exp(self.inv_sigmas)
         if xhist.shape[0] < self.lags:
-            mu_init = self.mu_init
-            sigma_init = np.exp(self.inv_sigma_init)
-            return mu_init + np.sqrt(sigma_init) * npr.randn(D)
+            sigma_init = np.exp(self.inv_sigma_init) if with_noise else 0
+            return self.mu_init + np.sqrt(sigma_init) * npr.randn(D)
         else:
-            mu = bs[z]
+            mu = bs[z].copy()
             for l in range(self.lags):
                 mu += As[z][:,l*D:(l+1)*D].dot(xhist[-l-1])
-            return np.sqrt(sigmas[z]) * npr.randn(D)
+
+            sigma = sigmas[z] if with_noise else 0
+            return mu + np.sqrt(sigma) * npr.randn(D)
 
     def smooth(self, expectations, data, input, tag):
         """
@@ -447,19 +454,20 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
             gammaln((nus + D) / 2.0) - gammaln(nus / 2.0) - D / 2.0 * np.log(nus) \
             -D / 2.0 * np.log(np.pi) - 0.5 * np.sum(np.log(sigmas), axis=1)
 
-    def sample_x(self, z, xhist, input=None, tag=None):
+    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, As, bs, sigmas, nus = self.D, self.As, self.bs, np.exp(self.inv_sigmas), np.exp(self.inv_nus)
         if xhist.shape[0] < self.lags:
             mu_init = self.mu_init
-            sigma_init = np.exp(self.inv_sigma_init)
+            sigma_init = np.exp(self.inv_sigma_init) if with_noise else 0
             return mu_init + np.sqrt(sigma_init) * npr.randn(D)
         else:
-            mu = bs[z]
+            mu = bs[z].copy()
             for l in range(self.lags):
                 mu += As[z][:,l*D:(l+1)*D].dot(xhist[-l-1])
 
             tau = npr.gamma(nus[z] / 2.0, 2.0 / nus[z])
-            return mu + np.sqrt(sigmas[z] / tau) * npr.randn(D)
+            sigma = sigmas[z] / tau if with_noise else 0
+            return mu + np.sqrt(sigma) * npr.randn(D)
 
 
 class _RecurrentAutoRegressiveObservationsMixin(AutoRegressiveObservations):

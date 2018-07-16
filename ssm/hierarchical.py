@@ -115,8 +115,8 @@ class HierarchicalObservations(_Hierarchical):
     def log_likelihoods(self, data, input, mask, tag):
         return self.children[tag].log_likelihoods(data, input, mask, tag)
 
-    def sample_x(self, z, xhist, input=None, tag=None):
-        return self.children[tag].sample_x(z, xhist, input=input, tag=tag)
+    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
+        return self.children[tag].sample_x(z, xhist, input=input, tag=tag, with_noise=with_noise)
     
     def smooth(self, expectations, data, input, tag):
         return self.children[tag].smooth(expectations, data, input, tag)
