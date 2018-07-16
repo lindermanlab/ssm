@@ -1,10 +1,11 @@
 # Define an autograd extension for HMM normalizer
 import autograd.numpy as np
+import autograd.numpy.random as npr
 from autograd.scipy.misc import logsumexp
 from autograd.extend import primitive, defvjp
 from functools import partial
 
-from ssm.messages import forward_pass, backward_pass, grad_hmm_normalizer
+from ssm.messages import forward_pass, backward_pass, backward_sample, grad_hmm_normalizer
 
 @primitive
 def hmm_normalizer(log_pi0, log_Ps, ll):
@@ -104,3 +105,24 @@ def hmm_filter(log_pi0, log_Ps, ll):
 
     assert np.allclose(np.sum(pz_tp1t, axis=1), 1.0)
     return pz_tp1t
+
+
+def hmm_sample(log_pi0, log_Ps, ll):
+    T, K = ll.shape
+
+    # Make sure everything is C contiguous
+    to_c = lambda arr: np.copy(arr, 'C') if not arr.flags['C_CONTIGUOUS'] else arr
+    log_pi0 = to_c(log_pi0)
+    log_Ps = to_c(log_Ps)
+    ll = to_c(ll)
+
+    # Forward pass gets the predicted state at time t given
+    # observations up to and including those from time t
+    alphas = np.zeros((T, K))
+    forward_pass(log_pi0, log_Ps, ll, alphas)
+
+    # Sample backward
+    us = npr.rand(T)
+    zs = -1 * np.ones(T, dtype=int)
+    backward_sample(log_Ps, ll, alphas, us, zs)
+    return zs

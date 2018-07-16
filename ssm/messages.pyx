@@ -51,7 +51,7 @@ cpdef forward_pass(double[::1] log_pi0,
                    double[:,::1] log_likes,
                    double[:,::1] alphas):
 
-    cdef int T, K, t, k
+    cdef int T, K, t, k, j
     T = log_likes.shape[0]
     K = log_likes.shape[1]
     assert log_Ps.shape[0] == T-1
@@ -74,10 +74,10 @@ cpdef forward_pass(double[::1] log_pi0,
     return logsumexp(alphas[T-1])
 
 cpdef backward_pass(double[:,:,::1] log_Ps,
-            double[:,::1] log_likes,
-            double[:,::1] betas):
+                    double[:,::1] log_likes,
+                    double[:,::1] betas):
 
-    cdef int T, K, t, k
+    cdef int T, K, t, k, j
     T = log_likes.shape[0]
     K = log_likes.shape[1]
     assert log_Ps.shape[0] == T-1
@@ -88,13 +88,60 @@ cpdef backward_pass(double[:,:,::1] log_Ps,
 
     cdef double[::1] tmp = np.zeros(K)
 
+    # Initialize the last output
+    for k in range(K):
+        betas[T-1, k] = 0
+
     for t in range(T-2,-1,-1):
         # betal[t] = logsumexp(Al + betal[t+1] + aBl[t+1],axis=1)
         for k in range(K):
             for j in range(K):
                 tmp[j] = log_Ps[t, k, j] + betas[t+1, j] + log_likes[t+1, j]
             betas[t, k] = logsumexp(tmp)
-        
+
+
+cpdef backward_sample(double[:,:,::1] log_Ps,
+                      double[:,::1] log_likes,
+                      double[:,::1] alphas,
+                      double[::1] us,
+                      long[::1] zs):
+
+    cdef int T, K, t, k, j
+    cdef double Z, acc
+
+    T = log_likes.shape[0]
+    K = log_likes.shape[1]
+    assert log_Ps.shape[0] == T-1
+    assert log_Ps.shape[1] == K
+    assert log_Ps.shape[2] == K
+    assert alphas.shape[0] == T
+    assert alphas.shape[1] == K
+    assert us.shape[0] == T
+    assert zs.shape[0] == T
+
+    cdef double[::1] lpzp1 = np.zeros(K)
+    cdef double[::1] lpz = np.zeros(K)
+
+    for t in range(T-1,-1,-1):
+        # compute normalized log p(z[t] = k | z[t+1])
+        for k in range(K):
+            lpz[k] = lpzp1[k] + alphas[t, k]
+        Z = logsumexp(lpz)
+
+        # sample 
+        acc = 0
+        zs[t] = K-1
+        for k in range(K):
+            acc += np.exp(lpz[k] - Z)
+            if us[t] < acc:
+                zs[t] = k
+                break
+
+        # set the transition potential
+        if t > 0:
+            for k in range(K):
+                lpzp1[k] = log_Ps[t-1, k, zs[t]]
+
 
 cpdef grad_hmm_normalizer(double[:,:,::1] log_Ps,
                           double[:,::1] alphas,
