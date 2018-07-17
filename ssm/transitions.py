@@ -228,33 +228,42 @@ class RecurrentTransitions(InputDrivenTransitions):
                        for zp, input, data in zip(zps, inputs, datas)])
         y = np.concatenate(zns)
 
+        # Determine the number of states used
+        used = np.unique(y)
+        K_used = len(used)
+        unused = np.setdiff1d(np.arange(K), used)
+        
+        # Reset parameters before filling in
+        self.log_Ps = np.zeros((K, K))
+        self.Ws = np.zeros((K, M))
+        self.Rs = np.zeros((K, D))
+
+        if K_used == 1:
+            warn("RecurrentTransitions: Only using 1 state in expectation. "
+                 "M-step cannot proceed. Resetting transition parameters.")
+            return
+
         # Fit the logistic regression
         lr = LogisticRegression(fit_intercept=False, multi_class="multinomial", solver="sag")
         lr.fit(X, y)
 
         # Extract the coefficients
+        assert lr.coef_.shape[0] == (K_used if K_used > 2 else 1)
         log_P = lr.coef_[:, :K]
         W = lr.coef_[:, K:K+M]
         R = lr.coef_[:, K+M:]
-
-        if lr.coef_.shape[0] == K:
-            self.log_Ps = log_P.T
-            self.Ws = W
-            self.Rs = R
-        
-        elif lr.coef_.shape[0] == 1:
+            
+        if K_used == 2:
             # lr thought there were only two classes
-            self.log_Ps = np.zeros((K, K))
-            self.log_Ps[:,1] = lr.coef_[0, :K]
-            self.Ws = np.zeros((K, M))
-            self.Ws[1] = lr.coef_[0,K:K+M]
-            self.Rs = np.zeros((K, D))
-            self.Rs[1] = lr.coef_[0,K+M:]
-
+            self.log_Ps[:,used[1]] = lr.coef_[0, :K]
+            self.Ws[used[1]] = lr.coef_[0,K:K+M]
+            self.Rs[used[1]] = lr.coef_[0,K+M:]
         else:
-            raise Exception("Expected coef to either be Kx... or 1x...")
-
-
+            self.log_Ps[:, used] = log_P.T
+            self.Ws[used] = W
+            self.Rs[used] = R
+        
+        
 class RecurrentOnlyTransitions(_Transitions):
     """
     Only allow the past observations and inputs to influence the
