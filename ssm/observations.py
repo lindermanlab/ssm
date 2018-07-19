@@ -327,7 +327,8 @@ class CategoricalObservations(_Observations):
         return np.sum(lls * mask[:, None, :], axis=2)                         # T x K
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
-        raise NotImplementedError
+        ps = np.exp(self.logits - logsumexp(self.logits, axis=2, keepdims=True))
+        return np.array([npr.choice(self.C, p=ps[z, d]) for d in range(self.D)])
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         x = np.concatenate(datas)
