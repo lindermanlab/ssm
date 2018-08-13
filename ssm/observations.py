@@ -481,6 +481,170 @@ class AutoRegressiveObservations(_Observations):
         return (expectations[:, :, None] * mus).sum(1)
 
 
+class IndependentAutoRegressiveObservations(_Observations):
+    def __init__(self, K, D, M=0, lags=1):
+        super(IndependentAutoRegressiveObservations, self).__init__(K, D, M)
+        
+        # Distribution over initial point
+        self.mu_init = np.zeros(D)
+        self.inv_sigma_init = np.zeros(D)
+        
+        # AR parameters
+        assert lags > 0 
+        self.lags = lags
+        self.As = .95 * np.ones((K, D, lags))
+        self.bs = npr.randn(K, D)
+        self.Vs = npr.randn(K, D, M)
+        self.inv_sigmas = -4 + npr.randn(K, D)
+
+    @property
+    def params(self):
+        return self.As, self.bs, self.Vs, self.inv_sigmas
+        
+    @params.setter
+    def params(self, value):
+        self.As, self.bs, self.Vs, self.inv_sigmas = value
+        
+    def permute(self, perm):
+        self.As = self.As[perm]
+        self.bs = self.bs[perm]
+        self.Vs = self.Vs[perm]
+        self.inv_sigmas = self.inv_sigmas[perm]
+
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
+        # Initialize with linear regressions
+        from sklearn.linear_model import LinearRegression
+        data = np.concatenate(datas) 
+        input = np.concatenate(inputs)
+        T = data.shape[0]
+
+        for k in range(self.K):
+            for d in range(self.D):
+                ts = npr.choice(T-self.lags, replace=False, size=(T-self.lags)//self.K)
+                x = np.column_stack([data[ts + l, d:d+1] for l in range(self.lags)] + [input[ts]])
+                y = data[ts+self.lags, d:d+1]
+                lr = LinearRegression().fit(x, y)
+
+                self.As[k, d] = lr.coef_[:, :self.lags]
+                self.Vs[k, d] = lr.coef_[:, self.lags:]
+                self.bs[k, d] = lr.intercept_
+                
+                resid = y - lr.predict(x)
+                sigmas = np.var(resid, axis=0)
+                self.inv_sigmas[k, d] = np.log(sigmas + 1e-8)
+        
+    def _compute_mus(self, data, input, mask, tag):
+        T, D = data.shape
+        As, bs, Vs = self.As, self.bs, self.Vs
+
+        # Instantaneous inputs, lagged data, and bias
+        mus = np.matmul(Vs[None, ...], input[self.lags:, None, :, None])[:, :, :, 0]
+        for l in range(self.lags):
+            mus = mus + As[:, :, l] * data[self.lags-l-1:-l-1, None, :]
+        mus = mus + bs
+
+        # Pad with the initial condition
+        mus = np.concatenate((self.mu_init * np.ones((self.lags, self.K, self.D)), mus))
+
+        assert mus.shape == (T, self.K, D)
+        return mus
+
+    def _compute_sigmas(self, data, input, mask, tag):
+        T, D = data.shape
+        
+        sigma_init = np.exp(self.inv_sigma_init) * np.ones((self.lags, self.K, self.D))
+        sigma_ar = np.repeat(np.exp(self.inv_sigmas)[None, :, :], T-self.lags, axis=0)
+        sigmas = np.concatenate((sigma_init, sigma_ar))
+        assert sigmas.shape == (T, self.K, D)
+        return sigmas
+
+    def log_likelihoods(self, data, input, mask, tag):
+        # import pdb; pdb.set_trace()
+        mus = self._compute_mus(data, input, mask, tag)
+        sigmas = self._compute_sigmas(data, input, mask, tag)
+        ll = -0.5 * (np.log(2 * np.pi * sigmas) + (data[:, None, :] - mus)**2 / sigmas) 
+        return np.sum(ll * mask[:, None, :], axis=2)
+
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        from sklearn.linear_model import LinearRegression
+        D, M = self.D, self.M
+
+        for d in range(self.D):
+            # Collect data for this dimension
+            xs, ys, weights = [], [], []
+            for (Ez, _), data, input, mask in zip(expectations, datas, inputs, masks):
+                # Only use data if it is complete
+                if np.all(mask[:, d]):
+                    xs.append(
+                        np.hstack([data[self.lags-l-1:-l-1, d:d+1] for l in range(self.lags)] 
+                                  + [input[self.lags:], np.ones((data.shape[0]-self.lags, 1))]))
+                    ys.append(data[self.lags:, d])
+                    weights.append(Ez[self.lags:])
+
+            xs = np.concatenate(xs)
+            ys = np.concatenate(ys)
+            weights = np.concatenate(weights)
+
+            # If there was no data for this dimension then skip it
+            if len(xs) == 0:
+                self.As[:, d, :] = 0
+                self.Vs[:, d, :] = 0
+                self.bs[:, d] = 0
+                continue
+
+            # Otherwise, fit a weighted linear regression for each discrete state
+            for k in range(self.K):
+                # Check for zero weights
+                if np.sum(weights[:, k]) < 1e-16:
+                    self.As[k, d] = 1.0
+                    self.Vs[k, d] = 0
+                    self.bs[k, d] = 0
+                    self.inv_sigmas[k, d] = 0
+                    continue
+
+                # Solve for the most likely A,V,b (no prior)
+                Jk = np.sum(weights[:, k][:, None, None] * xs[:,:,None] * xs[:, None,:], axis=0)
+                hk = np.sum(weights[:, k][:, None] * xs * ys[:, None], axis=0)
+                muk = np.linalg.solve(Jk, hk)
+
+                self.As[k, d] = muk[:self.lags]
+                self.Vs[k, d] = muk[self.lags:self.lags+M]
+                self.bs[k, d] = muk[-1]
+
+                # Update the variances
+                yhats = xs.dot(np.concatenate((self.As[k, d], self.Vs[k, d], [self.bs[k, d]])))
+                sqerr = (ys - yhats)**2
+                sigma = np.average(sqerr, weights=weights[:, k], axis=0) + 1e-16
+                self.inv_sigmas[k, d] = np.log(sigma)
+        
+                # Debug
+                sigma2 = np.sum(sqerr * weights[:,k]) / np.sum(weights[:,k])
+                assert np.allclose(sigma, sigma2)
+                
+    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
+        D, As, bs, sigmas = self.D, self.As, self.bs, np.exp(self.inv_sigmas)
+        if xhist.shape[0] < self.lags:
+            sigma_init = np.exp(self.inv_sigma_init) if with_noise else 0
+            return self.mu_init + np.sqrt(sigma_init) * npr.randn(D)
+        else:
+            mu = bs[z].copy()
+            for l in range(self.lags):
+                mu += As[z,:,l] * xhist[-l-1]
+
+            sigma = sigmas[z] if with_noise else 0
+            return mu + np.sqrt(sigma) * npr.randn(D)
+
+    def smooth(self, expectations, data, input, tag):
+        """
+        Compute the mean observation under the posterior distribution
+        of latent discrete states.
+        """
+        T = expectations.shape[0]
+        mask = np.ones((T, self.D), dtype=bool) 
+        mus = self._compute_mus(data, input, mask, tag)
+        return (expectations[:, :, None] * mus).sum(1)
+
+
 # Robust autoregressive models with Student's t noise
 class RobustAutoRegressiveObservations(AutoRegressiveObservations):
     def __init__(self, K, D, M=0, lags=1):
@@ -573,3 +737,5 @@ class RecurrentRobustAutoRegressiveObservations(
     _RecurrentAutoRegressiveObservationsMixin, 
     RobustAutoRegressiveObservations):
     pass
+
+

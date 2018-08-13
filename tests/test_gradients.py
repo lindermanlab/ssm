@@ -4,7 +4,7 @@ from autograd.scipy.misc import logsumexp
 from autograd import grad
 from autograd.test_util import check_grads
 
-from ssm.messages import forward_pass, grad_hmm_normalizer
+from ssm.messages import forward_pass, backward_pass, grad_hmm_normalizer
 from ssm.primitives import hmm_normalizer
 from ssm.models import HMM
 
@@ -59,6 +59,27 @@ def test_autograd_primitive(T=1000, K=3):
     check_grads(hmm_normalizer, argnum=1, modes=['rev'], order=1)(log_pi0, log_Ps, ll)
 
 
+def test_backward_pass(T=1000, K=5, D=2):
+    from pyhsmm.internals.hmm_messages_interface import messages_backwards_log
+    
+    # Make parameters
+    log_pi0 = -np.log(K) * np.ones(K)
+    As = npr.rand(K, K)
+    As /= As.sum(axis=-1, keepdims=True)
+    log_Ps = np.log(np.repeat(As[None, :, :], T-1, axis=0))
+    ll = npr.randn(T, K)
+    
+    # Use pyhsmm to compute
+    true_betas = np.zeros((T, K))
+    messages_backwards_log(As, ll, true_betas)
+
+    # Use ssm to compute
+    test_betas = np.zeros((T, K))
+    backward_pass(log_Ps, ll, test_betas)
+    
+    assert np.allclose(true_betas, test_betas)
+    
+
 def test_hmm_likelihood(T=500, K=5, D=2):
     # Create a true HMM
     A = npr.rand(K, K)
@@ -91,3 +112,46 @@ def test_hmm_likelihood(T=500, K=5, D=2):
     test_lkhd = hmm.log_probability(y)
 
     assert np.allclose(true_lkhd, test_lkhd)
+
+
+def test_expectations(T=1000, K=20, D=2):
+    # Create a true HMM
+    A = npr.rand(K, K)
+    A /= A.sum(axis=1, keepdims=True)
+    A = 0.75 * np.eye(K) + 0.25 * A
+    C = npr.randn(K, D)
+    sigma = 0.01
+
+    # Sample from the true HMM
+    z = np.zeros(T, dtype=int)
+    y = np.zeros((T, D))
+    for t in range(T):
+        if t > 0:
+            z[t] = np.random.choice(K, p=A[z[t-1]])
+        y[t] = C[z[t]] + np.sqrt(sigma) * npr.randn(D)
+
+    # Compare to pyhsmm answer
+    from pyhsmm.models import HMM as OldHMM
+    from pyhsmm.basic.distributions import Gaussian
+    hmm = OldHMM([Gaussian(mu=C[k], sigma=sigma * np.eye(D)) for k in range(K)],
+                  trans_matrix=A,
+                  init_state_distn="uniform")
+    hmm.add_data(y)
+    states = hmm.states_list.pop()
+    states.E_step()
+    true_Ez = states.expected_states
+    true_E_trans = states.expected_transcounts
+
+    # Make an HMM with these parameters
+    hmm = HMM(K, D, observations="gaussian")
+    hmm.transitions.log_Ps = np.log(A)
+    hmm.observations.mus = C
+    hmm.observations.inv_sigmas = np.log(sigma) * np.ones((K, D))
+    test_Ez, test_Ezzp1 = hmm.expected_states(y)
+    test_E_trans = test_Ezzp1.sum(0)
+
+    print(true_E_trans.round(3))
+    print(test_E_trans.round(3))
+
+    assert np.allclose(true_Ez, test_Ez)
+    assert np.allclose(true_E_trans, test_E_trans)

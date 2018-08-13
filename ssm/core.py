@@ -153,6 +153,27 @@ class _HMM(object):
             lp += hmm_normalizer(log_pi0, log_Ps, log_likes)
             assert np.isfinite(lp)
         return lp
+
+    def expected_log_probability(self, expectations, datas, inputs=None, masks=None, tags=None):
+        """
+        Compute the log probability of the data under the current 
+        model parameters.
+        
+        :param datas: single array or list of arrays of data.
+        :return total log probability of the data.
+        """
+        elp = self.log_prior()
+        for (Ez, Ezzp1), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
+            log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
+            log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+            log_likes = self.observations.log_likelihoods(data, input, mask, tag)
+
+            # Compute the expected log probability 
+            elp += np.sum(Ez[0] * log_pi0)
+            elp += np.sum(Ezzp1 * log_Ps)
+            elp += np.sum(Ez[1:] * log_likes[1:])
+            assert np.isfinite(elp)
+        return elp
     
     # Model fitting
     def _fit_sgd(self, optimizer, datas, inputs, masks, tags, print_intvl=10, **kwargs):
@@ -178,7 +199,7 @@ class _HMM(object):
 
         return lls
 
-    def _fit_em(self, datas, inputs, masks, tags, num_em_iters=100, verbose=True, **kwargs):
+    def _fit_em(self, datas, inputs, masks, tags, num_em_iters=100, verbose=True, debug=False, **kwargs):
         """
         Fit the parameters with expectation maximization.
 
@@ -191,14 +212,25 @@ class _HMM(object):
             expectations = [self.expected_states(data, input, mask, tag) 
                             for data, input, mask, tag in zip(datas, inputs, masks, tags)]
 
+            if debug:
+                el1 = self.expected_log_probability(expectations, datas, inputs, masks, tags)
+                ll1 = self.log_probability(datas, inputs, masks, tags)
+
             # M step: maximize expected log joint wrt parameters
             self.init_state_distn.m_step(expectations, datas, inputs, masks, tags, **kwargs)
             self.transitions.m_step(expectations, datas, inputs, masks, tags, **kwargs)
             self.observations.m_step(expectations, datas, inputs, masks, tags, **kwargs)
 
+            if debug: 
+                el2 = self.expected_log_probability(expectations, datas, inputs, masks, tags)
+                ll2 = self.log_probability(datas, inputs, masks, tags)
+                assert el2 >= el1 - 1e-8
+                assert ll2 >= ll1 - 1e-8
+                assert (ll2 - ll1) >= (el2 - el1) - 1e-8
+
             # Store progress
             lls.append(self.log_probability(datas, inputs, masks, tags))
-
+            
             if verbose:
                 print("Iteration {}.  LL: {:.1f}".format(itr, lls[-1]))
 

@@ -96,8 +96,8 @@ class StationaryTransitions(_Transitions):
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        expected_joints = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1 in expectations]) + 1e-8
-        P = expected_joints / expected_joints.sum(axis=1, keepdims=True)
+        P = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1 in expectations]) + 1e-16
+        P /= P.sum(axis=-1, keepdims=True)
         self.log_Ps = np.log(P)
 
 

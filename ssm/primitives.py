@@ -78,6 +78,7 @@ def hmm_expected_states(log_pi0, log_Ps, ll):
     expected_joints = alphas[:-1,:,None] + betas[1:,None,:] + ll[1:,None,:] + log_Ps
     expected_joints -= expected_joints.max((1,2))[:,None, None]
     expected_joints = np.exp(expected_joints)
+    expected_joints /= expected_joints.sum((1,2))[:,None,None]
     
     return expected_states, expected_joints
 
