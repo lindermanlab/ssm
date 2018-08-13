@@ -559,7 +559,6 @@ class IndependentAutoRegressiveObservations(_Observations):
         return sigmas
 
     def log_likelihoods(self, data, input, mask, tag):
-        # import pdb; pdb.set_trace()
         mus = self._compute_mus(data, input, mask, tag)
         sigmas = self._compute_sigmas(data, input, mask, tag)
         ll = -0.5 * (np.log(2 * np.pi * sigmas) + (data[:, None, :] - mus)**2 / sigmas) 
@@ -594,8 +593,8 @@ class IndependentAutoRegressiveObservations(_Observations):
 
             # Otherwise, fit a weighted linear regression for each discrete state
             for k in range(self.K):
-                # Check for zero weights
-                if np.sum(weights[:, k]) < 1e-16:
+                # Check for zero weights (singular matrix)
+                if np.sum(weights[:, k]) < self.lags + M + 1:
                     self.As[k, d] = 1.0
                     self.Vs[k, d] = 0
                     self.bs[k, d] = 0
@@ -616,10 +615,6 @@ class IndependentAutoRegressiveObservations(_Observations):
                 sqerr = (ys - yhats)**2
                 sigma = np.average(sqerr, weights=weights[:, k], axis=0) + 1e-16
                 self.inv_sigmas[k, d] = np.log(sigma)
-        
-                # Debug
-                sigma2 = np.sum(sqerr * weights[:,k]) / np.sum(weights[:,k])
-                assert np.allclose(sigma, sigma2)
                 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, As, bs, sigmas = self.D, self.As, self.bs, np.exp(self.inv_sigmas)
