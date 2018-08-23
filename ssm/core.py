@@ -65,14 +65,6 @@ class _HMM(object):
         self.transitions.permute(perm)
         self.observations.permute(perm)
 
-    def log_prior(self):
-        """
-        Compute the log prior probability of the model parameters
-        """  
-        return self.init_state_distn.log_prior() + \
-               self.transitions.log_prior() + \
-               self.observations.log_prior()
-
     def sample(self, T, prefix=None, input=None, tag=None, with_noise=True):
         K, D = self.K, self.D
 
@@ -136,8 +128,16 @@ class _HMM(object):
         Ez, _ = self.expected_states(data, input, mask)
         return self.observations.smooth(Ez, data, input, tag)
         
+    def log_prior(self):
+        """
+        Compute the log prior probability of the model parameters
+        """  
+        return self.init_state_distn.log_prior() + \
+               self.transitions.log_prior() + \
+               self.observations.log_prior()
+
     @ensure_args_are_lists
-    def log_probability(self, datas, inputs=None, masks=None, tags=None):
+    def log_likelihood(self, datas, inputs=None, masks=None, tags=None):
         """
         Compute the log probability of the data under the current 
         model parameters.
@@ -145,14 +145,18 @@ class _HMM(object):
         :param datas: single array or list of arrays of data.
         :return total log probability of the data.
         """
-        lp = self.log_prior()
+        ll = 0
         for data, input, mask, tag in zip(datas, inputs, masks, tags):
             log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
             log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
             log_likes = self.observations.log_likelihoods(data, input, mask, tag)
-            lp += hmm_normalizer(log_pi0, log_Ps, log_likes)
-            assert np.isfinite(lp)
-        return lp
+            ll += hmm_normalizer(log_pi0, log_Ps, log_likes)
+            assert np.isfinite(ll)
+        return ll
+
+    @ensure_args_are_lists
+    def log_probability(self, datas, inputs=None, masks=None, tags=None):
+        return self.log_likelihood(datas, inputs, masks, tags) + self.log_prior()
 
     def expected_log_probability(self, expectations, datas, inputs=None, masks=None, tags=None):
         """
@@ -232,7 +236,7 @@ class _HMM(object):
             lls.append(self.log_probability(datas, inputs, masks, tags))
             
             if verbose:
-                print("Iteration {}.  LL: {:.1f}".format(itr, lls[-1]))
+                print("Iteration {}.  LP: {:.1f}".format(itr, lls[-1]))
 
         return lls
 
