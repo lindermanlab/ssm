@@ -332,6 +332,7 @@ class RecurrentOnlyTransitions(_Transitions):
         # Reset parameters before filling in
         self.Ws = np.zeros((K, M))
         self.Rs = np.zeros((K, D))
+        self.r = np.zeros((K,))
 
         if K_used == 1:
             warn("RecurrentOnlyTransitions: Only using 1 state in expectation. "
@@ -353,7 +354,7 @@ class RecurrentOnlyTransitions(_Transitions):
             self.Rs[used] = lr.coef_[:, M:]
 
         # Set the intercept
-        self.r = lr.intercept_
+        self.r[used] = lr.intercept_
         
 
 
