@@ -324,31 +324,37 @@ class RecurrentOnlyTransitions(_Transitions):
                        for input, data in zip(inputs, datas)])
         y = np.concatenate(zns)
 
+        # Identify used states
+        used = np.unique(y)
+        K_used = len(used)
+        unused = np.setdiff1d(np.arange(K), used)
+        
+        # Reset parameters before filling in
+        self.Ws = np.zeros((K, M))
+        self.Rs = np.zeros((K, D))
+
+        if K_used == 1:
+            warn("RecurrentOnlyTransitions: Only using 1 state in expectation. "
+                 "M-step cannot proceed. Resetting transition parameters.")
+            return
+
         # Fit the logistic regression
         lr = LogisticRegression(fit_intercept=True, multi_class="multinomial", solver="sag")
         lr.fit(X, y)
 
         # Extract the coefficients
-        W = lr.coef_[:, :M]
-        R = lr.coef_[:, M:]
-
-        if lr.coef_.shape[0] == K:
-            self.Ws = W
-            self.Rs = R
-        
-        elif lr.coef_.shape[0] == 1:
+        assert lr.coef_.shape[0] == (K_used if K_used > 2 else 1)            
+        if K_used == 2:
             # lr thought there were only two classes
-            self.Ws = np.zeros((K, M))
-            self.Ws[1] = lr.coef_[0,:M]
-            self.Rs = np.zeros((K, D))
-            self.Rs[1] = lr.coef_[0,M:]
-
+            self.Ws[used[1]] = lr.coef_[0, :M]
+            self.Rs[used[1]] = lr.coef_[0, M:]
         else:
-            raise Exception("Expected coef to either be Kx... or 1x...")
-
+            self.Ws[used] = lr.coef_[:, :M]
+            self.Rs[used] = lr.coef_[:, M:]
 
         # Set the intercept
         self.r = lr.intercept_
+        
 
 
 # Allow general nonlinear emission models with neural networks
