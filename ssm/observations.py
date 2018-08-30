@@ -422,9 +422,19 @@ class AutoRegressiveObservations(_Observations):
         assert mus.shape == (T, self.K, D)
         return mus
 
+    def _compute_sigmas(self, data, input, mask, tag):
+        T, D = data.shape
+        inv_sigmas = self.inv_sigmas
+        
+        sigma_init = np.exp(self.inv_sigma_init) * np.ones((self.lags, self.K, self.D))
+        sigma_ar = np.repeat(np.exp(inv_sigmas)[None, :, :], T-self.lags, axis=0)
+        sigmas = np.concatenate((sigma_init, sigma_ar))
+        assert sigmas.shape == (T, self.K, D)
+        return sigmas
+
     def log_likelihoods(self, data, input, mask, tag):
         mus = self._compute_mus(data, input, mask, tag)
-        sigmas = np.exp(self.inv_sigmas)
+        sigmas = self._compute_sigmas(data, input, mask, tag)
         return -0.5 * np.sum(
             (np.log(2 * np.pi * sigmas) + (data[:, None, :] - mus)**2 / sigmas) 
             * mask[:, None, :], axis=2)
@@ -661,14 +671,14 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
     def log_likelihoods(self, data, input, mask, tag):
         D = self.D
         mus = self._compute_mus(data, input, mask, tag)
-        sigmas = np.exp(self.inv_sigmas)
+        sigmas = self._compute_sigmas(data, input, mask, tag)
         nus = np.exp(self.inv_nus)
 
         resid = data[:, None, :] - mus
         z = resid / sigmas
         return -0.5 * (nus + D) * np.log(1.0 + (resid * z).sum(axis=2) / nus) + \
             gammaln((nus + D) / 2.0) - gammaln(nus / 2.0) - D / 2.0 * np.log(nus) \
-            -D / 2.0 * np.log(np.pi) - 0.5 * np.sum(np.log(sigmas), axis=1)
+            -D / 2.0 * np.log(np.pi) - 0.5 * np.sum(np.log(sigmas), axis=-1)
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, As, bs, sigmas, nus = self.D, self.As, self.bs, np.exp(self.inv_sigmas), np.exp(self.inv_nus)
