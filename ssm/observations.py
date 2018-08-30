@@ -521,12 +521,12 @@ class IndependentAutoRegressiveObservations(_Observations):
         for k in range(self.K):
             for d in range(self.D):
                 ts = npr.choice(T-self.lags, replace=False, size=(T-self.lags)//self.K)
-                x = np.column_stack([data[ts + l, d:d+1] for l in range(self.lags)] + [input[ts]])
+                x = np.column_stack([data[ts + l, d:d+1] for l in range(self.lags)] + [input[ts, :self.M]])
                 y = data[ts+self.lags, d:d+1]
                 lr = LinearRegression().fit(x, y)
 
                 self.As[k, d] = lr.coef_[:, :self.lags]
-                self.Vs[k, d] = lr.coef_[:, self.lags:]
+                self.Vs[k, d] = lr.coef_[:, self.lags:self.lags+self.M]
                 self.bs[k, d] = lr.intercept_
                 
                 resid = y - lr.predict(x)
@@ -538,10 +538,10 @@ class IndependentAutoRegressiveObservations(_Observations):
         As, bs, Vs = self.As, self.bs, self.Vs
 
         # Instantaneous inputs, lagged data, and bias
-        mus = np.matmul(Vs[None, ...], input[self.lags:, None, :, None])[:, :, :, 0]
+        mus = np.matmul(Vs[None, ...], input[self.lags:, None, :self.M, None])[:, :, :, 0]
         for l in range(self.lags):
-            mus = mus + As[:, :, l] * data[self.lags-l-1:-l-1, None, :]
-        mus = mus + bs
+            mus += As[:, :, l] * data[self.lags-l-1:-l-1, None, :]
+        mus += bs
 
         # Pad with the initial condition
         mus = np.concatenate((self.mu_init * np.ones((self.lags, self.K, self.D)), mus))
@@ -576,7 +576,7 @@ class IndependentAutoRegressiveObservations(_Observations):
                 if np.all(mask[:, d]):
                     xs.append(
                         np.hstack([data[self.lags-l-1:-l-1, d:d+1] for l in range(self.lags)] 
-                                  + [input[self.lags:], np.ones((data.shape[0]-self.lags, 1))]))
+                                  + [input[self.lags:, :M], np.ones((data.shape[0]-self.lags, 1))]))
                     ys.append(data[self.lags:, d])
                     weights.append(Ez[self.lags:])
 
