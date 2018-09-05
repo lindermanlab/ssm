@@ -45,7 +45,7 @@ class _Transitions(object):
         
         # expected log joint
         def _expected_log_joint(expectations):
-            elbo = 0
+            elbo = self.log_prior()
             for data, input, mask, tag, (expected_states, expected_joints) \
                 in zip(datas, inputs, masks, tags, expectations):
                 log_Ps = self.log_transition_matrices(data, input, mask, tag)
