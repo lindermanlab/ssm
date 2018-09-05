@@ -119,7 +119,7 @@ class _LinearEmissions(_Emissions):
     def compute_mus(self, x):
         return np.matmul(self.Cs[None, ...], x[:, None, :, None])[:, :, :, 0] + self.ds
 
-    def _initialize_with_pca(self, datas, masks, num_iters=25):
+    def _initialize_with_pca(self, datas, masks, num_iters=20):
         pca, xs = pca_with_imputation(self.D, datas, masks, num_iters=num_iters)
         Keff = 1 if self.single_subspace else self.K
         self.Cs = np.tile(pca.components_.T[None, :, :], (Keff, 1, 1))

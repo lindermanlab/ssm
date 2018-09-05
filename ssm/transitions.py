@@ -10,7 +10,7 @@ from autograd import grad
 
 from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
     ensure_elbo_args_are_lists, adam_with_convergence_check, one_hot, \
-    logistic
+    logistic, relu
 
 
 class _Transitions(object):
@@ -374,7 +374,7 @@ class NeuralNetworkRecurrentTransitions(_Transitions):
         self.biases = [npr.randn(n) for n in layer_sizes[1:]]
 
         nonlinearities = dict(
-            relu=lambda x: np.maximum(0, x),
+            relu=relu,
             tanh=np.tanh,
             sigmoid=logistic)
         self.nonlinearity = nonlinearities[nonlinearity]
