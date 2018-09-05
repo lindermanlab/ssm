@@ -682,7 +682,7 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
         z = resid / sigmas
         return -0.5 * (nus + D) * np.log(1.0 + (resid * z).sum(axis=2) / nus) + \
             gammaln((nus + D) / 2.0) - gammaln(nus / 2.0) - D / 2.0 * np.log(nus) \
-            -D / 2.0 * np.log(np.pi) - 0.5 * np.sum(np.log(sigmas), axis=1)
+            -D / 2.0 * np.log(np.pi) - 0.5 * np.sum(np.log(sigmas), axis=-1)
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, As, bs, sigmas, nus = self.D, self.As, self.bs, np.exp(self.inv_sigmas), np.exp(self.inv_nus)
