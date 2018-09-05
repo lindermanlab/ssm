@@ -175,4 +175,5 @@ def one_hot(z, K):
     zoh = np.reshape(zoh, shp + (K,))
     return zoh
 
-
+def relu(x):
+    return np.maximum(0, x)
