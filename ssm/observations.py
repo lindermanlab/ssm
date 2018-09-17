@@ -185,9 +185,26 @@ class StudentsTObservations(_Observations):
         """
         return expectations.dot(self.mus)
 
-    # def m_step(self, expectations, datas, inputs, tags):
-    #     # see https://stats.stackexchange.com/questions/63647/
-    #     #         estimating-parameters-of-students-t-distribution
+    def m_step(self, expectations, datas, inputs, tags, num_em_iters=10):
+        """
+        Student's t is a scale mixture of Gaussians.  We can estimate its
+        parameters using the EM algorithm.  See
+             https://stats.stackexchange.com/questions/63647/
+                estimating-parameters-of-students-t-distribution
+
+        This amounts to estimating the scale of the precision from its gamma
+        posterior and then updating the mean and covariance accordingly.
+        """ 
+        super(StudentsTObservations, self).m_step(expectations, datas, inputs, tags)
+
+        # Starting to implement this... 
+        # for itr in range(num_em_iters):
+        #     # Estimate the scales w for each data point
+        #     ws = []
+        #     for (Ez, _), y in zip(expectations, datas):
+        #         w = (np.exp(self.inv_nus) + 1) * np.exp(self.inv_sigmas) / 
+        #             (np.exp(self.inv_nus) * np.exp(inv_sigmas) + (y - self.mus)**2)
+
 
 
 class BernoulliObservations(_Observations):

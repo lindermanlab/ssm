@@ -64,10 +64,10 @@ def trend_filter(data):
     return data - trend
 
 def standardize(data, mask): 
-
-    data[~mask] = np.nan
-    m = np.nanmean(data, axis=0)
-    s = np.nanstd(data, axis=0)
+    data2 = data.copy()
+    data2[~mask] = np.nan
+    m = np.nanmean(data2, axis=0)
+    s = np.nanstd(data2, axis=0)
     s[~np.any(mask, axis=0)] = 1
     y = (data - m) / s
     assert np.all(np.isfinite(y))
