@@ -70,6 +70,7 @@ def standardize(data, mask):
     s = np.nanstd(data2, axis=0)
     s[~np.any(mask, axis=0)] = 1
     y = (data - m) / s
+    y[~mask] = 0
     assert np.all(np.isfinite(y))
     return y
 
