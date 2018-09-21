@@ -58,27 +58,51 @@ arhmm_em_lls = arhmm.fit(y, method="em", num_em_iters=N_em_iters)
 arhmm_em_test_ll = arhmm.log_probability(y_test)
 arhmm_em_smooth = arhmm.smooth(y)
 
+print("Fitting tARHMM with SGD")
+tarhmm = HMM(K, D, observations="robust_ar")
+tarhmm_sgd_lls = tarhmm.fit(y, method="sgd", num_iters=N_sgd_iters)
+tarhmm_sgd_test_ll = tarhmm.log_probability(y_test)
+tarhmm_sgd_smooth = tarhmm.smooth(y)
+
+print("Fitting tARHMM with EM")
+tarhmm = HMM(K, D, observations="robust_ar")
+tarhmm_em_lls = tarhmm.fit(y, method="em", num_em_iters=N_em_iters)
+tarhmm_em_test_ll = tarhmm.log_probability(y_test)
+tarhmm_em_smooth = tarhmm.smooth(y)
+
 # Plot smoothed observations
 plt.figure()
 for d in range(D):
 	plt.subplot(D, 1, d+1)
 	plt.plot(y, '-k', lw=2, label="true")
-	plt.plot(hmm_sgd_smooth, '-r', lw=1, label="HMM (SGD)")
-	plt.plot(hmm_em_smooth, ':r', lw=1, label="HMM (EM)")
-	plt.plot(thmm_sgd_smooth, ':g', lw=1, label="tHMM (SGD)")
-	plt.plot(thmm_em_smooth, ':g', lw=1, label="tHMM (EM)")
-	plt.plot(arhmm_sgd_smooth, '-b', lw=1, label="ARHMM (SGD)")
-	plt.plot(arhmm_em_smooth, ':b', lw=1, label="ARHMM (EM)")
+	l1 = plt.plot(hmm_sgd_smooth, '-', lw=1,
+                      label="HMM (SGD)")[0]
+	plt.plot(hmm_em_smooth, ':', lw=1, color=l1.get_color(),
+                 label="HMM (EM)")
+	l2 = plt.plot(thmm_sgd_smooth, '-', lw=1,
+                      label="tHMM (SGD)")[0]
+	plt.plot(thmm_em_smooth, ':', lw=1, color=l2.get_color(),
+                 label="tHMM (EM)")
+	l3 = plt.plot(arhmm_sgd_smooth, '-', lw=1,
+                      label="ARHMM (SGD)")[0]
+	plt.plot(arhmm_em_smooth, ':', lw=1, color=l3.get_color(),
+                 label="ARHMM (EM)")
+	l4 = plt.plot(tarhmm_sgd_smooth, '-', lw=1,
+                      label="tARHMM (SGD)")[0]
+	plt.plot(arhmm_em_smooth, ':', lw=1, color=l4.get_color(),
+                 label="tARHMM (EM)")
 	plt.legend(loc="upper right")
 
 # Plot log likelihoods
 plt.figure()
-plt.plot(hmm_sgd_lls, label="HMM (SGD)")
-plt.plot(hmm_em_lls, label="HMM (EM)")
-plt.plot(thmm_sgd_lls, label="tHMM (SGD)")
-plt.plot(thmm_em_lls, label="tHMM (EM)")
-plt.plot(arhmm_sgd_lls, label="ARHMM (SGD)")
-plt.plot(arhmm_em_lls, label="ARHMM (EM)")
+l1 = plt.plot(hmm_sgd_lls, ls='-', label="HMM (SGD)")[0]
+plt.plot(hmm_em_lls, ls=':', label="HMM (EM)", color=l1.get_color())
+l2 = plt.plot(thmm_sgd_lls, ls='-', label="tHMM (SGD)")[0]
+plt.plot(thmm_em_lls, ls=':', label="tHMM (EM)", color=l2.get_color())
+l3 = plt.plot(arhmm_sgd_lls, ls='-', label="ARHMM (SGD)")[0]
+plt.plot(arhmm_em_lls, ls=':', label="ARHMM (EM)", color=l3.get_color())
+l4 = plt.plot(tarhmm_sgd_lls, ls='-', label="tARHMM (SGD)")[0]
+plt.plot(tarhmm_em_lls, ls=':', label="tARHMM (EM)", color=l4.get_color())
 plt.plot(true_ll * np.ones(max(N_em_iters, N_sgd_iters)), ':', label="true")
 plt.legend(loc="lower right")
 
@@ -90,5 +114,7 @@ print("tHMM (SGD) ", thmm_sgd_test_ll)
 print("tHMM (EM) ", thmm_em_test_ll)
 print("ARHMM (SGD) ", arhmm_sgd_test_ll)
 print("ARHMM (EM) ", arhmm_em_test_ll)
+print("tARHMM (SGD) ", tarhmm_sgd_test_ll)
+print("tARHMM (EM) ", tarhmm_em_test_ll)
 
 plt.show()
