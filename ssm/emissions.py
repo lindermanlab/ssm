@@ -1,5 +1,6 @@
 import autograd.numpy as np
 import autograd.numpy.random as npr
+from autograd.scipy.special import gammaln
 
 from ssm.util import ensure_args_are_lists, ensure_args_not_none, logistic, logit, softplus, inv_softplus
 from ssm.preprocessing import interpolate_data, pca_with_imputation
@@ -238,7 +239,7 @@ class StudentsTEmissions(_LinearEmissions):
         mus = self.compute_mus(x)
         etas = np.exp(self.inv_etas)
         taus = npr.gamma(nus[z] / 2.0, 2.0 / nus[z])
-        return mus[:,z,:] + np.sqrt(etas[z] / taus) * npr.randn(T, self.N)
+        return mus[np.arange(T), z, :] + np.sqrt(etas[z] / taus) * npr.randn(T, self.N)
         
     def smooth(self, expected_states, variational_mean, data, input=None, mask=None, tag=None):
         mus = self.compute_mus(variational_mean)
@@ -280,7 +281,7 @@ class BernoulliEmissions(_LinearEmissions):
         T = z.shape[0]
         z = np.zeros_like(z, dtype=int) if self.single_subspace else z
         ps = self.mean(self.compute_mus(x))
-        return npr.rand(T, self.N) < ps[:,z,:]
+        return npr.rand(T, self.N) < ps[np.arange(T), z,:]
 
     def smooth(self, expected_states, variational_mean, data, input=None, mask=None, tag=None):
         ps = self.mean(self.compute_mus(variational_mean))
@@ -289,7 +290,7 @@ class BernoulliEmissions(_LinearEmissions):
 
 class PoissonEmissions(_LinearEmissions):
     def __init__(self, N, K, D, M=0, single_subspace=True, link="log"):
-        super(PoissonEmissions, self).__init__(K, D, M)
+        super(PoissonEmissions, self).__init__(N, K, D, M, single_subspace=single_subspace)
         
         mean_functions = dict(
             log=lambda x: np.exp(x),
@@ -324,7 +325,8 @@ class PoissonEmissions(_LinearEmissions):
         T = z.shape[0]
         z = np.zeros_like(z, dtype=int) if self.single_subspace else z
         lambdas = self.mean(self.compute_mus(x))
-        return npr.poisson(lambdas[:,z,:])
+        y = npr.poisson(lambdas[np.arange(T), z, :])
+        return y
 
     def smooth(self, expected_states, variational_mean, data, input=None, mask=None, tag=None):
         lambdas = self.mean(self.compute_mus(variational_mean))

@@ -539,7 +539,7 @@ class AutoRegressiveObservations(_Observations):
             (np.log(2 * np.pi * sigmas) + (data[:, None, :] - mus)**2 / sigmas) 
             * mask[:, None, :], axis=2)
 
-    def m_step(self, expectations, datas, inputs, masks, tags):
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         K, D, M, lags = self.K, self.D, self.M, self.lags
         # Collect data for this dimension
         xs, ys, Ezs = [], [], []
