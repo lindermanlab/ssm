@@ -30,11 +30,20 @@ from ssm.hierarchical import \
 
 from ssm.emissions import \
     GaussianEmissions, \
-    BernoulliEmissions, \
-    PoissonEmissions, \
+    GaussianIdentityEmissions, \
+    GaussianNeuralNetworkEmissions, \
     StudentsTEmissions, \
+    StudentsTIdentityEmissions, \
+    StudentsTNeuralNetworkEmissions, \
+    BernoulliEmissions, \
+    BernoulliIdentityEmissions, \
+    BernoulliNeuralNetworkEmissions, \
+    PoissonEmissions, \
+    PoissonIdentityEmissions, \
+    PoissonNeuralNetworkEmissions, \
     AutoRegressiveEmissions, \
-    GaussianNeuralNetworkEmissions
+    AutoRegressiveIdentityEmissions, \
+    AutoRegressiveNeuralNetworkEmissions
 
 
 def HMM(K, D, M=0,
@@ -194,12 +203,26 @@ def SLDS(N, K, D, M=0,
     # Make the emission distn    
     emission_classes = dict(
         gaussian=GaussianEmissions,
+        gaussian_id=GaussianIdentityEmissions, 
+        gaussian_nn=GaussianNeuralNetworkEmissions,
         studentst=StudentsTEmissions,
+        studentst_id=StudentsTIdentityEmissions,
+        studentst_nn=StudentsTNeuralNetworkEmissions,
         t=StudentsTEmissions,
+        t_id=StudentsTIdentityEmissions,
+        t_nn=StudentsTNeuralNetworkEmissions,
         poisson=PoissonEmissions,
+        poisson_id=PoissonIdentityEmissions,
+        poisson_nn=PoissonNeuralNetworkEmissions,
         bernoulli=BernoulliEmissions,
+        bernoulli_id=BernoulliIdentityEmissions,
+        bernoulli_nn=BernoulliNeuralNetworkEmissions,
         ar=AutoRegressiveEmissions,
-        autoregressive=AutoRegressiveEmissions
+        ar_id=AutoRegressiveIdentityEmissions,
+        ar_nn=AutoRegressiveNeuralNetworkEmissions,
+        autoregressive=AutoRegressiveEmissions,
+        autoregressive_id=AutoRegressiveIdentityEmissions,
+        autoregressive_nn=AutoRegressiveNeuralNetworkEmissions
         )
 
     emissions = emissions.lower()
@@ -261,13 +284,26 @@ def LDS(N, D, M=0,
     # Make the emission distn    
     emission_classes = dict(
         gaussian=GaussianEmissions,
+        gaussian_id=GaussianIdentityEmissions, 
+        gaussian_nn=GaussianNeuralNetworkEmissions,
         studentst=StudentsTEmissions,
+        studentst_id=StudentsTIdentityEmissions,
+        studentst_nn=StudentsTNeuralNetworkEmissions,
         t=StudentsTEmissions,
+        t_id=StudentsTIdentityEmissions,
+        t_nn=StudentsTNeuralNetworkEmissions,
         poisson=PoissonEmissions,
+        poisson_id=PoissonIdentityEmissions,
+        poisson_nn=PoissonNeuralNetworkEmissions,
         bernoulli=BernoulliEmissions,
+        bernoulli_id=BernoulliIdentityEmissions,
+        bernoulli_nn=BernoulliNeuralNetworkEmissions,
         ar=AutoRegressiveEmissions,
+        ar_id=AutoRegressiveIdentityEmissions,
+        ar_nn=AutoRegressiveNeuralNetworkEmissions,
         autoregressive=AutoRegressiveEmissions,
-        gaussian_nn=GaussianNeuralNetworkEmissions
+        autoregressive_id=AutoRegressiveIdentityEmissions,
+        autoregressive_nn=AutoRegressiveNeuralNetworkEmissions
         )
 
     emissions = emissions.lower()

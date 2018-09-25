@@ -147,7 +147,7 @@ def test_expectations(T=1000, K=20, D=2):
     hmm.transitions.log_Ps = np.log(A)
     hmm.observations.mus = C
     hmm.observations.inv_sigmas = np.log(sigma) * np.ones((K, D))
-    test_Ez, test_Ezzp1 = hmm.expected_states(y)
+    test_Ez, test_Ezzp1, _ = hmm.expected_states(y)
     test_E_trans = test_Ezzp1.sum(0)
 
     print(true_E_trans.round(3))

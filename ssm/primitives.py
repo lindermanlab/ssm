@@ -67,7 +67,9 @@ def hmm_expected_states(log_pi0, log_Ps, ll):
     ll = to_c(ll)
 
     alphas = np.zeros((T, K))
-    forward_pass(log_pi0, log_Ps, ll, alphas)    
+    forward_pass(log_pi0, log_Ps, ll, alphas)
+    normalizer = logsumexp(alphas[-1])
+
     betas = np.zeros((T, K))
     backward_pass(log_Ps, ll, betas)    
 
@@ -80,7 +82,7 @@ def hmm_expected_states(log_pi0, log_Ps, ll):
     expected_joints = np.exp(expected_joints)
     expected_joints /= expected_joints.sum((1,2))[:,None,None]
     
-    return expected_states, expected_joints
+    return expected_states, expected_joints, normalizer
 
 
 def hmm_filter(log_pi0, log_Ps, ll):

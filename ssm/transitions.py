@@ -46,7 +46,7 @@ class _Transitions(object):
         # expected log joint
         def _expected_log_joint(expectations):
             elbo = self.log_prior()
-            for data, input, mask, tag, (expected_states, expected_joints) \
+            for data, input, mask, tag, (expected_states, expected_joints, _) \
                 in zip(datas, inputs, masks, tags, expectations):
                 log_Ps = self.log_transition_matrices(data, input, mask, tag)
                 elbo += np.sum(expected_joints * log_Ps)
@@ -96,7 +96,7 @@ class StationaryTransitions(_Transitions):
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        P = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1 in expectations]) + 1e-16
+        P = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations]) + 1e-16
         P /= P.sum(axis=-1, keepdims=True)
         self.log_Ps = np.log(P)
 
@@ -123,7 +123,7 @@ class StickyTransitions(StationaryTransitions):
         return lp
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        expected_joints = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1 in expectations]) + 1e-8
+        expected_joints = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations]) + 1e-8
         expected_joints += self.kappa * np.eye(self.K)
         P = expected_joints / expected_joints.sum(axis=1, keepdims=True)
         self.log_Ps = np.log(P)
@@ -218,7 +218,7 @@ class RecurrentTransitions(InputDrivenTransitions):
         K, M, D = self.K, self.M, self.D
 
         zps, zns = [], []
-        for Ez, _ in expectations:
+        for Ez, _, _ in expectations:
             z = np.array([np.random.choice(K, p=p) for p in Ez])
             zps.append(z[:-1])
             zns.append(z[1:])
@@ -314,7 +314,7 @@ class RecurrentOnlyTransitions(_Transitions):
         K, M, D = self.K, self.M, self.D
 
         zps, zns = [], []
-        for Ez, _ in expectations:
+        for Ez, _, _ in expectations:
             z = np.array([np.random.choice(K, p=p) for p in Ez])
             zps.append(z[:-1])
             zns.append(z[1:])

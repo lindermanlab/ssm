@@ -84,21 +84,21 @@ def random_rotation(n, theta=None):
 
 def ensure_args_are_lists(f):
     def wrapper(self, datas, inputs=None, masks=None, tags=None, **kwargs):
-        datas = [datas] if not isinstance(datas, list) else datas
+        datas = [datas] if not isinstance(datas, (list, tuple)) else datas
         
         if inputs is None:
             inputs = [np.zeros((data.shape[0], self.M)) for data in datas]
-        elif not isinstance(inputs, list):
+        elif not isinstance(inputs, (list, tuple)):
             inputs = [inputs]
 
         if masks is None:
             masks = [np.ones_like(data, dtype=bool) for data in datas]
-        elif not isinstance(masks, list):
+        elif not isinstance(masks, (list, tuple)):
             masks = [masks]
 
         if tags is None:
             tags = [None] * len(datas)
-        elif not isinstance(tags, list):
+        elif not isinstance(tags, (list, tuple)):
             tags = [tags]
 
         return f(self, datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
@@ -108,21 +108,21 @@ def ensure_args_are_lists(f):
 
 def ensure_elbo_args_are_lists(f):
     def wrapper(self, variational_params, datas, inputs=None, masks=None, tags=None, **kwargs):
-        datas = [datas] if not isinstance(datas, list) else datas
+        datas = [datas] if not isinstance(datas, (list, tuple)) else datas
         
         if inputs is None:
             inputs = [np.zeros((data.shape[0], self.M)) for data in datas]
-        elif not isinstance(inputs, list):
+        elif not isinstance(inputs, (list, tuple)):
             inputs = [inputs]
 
         if masks is None:
             masks = [np.ones_like(data, dtype=bool) for data in datas]
-        elif not isinstance(masks, list):
+        elif not isinstance(masks, (list, tuple)):
             masks = [masks]
 
         if tags is None:
             tags = [None] * len(datas)
-        elif not isinstance(tags, list):
+        elif not isinstance(tags, (list, tuple)):
             tags = [tags]
 
         return f(self, variational_params, datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
