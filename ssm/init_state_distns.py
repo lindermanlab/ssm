@@ -41,6 +41,6 @@ class InitialStateDistribution(object):
         return self.log_pi0 - logsumexp(self.log_pi0)
     
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        pi0 = sum([Ez[0] for Ez, _ in expectations]) + 1e-8
+        pi0 = sum([Ez[0] for Ez, _, _ in expectations]) + 1e-8
         self.log_pi0 = np.log(pi0 / pi0.sum())
 

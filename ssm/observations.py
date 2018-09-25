@@ -52,7 +52,7 @@ class _Observations(object):
         # expected log joint
         def _expected_log_joint(expectations):
             elbo = self.log_prior()
-            for data, input, mask, tag, (expected_states, expected_joints) \
+            for data, input, mask, tag, (expected_states, expected_joints, _) \
                 in zip(datas, inputs, masks, tags, expectations):
                 lls = self.log_likelihoods(data, input, mask, tag)
                 elbo += np.sum(expected_states * lls)
@@ -115,7 +115,7 @@ class GaussianObservations(_Observations):
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         x = np.concatenate(datas)
-        weights = np.concatenate([Ez for Ez, _ in expectations])
+        weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
             self.mus[k] = np.average(x, axis=0, weights=weights[:,k])
             sqerr = (x - self.mus[k])**2
@@ -231,7 +231,7 @@ class StudentsTObservations(_Observations):
             # Update the mean (notation from natural params of Gaussian)
             J = np.zeros((K, D))
             h = np.zeros((K, D))
-            for tau, (Ez, _), y in zip(taus, expectations, datas):
+            for tau, (Ez, _, _), y in zip(taus, expectations, datas):
                 J += np.sum(Ez[:, :, None] * tau, axis=0)
                 h += np.sum(Ez[:, :, None] * tau * y[:, None, :], axis=0) 
             self.mus = h / J
@@ -239,7 +239,7 @@ class StudentsTObservations(_Observations):
             # Update the variance
             sqerr = np.zeros((K, D))
             weight = np.zeros((K, D))
-            for tau, (Ez, _), y in zip(taus, expectations, datas):
+            for tau, (Ez, _, _), y in zip(taus, expectations, datas):
                 sqerr += np.sum(Ez[:, :, None] * tau * (y[:, None, :] - self.mus)**2, axis=0) 
                 weight += np.sum(Ez[:, :, None], axis=0)
             self.inv_sigmas = np.log(sqerr / weight + 1e-8)
@@ -275,7 +275,7 @@ class StudentsTObservations(_Observations):
             
             elp = 0
             T = 0
-            for tau, (Ez, _) in zip(taus, expectations):
+            for tau, (Ez, _, _) in zip(taus, expectations):
                 lp = np.sum(nus/2 * np.log(nus/2) - gammaln(nus/2) + \
                            (nus/2 - 1) * np.log(tau) - tau * nus / 2, axis=2)
                 elp += np.sum(Ez * lp)
@@ -327,7 +327,7 @@ class BernoulliObservations(_Observations):
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         x = np.concatenate(datas)
-        weights = np.concatenate([Ez for Ez, _ in expectations])
+        weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
             ps = np.clip(np.average(x, axis=0, weights=weights[:,k]), 1e-3, 1-1e-3)
             self.logit_ps[k] = logit(ps)
@@ -380,7 +380,7 @@ class PoissonObservations(_Observations):
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         x = np.concatenate(datas)
-        weights = np.concatenate([Ez for Ez, _ in expectations])
+        weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
             self.log_lambdas[k] = np.log(np.average(x, axis=0, weights=weights[:,k]) + 1e-8)
 
@@ -432,7 +432,7 @@ class CategoricalObservations(_Observations):
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         x = np.concatenate(datas)
-        weights = np.concatenate([Ez for Ez, _ in expectations])
+        weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
             # compute weighted histogram of the class assignments
             xoh = one_hot(x, self.C)                                          # T x D x C
@@ -543,7 +543,7 @@ class AutoRegressiveObservations(_Observations):
         K, D, M, lags = self.K, self.D, self.M, self.lags
         # Collect data for this dimension
         xs, ys, Ezs = [], [], []
-        for (Ez, _), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
+        for (Ez, _, _), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
             # Only use data if it is complete
             if not np.all(mask):
                 raise Exception("Encountered missing data in AutoRegressiveObservations!") 
@@ -702,7 +702,7 @@ class IndependentAutoRegressiveObservations(_Observations):
         for d in range(self.D):
             # Collect data for this dimension
             xs, ys, weights = [], [], []
-            for (Ez, _), data, input, mask in zip(expectations, datas, inputs, masks):
+            for (Ez, _, _), data, input, mask in zip(expectations, datas, inputs, masks):
                 # Only use data if it is complete
                 if np.all(mask[:, d]):
                     xs.append(
@@ -801,7 +801,8 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
             gammaln((nus + D) / 2.0) - gammaln(nus / 2.0) - D / 2.0 * np.log(nus) \
             -D / 2.0 * np.log(np.pi) - 0.5 * np.sum(np.log(sigmas), axis=-1)
 
-    def m_step(self, expectations, datas, inputs, masks, tags, num_em_iters=10, optimizer="adam", **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, 
+               num_em_iters=1, optimizer="adam", num_iters=10, **kwargs):
         """
         Student's t is a scale mixture of Gaussians.  We can estimate its
         parameters using the EM algorithm. This amounts to estimating the 
@@ -809,16 +810,14 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
         the mean and covariance accordingly.
         """ 
         self._m_step_ar(expectations, datas, inputs, masks, tags, num_em_iters)
-        self._m_step_nu(expectations, datas, inputs, masks, tags, optimizer, **kwargs)
-
+        self._m_step_nu(expectations, datas, inputs, masks, tags, optimizer, num_iters, **kwargs)
 
     def _m_step_ar(self, expectations, datas, inputs, masks, tags, num_em_iters):
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
-        
         # Collect data for this dimension
         xs, ys, Ezs = [], [], []
-        for (Ez, _), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
+        for (Ez, _, _), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
             # Only use data if it is complete
             if not np.all(mask):
                 raise Exception("Encountered missing data in AutoRegressiveObservations!") 
@@ -832,7 +831,6 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
         for itr in range(num_em_iters):
             # Compute expected precision for each data point given current parameters
             taus = []
-            # for data, input, mask, tag in zip(datas, inputs, masks, tags):
             for x, y in zip(xs, ys):
                 # mus = self._compute_mus(data, input, mask, tag)
                 # sigmas = self._compute_sigmas(data, input, mask, tag)
@@ -845,45 +843,31 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
                 beta = np.exp(self.inv_nus[:, None])/2 + 1/2 * (y[:, None, :] - mus)**2 / sigmas
                 taus.append(alpha / beta)
 
-            # Fit a weighted linear regression for each discrete state
-            for k in range(K):
-                
-                # # Check for zero weights (singular matrix)
-                # if np.sum(weights[:, k]) < D * lags + M + 1:
-                #     self.As[k] = 0
-                #     self.Vs[k] = 0
-                #     self.bs[k] = 0
-                #     self.inv_sigmas[k] = 0
-                #     continue
+            # Fit the weighted linear regressions for each K and D
+            J = np.zeros((K, D, D*lags + M + 1, D*lags + M + 1))
+            h = np.zeros((K, D,  D*lags + M + 1,))
+            for x, y, Ez, tau in zip(xs, ys, Ezs, taus):
+                scale = Ez[:, :, None] * tau
+                xx = x[:, None, :] * x[:, :, None]
+                xy = x[:, None, :] * y[:, :, None]
+                J += np.sum(scale[:, :, :, None, None] * xx[:, None, None, :, :], axis=0)
+                h += np.sum(scale[:, :, :, None] * xy[:, None, :, :], axis=0)
 
-                # Update each row of the AR matrix
-                for d in range(D):
-                    # Note: a prior would go here
-                    Jk = np.zeros((D * lags + M + 1, D * lags + M + 1))
-                    hk = np.zeros((D * lags + M + 1,))
-                    
-                    for x, y, Ez, tau in zip(xs, ys, Ezs, taus):
-                        # Compute the effective precision (product of E[z_t=k] and tau_{t, k, d}
-                        scale = Ez[:, k] * tau[:, k, d]
-                        Jk += np.sum(scale[:, None, None] * x[:,:,None] * x[:, None,:], axis=0)
-                        hk += np.sum(scale[:, None] * x * y[:, d:d+1], axis=0)
+            mus = np.linalg.solve(J, h)
+            self.As = mus[:, :, :D*lags]
+            self.Vs = mus[:, :, D*lags:D*lags+M]
+            self.bs = mus[:, :, -1]
 
-                    # Solve the linear system and unpack the mean
-                    muk = np.linalg.solve(Jk, hk)
-                    self.As[k, d] = muk[:D*lags]
-                    self.Vs[k, d] = muk[D*lags:D*lags+M]
-                    self.bs[k, d] = muk[-1]
+            # Fit the variance
+            sqerr = 0
+            weight = 0
+            for x, y, Ez, tau in zip(xs, ys, Ezs, taus):
+                yhat = np.matmul(x[None, :, :], np.swapaxes(mus, -1, -2))
+                sqerr += np.einsum('tk, tkd, ktd -> kd', Ez, tau, (y - yhat)**2)
+                weight += np.sum(Ez, axis=0)
+            self.inv_sigmas = np.log(sqerr / weight[:, None] + 1e-16)
 
-                    # Update the variance
-                    sqerr = 0
-                    weight = 0
-                    for x, y, Ez, tau in zip(xs, ys, Ezs, taus):
-                        yhat = np.dot(x, muk)
-                        sqerr += np.sum(Ez[:, k] * tau[:, k, d] * (y[:, d] - yhat)**2)
-                        weight += np.sum(Ez[:, k])
-                    self.inv_sigmas[k, d] = np.log(sqerr / weight + 1e-16)
-
-    def _m_step_nu(self, expectations, datas, inputs, masks, tags, optimizer, **kwargs):
+    def _m_step_nu(self, expectations, datas, inputs, masks, tags, optimizer, num_iters, **kwargs):
         """
         The shape parameter nu determines a gamma prior.  We have
         
@@ -894,8 +878,6 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
         their conditional gamma distribution, as above, 
         and then update nu_n to maximize their probability.
         """
-        if "num_iters" not in kwargs:
-            kwargs["num_iters"] = 25
         optimizer = dict(sgd=sgd, adam=adam)[optimizer]
         K, D = self.K, self.D
 
@@ -917,7 +899,7 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
             
             elp = 0
             T = 0
-            for tau, (Ez, _) in zip(taus, expectations):
+            for tau, (Ez, _, _) in zip(taus, expectations):
                 lp = np.sum(nus/2 * np.log(nus/2) - gammaln(nus/2) + \
                            (nus/2 - 1) * np.log(tau) - tau * nus / 2, axis=2)
                 elp += np.sum(Ez * lp)
@@ -925,7 +907,7 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
 
             return -elp / T
 
-        self.inv_nus = optimizer(grad(_objective), self.inv_nus, **kwargs)
+        self.inv_nus = optimizer(grad(_objective), self.inv_nus, num_iters=num_iters, **kwargs)
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, As, bs, sigmas, nus = self.D, self.As, self.bs, np.exp(self.inv_sigmas), np.exp(self.inv_nus)

@@ -109,7 +109,7 @@ class _HMM(object):
 
     @ensure_args_not_none
     def most_likely_states(self, data, input=None, mask=None, tag=None):
-        Ez, _ = self.expected_states(data, input, mask, tag)
+        Ez, _, _ = self.expected_states(data, input, mask, tag)
         return np.argmax(Ez, axis=1)
 
     @ensure_args_not_none
@@ -125,7 +125,7 @@ class _HMM(object):
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
-        Ez, _ = self.expected_states(data, input, mask)
+        Ez, _, _ = self.expected_states(data, input, mask)
         return self.observations.smooth(Ez, data, input, tag)
         
     def log_prior(self):
@@ -175,7 +175,7 @@ class _HMM(object):
             # Compute the expected log probability 
             elp += np.sum(Ez[0] * log_pi0)
             elp += np.sum(Ezzp1 * log_Ps)
-            elp += np.sum(Ez[1:] * log_likes[1:])
+            elp += np.sum(Ez * log_likes)
             assert np.isfinite(elp)
         return elp
     
@@ -203,7 +203,7 @@ class _HMM(object):
 
         return lls
 
-    def _fit_em(self, datas, inputs, masks, tags, num_em_iters=100, verbose=True, debug=False, **kwargs):
+    def _fit_em(self, datas, inputs, masks, tags, num_em_iters=100, verbose=True, **kwargs):
         """
         Fit the parameters with expectation maximization.
 
@@ -216,25 +216,13 @@ class _HMM(object):
             expectations = [self.expected_states(data, input, mask, tag) 
                             for data, input, mask, tag in zip(datas, inputs, masks, tags)]
 
-            if debug:
-                el1 = self.expected_log_probability(expectations, datas, inputs, masks, tags)
-                ll1 = self.log_probability(datas, inputs, masks, tags)
-
             # M step: maximize expected log joint wrt parameters
             self.init_state_distn.m_step(expectations, datas, inputs, masks, tags, **kwargs)
             self.transitions.m_step(expectations, datas, inputs, masks, tags, **kwargs)
             self.observations.m_step(expectations, datas, inputs, masks, tags, **kwargs)
 
-            if debug: 
-                el2 = self.expected_log_probability(expectations, datas, inputs, masks, tags)
-                ll2 = self.log_probability(datas, inputs, masks, tags)
-                assert el2 >= el1 - 1e-8
-                assert ll2 >= ll1 - 1e-8
-                assert (ll2 - ll1) >= (el2 - el1) - 1e-8
-
             # Store progress
-            lls.append(self.log_probability(datas, inputs, masks, tags))
-            
+            lls.append(self.log_prior() + sum([ll for (_, _, ll) in expectations]))
             if verbose:
                 print("Iteration {}.  LP: {:.1f}".format(itr, lls[-1]))
 
