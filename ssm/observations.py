@@ -12,6 +12,7 @@ from autograd import grad
 from ssm.util import random_rotation, ensure_args_are_lists, ensure_args_not_none, \
     logistic, logit, adam_with_convergence_check, one_hot
 from ssm.preprocessing import interpolate_data
+from ssm.cstats import robust_ar_statistics
 
 
 class _Observations(object):
@@ -847,11 +848,7 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
             J = np.zeros((K, D, D*lags + M + 1, D*lags + M + 1))
             h = np.zeros((K, D,  D*lags + M + 1,))
             for x, y, Ez, tau in zip(xs, ys, Ezs, taus):
-                scale = Ez[:, :, None] * tau
-                xx = x[:, None, :] * x[:, :, None]
-                xy = x[:, None, :] * y[:, :, None]
-                J += np.sum(scale[:, :, :, None, None] * xx[:, None, None, :, :], axis=0)
-                h += np.sum(scale[:, :, :, None] * xy[:, None, :, :], axis=0)
+                robust_ar_statistics(Ez, tau, x, y, J, h)
 
             mus = np.linalg.solve(J, h)
             self.As = mus[:, :, :D*lags]
