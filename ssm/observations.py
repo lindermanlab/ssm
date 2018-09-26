@@ -4,13 +4,13 @@ import warnings
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.misc import logsumexp
-from autograd.scipy.special import gammaln
+from autograd.scipy.special import gammaln, digamma
 from autograd.scipy.stats import norm, gamma
 from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
 from ssm.util import random_rotation, ensure_args_are_lists, ensure_args_not_none, \
-    logistic, logit, adam_with_convergence_check, one_hot
+    logistic, logit, adam_with_convergence_check, one_hot, generalized_newton_studentst_dof
 from ssm.preprocessing import interpolate_data
 from ssm.cstats import robust_ar_statistics
 
@@ -186,105 +186,75 @@ class StudentsTObservations(_Observations):
         """
         return expectations.dot(self.mus)
 
-    def m_step(self, expectations, datas, inputs, masks, tags, num_em_iters=10, optimizer="adam", **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         """
         Student's t is a scale mixture of Gaussians.  We can estimate its
-        parameters using the EM algorithm. This amounts to estimating the 
-        scale of the precision from its gamma posterior and then updating 
-        the mean and covariance accordingly.
+        parameters using the EM algorithm. See the notebook in doc/students_t for
+        complete details.
         """ 
-        self._m_step_mu_sigma(expectations, datas, inputs, masks, tags, num_em_iters)
-        self._m_step_nu(expectations, datas, inputs, masks, tags, optimizer, **kwargs)
+        self._m_step_mu_sigma(expectations, datas, inputs, masks, tags)
+        self._m_step_nu(expectations, datas, inputs, masks, tags)
 
-    def _m_step_mu_sigma(self, expectations, datas, inputs, masks, tags, num_em_iters):
-        """
-        Student's t is a scale mixture of Gaussians.  We can estimate its
-        parameters using the EM algorithm.  See
-             https://stats.stackexchange.com/questions/63647/
-                estimating-parameters-of-students-t-distribution
-
-        The augmented model is 
-
-            tau_td | z_t ~ Gam(nu_{z_t}/2, nu_{z_t}/2)
-            y_td | z_t, tau_td ~ N(mu_{z_t}, tau_td / sigma_{z_t})
-
-        In our EM algorithm, we first compute E_{p(tau_td | z_t=k, y_td, mu_k, sigma_k)[tau_td].
-        This is a gamma posterior,
-
-            tau_td | z_t=k, y_t, mu_k, sigma_k ~ Gam(nu_k/2 + 1/2, nu_k/2 + 1/2*(y_td - mu_k)**2)
-
-        Its mean is E[tau_td | zt = k] = (nu_k/2 + 1/2) / (nu_k/2 + 1/2*(y_td - mu_k)**2)
-
-        Then we plug this into the expected log likelihood E_{p(z | y) p(tau | z, y)}[log p(y | mu, sigma)]
-        to optimize mu and sigma. 
-        """
+    def _m_step_mu_sigma(self, expectations, datas, inputs, masks, tags):
         K, D = self.K, self.D
-        for itr in range(num_em_iters):
-            # Estimate the precisions w for each data point
-            taus = []
-            for y in datas:
-                # nu: (K,)  mus: (K, D)  sigmas: (K, D)  y: (T, D)  -> w: (T, K, D)
-                nus = np.exp(self.inv_nus[:, None])
-                alpha = nus/2 + 1/2
-                beta = nus/2 + 1/2 * (y[:, None, :] - self.mus)**2 / np.exp(self.inv_sigmas)
-                taus.append(alpha / beta)
-
-            # Update the mean (notation from natural params of Gaussian)
-            J = np.zeros((K, D))
-            h = np.zeros((K, D))
-            for tau, (Ez, _, _), y in zip(taus, expectations, datas):
-                J += np.sum(Ez[:, :, None] * tau, axis=0)
-                h += np.sum(Ez[:, :, None] * tau * y[:, None, :], axis=0) 
-            self.mus = h / J
-
-            # Update the variance
-            sqerr = np.zeros((K, D))
-            weight = np.zeros((K, D))
-            for tau, (Ez, _, _), y in zip(taus, expectations, datas):
-                sqerr += np.sum(Ez[:, :, None] * tau * (y[:, None, :] - self.mus)**2, axis=0) 
-                weight += np.sum(Ez[:, :, None], axis=0)
-            self.inv_sigmas = np.log(sqerr / weight + 1e-8)
-
-    def _m_step_nu(self, expectations, datas, inputs, masks, tags, optimizer, **kwargs):
-        """
-        The shape parameter nu determines a gamma prior.  We have
-        
-            w_n ~ Gamma(nu/2, nu/2)
-            y_n ~ N(mu, sigma^2 / w_n)
-
-        To update w_n, we can samples w_n's from 
-        their conditional gamma distribution, as above, 
-        and then update nu_n to maximize their probability.
-        """
-        if "num_iters" not in kwargs:
-            kwargs["num_iters"] = 25
-        optimizer = dict(sgd=sgd, adam=adam)[optimizer]
-        K, D = self.K, self.D
-
-        # Sample the precisions w for each data point
-        taus = []
+    
+        # Estimate the precisions w for each data point
+        E_taus = []
         for y in datas:
             # nu: (K,)  mus: (K, D)  sigmas: (K, D)  y: (T, D)  -> w: (T, K, D)
             nus = np.exp(self.inv_nus[:, None])
             alpha = nus/2 + 1/2
             beta = nus/2 + 1/2 * (y[:, None, :] - self.mus)**2 / np.exp(self.inv_sigmas)
-            taus.append(npr.gamma(alpha, 1/beta))
+            E_taus.append(alpha / beta)
 
-        # Maximize the expected log probability of taus | nu
-        def _objective(inv_nus, itr):
-            nus = np.exp(inv_nus)[:, None]
+        # Update the mean (notation from natural params of Gaussian)
+        J = np.zeros((K, D))
+        h = np.zeros((K, D))
+        for E_tau, (Ez, _, _), y in zip(E_taus, expectations, datas):
+            J += np.sum(Ez[:, :, None] * E_tau, axis=0)
+            h += np.sum(Ez[:, :, None] * E_tau * y[:, None, :], axis=0) 
+        self.mus = h / J
+
+        # Update the variance
+        sqerr = np.zeros((K, D))
+        weight = np.zeros((K, D))
+        for E_tau, (Ez, _, _), y in zip(E_taus, expectations, datas):
+            sqerr += np.sum(Ez[:, :, None] * E_tau * (y[:, None, :] - self.mus)**2, axis=0) 
+            weight += np.sum(Ez[:, :, None], axis=0)
+        self.inv_sigmas = np.log(sqerr / weight + 1e-8)
+
+    def _m_step_nu(self, expectations, datas, inputs, masks, tags):
+        """
+        The shape parameter nu determines a gamma prior.  We have
+        
+            tau_n ~ Gamma(nu/2, nu/2)
+            y_n ~ N(mu, sigma^2 / tau_n)
+
+        To update nu, we do EM and optimize the expected log likelihood using
+        a generalized Newton's method.  See the notebook in doc/students_t for
+        complete details.
+        """
+        K, D = self.K, self.D
+
+        # Compute the precisions w for each data point
+        E_taus = np.zeros(K)
+        E_logtaus = np.zeros(K)
+        weights = np.zeros(K)
+        for y, (Ez, _, _) in zip(datas, expectations):
+            # nu: (K,)  mus: (K, D)  sigmas: (K, D)  y: (T, D)  -> alpha/beta: (T, K, D)
+            nus = np.exp(self.inv_nus[:, None])
+            alpha = nus/2 + 1/2
+            beta = nus/2 + 1/2 * (y[:, None, :] - self.mus)**2 / np.exp(self.inv_sigmas)
             
-            elp = 0
-            T = 0
-            for tau, (Ez, _, _) in zip(taus, expectations):
-                lp = np.sum(nus/2 * np.log(nus/2) - gammaln(nus/2) + \
-                           (nus/2 - 1) * np.log(tau) - tau * nus / 2, axis=2)
-                elp += np.sum(Ez * lp)
-                T += Ez.shape[0]
+            E_taus += np.sum(Ez[:, :, None] * alpha / beta, axis=(0, 2))
+            E_logtaus += np.sum(Ez[:, :, None] * (digamma(alpha) - np.log(beta)), axis=(0, 2))
+            weights += np.sum(Ez, axis=0) * D
 
-            return -elp / T
+        E_taus /= weights
+        E_logtaus /= weights
 
-        self.inv_nus = optimizer(grad(_objective), self.inv_nus, **kwargs)
+        for k in range(K):
+            self.inv_nus[k] = np.log(generalized_newton_studentst_dof(E_taus[k], E_logtaus[k]))
 
 
 class BernoulliObservations(_Observations):
@@ -875,36 +845,29 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
         their conditional gamma distribution, as above, 
         and then update nu_n to maximize their probability.
         """
-        optimizer = dict(sgd=sgd, adam=adam)[optimizer]
+        # Compute the precisions w for each data point
         K, D = self.K, self.D
-
-        # Sample the precisions w for each data point
-        taus = []
-        for data, input, mask, tag in zip(datas, inputs, masks, tags):
+        E_taus = np.zeros(K)
+        E_logtaus = np.zeros(K)
+        weights = np.zeros(K)
+        for (Ez, _, _,), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
             # nu: (K,)  mus: (K, D)  sigmas: (K, D)  y: (T, D)  -> w: (T, K, D)
             mus = self._compute_mus(data, input, mask, tag)
             sigmas = self._compute_sigmas(data, input, mask, tag)
-                
             nus = np.exp(self.inv_nus[:, None])
+
             alpha = nus/2 + 1/2
             beta = nus/2 + 1/2 * (data[:, None, :] - mus)**2 / sigmas
-            taus.append(npr.gamma(alpha, 1/beta))
-
-        # Maximize the expected log probability of taus | nu
-        def _objective(inv_nus, itr):
-            nus = np.exp(inv_nus)[:, None]
             
-            elp = 0
-            T = 0
-            for tau, (Ez, _, _) in zip(taus, expectations):
-                lp = np.sum(nus/2 * np.log(nus/2) - gammaln(nus/2) + \
-                           (nus/2 - 1) * np.log(tau) - tau * nus / 2, axis=2)
-                elp += np.sum(Ez * lp)
-                T += Ez.shape[0]
+            E_taus += np.sum(Ez[:, :, None] * alpha / beta, axis=(0, 2))
+            E_logtaus += np.sum(Ez[:, :, None] * (digamma(alpha) - np.log(beta)), axis=(0, 2))
+            weights += np.sum(Ez, axis=0) * D
 
-            return -elp / T
+        E_taus /= weights
+        E_logtaus /= weights
 
-        self.inv_nus = optimizer(grad(_objective), self.inv_nus, num_iters=num_iters, **kwargs)
+        for k in range(K):
+            self.inv_nus[k] = np.log(generalized_newton_studentst_dof(E_taus[k], E_logtaus[k]))
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, As, bs, sigmas, nus = self.D, self.As, self.bs, np.exp(self.inv_sigmas), np.exp(self.inv_nus)
