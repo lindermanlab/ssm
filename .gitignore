@@ -5,6 +5,8 @@ __pycache__/
 
 # C extensions
 *.so
+*.cpp
+*.c
 
 # Distribution / packaging
 .Python
@@ -105,3 +107,4 @@ venv.bak/
 
 # Other
 *~
+notebooks/dask-worker-space

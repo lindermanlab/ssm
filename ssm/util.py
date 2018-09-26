@@ -175,5 +175,42 @@ def one_hot(z, K):
     zoh = np.reshape(zoh, shp + (K,))
     return zoh
 
+
 def relu(x):
     return np.maximum(0, x)
+
+
+def generalized_newton_studentst_dof(E_tau, E_logtau, nu0=1, max_iter=100, nu_min=1e-3, nu_max=20, tol=1e-8, verbose=False):
+    """
+    Generalized Newton's method for the degrees of freedom parameter, nu, 
+    of a Student's t distribution.  See the notebook in the doc/students_t
+    folder for a complete derivation. 
+    """
+    from scipy.special import digamma, polygamma
+    delbo = lambda nu: 1/2 * (1 + np.log(nu/2)) - 1/2 * digamma(nu/2) + 1/2 * E_logtau - 1/2 * E_tau
+    ddelbo = lambda nu: 1/(2 * nu) - 1/4 * polygamma(1, nu/2)
+
+    dnu = np.inf
+    nu = nu0
+    for itr in range(max_iter):
+        if abs(dnu) < tol:
+            break
+            
+        if nu < nu_min or nu > nu_max:
+            warn("generalized_newton_studentst_dof fixed point grew beyond "
+                 "bounds [{},{}].".format(nu_min, nu_max))
+            nu = np.clip(nu, nu_min, nu_max)
+            break
+        
+        # Perform the generalized Newton update
+        a = -nu**2 * ddelbo(nu)
+        b = delbo(nu) - a / nu
+        assert a > 0 and b < 0, "generalized_newton_studentst_dof encountered invalid values of a,b"
+        dnu = -a / b - nu
+        nu = nu + dnu
+
+    if itr == max_iter - 1:
+        warn("generalized_newton_studentst_dof failed to converge" 
+             "at tolerance {} in {} iterations.".format(tol, itr))
+
+    return nu
