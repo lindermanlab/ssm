@@ -181,6 +181,11 @@ class RecurrentTransitions(InputDrivenTransitions):
         # Parameters linking past observations to state distribution
         self.Rs = npr.randn(K, D)
 
+        # Store a scikit learn logistic regression object for warm starting
+        from sklearn.linear_model import LogisticRegression
+        self._lr = LogisticRegression(
+            fit_intercept=False, multi_class="multinomial", solver="sag", warm_start=True)
+
     @property
     def params(self):
         return super(RecurrentTransitions, self).params + (self.Rs,)
@@ -214,7 +219,7 @@ class RecurrentTransitions(InputDrivenTransitions):
         Technically, this is a stochastic M-step since the states 
         are sampled from their posterior marginals.
         """
-        from sklearn.linear_model import LogisticRegression
+        
         K, M, D = self.K, self.M, self.D
 
         zps, zns = [], []
@@ -244,20 +249,19 @@ class RecurrentTransitions(InputDrivenTransitions):
             return
 
         # Fit the logistic regression
-        lr = LogisticRegression(fit_intercept=False, multi_class="multinomial", solver="sag")
-        lr.fit(X, y)
+        self._lr.fit(X, y)
 
         # Extract the coefficients
-        assert lr.coef_.shape[0] == (K_used if K_used > 2 else 1)
-        log_P = lr.coef_[:, :K]
-        W = lr.coef_[:, K:K+M]
-        R = lr.coef_[:, K+M:]
+        assert self._lr.coef_.shape[0] == (K_used if K_used > 2 else 1)
+        log_P = self._lr.coef_[:, :K]
+        W = self._lr.coef_[:, K:K+M]
+        R = self._lr.coef_[:, K+M:]
             
         if K_used == 2:
             # lr thought there were only two classes
-            self.log_Ps[:,used[1]] = lr.coef_[0, :K]
-            self.Ws[used[1]] = lr.coef_[0,K:K+M]
-            self.Rs[used[1]] = lr.coef_[0,K+M:]
+            self.log_Ps[:,used[1]] = self._lr.coef_[0, :K]
+            self.Ws[used[1]] = self._lr.coef_[0,K:K+M]
+            self.Rs[used[1]] = self._lr.coef_[0,K+M:]
         else:
             self.log_Ps[:, used] = log_P.T
             self.Ws[used] = W
@@ -277,6 +281,11 @@ class RecurrentOnlyTransitions(_Transitions):
         self.Ws = npr.randn(K, M)
         self.Rs = npr.randn(K, D)
         self.r = npr.randn(K)
+
+        # Store a scikit learn logistic regression object for warm starting
+        from sklearn.linear_model import LogisticRegression
+        self._lr = LogisticRegression(
+            fit_intercept=False, multi_class="multinomial", solver="sag", warm_start=True)
 
     @property
     def params(self):
@@ -310,7 +319,6 @@ class RecurrentOnlyTransitions(_Transitions):
         Technically, this is a stochastic M-step since the states 
         are sampled from their posterior marginals.
         """
-        from sklearn.linear_model import LogisticRegression
         K, M, D = self.K, self.M, self.D
 
         zps, zns = [], []
@@ -340,21 +348,20 @@ class RecurrentOnlyTransitions(_Transitions):
             return
 
         # Fit the logistic regression
-        lr = LogisticRegression(fit_intercept=True, multi_class="multinomial", solver="sag")
-        lr.fit(X, y)
+        self._lr.fit(X, y)
 
         # Extract the coefficients
-        assert lr.coef_.shape[0] == (K_used if K_used > 2 else 1)            
+        assert self._lr.coef_.shape[0] == (K_used if K_used > 2 else 1)            
         if K_used == 2:
             # lr thought there were only two classes
-            self.Ws[used[1]] = lr.coef_[0, :M]
-            self.Rs[used[1]] = lr.coef_[0, M:]
+            self.Ws[used[1]] = self._lr.coef_[0, :M]
+            self.Rs[used[1]] = self._lr.coef_[0, M:]
         else:
-            self.Ws[used] = lr.coef_[:, :M]
-            self.Rs[used] = lr.coef_[:, M:]
+            self.Ws[used] = self._lr.coef_[:, :M]
+            self.Rs[used] = self._lr.coef_[:, M:]
 
         # Set the intercept
-        self.r[used] = lr.intercept_
+        self.r[used] = self._lr.intercept_
         
 
 
