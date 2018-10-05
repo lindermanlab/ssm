@@ -50,3 +50,8 @@ cd ssm
 pip install -e .
 ```
 This will install "from source" and compile the Cython code for fast message passing and gradients.
+
+To install with some parallel support via OpenMP, first make sure that your compiler supports it.  OS X's default Clang compiler does not, but you can install GNU gcc and g++ with conda.  Once you've set these as your default, you can install with OpenMP support using
+```
+USE_OPENMP=True pip install -e .
+```

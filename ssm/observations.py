@@ -776,9 +776,8 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
                num_em_iters=1, optimizer="adam", num_iters=10, **kwargs):
         """
         Student's t is a scale mixture of Gaussians.  We can estimate its
-        parameters using the EM algorithm. This amounts to estimating the 
-        scale of the precision from its gamma posterior and then updating 
-        the mean and covariance accordingly.
+        parameters using the EM algorithm. See the notebook in doc/students_t 
+        for complete details. 
         """ 
         self._m_step_ar(expectations, datas, inputs, masks, tags, num_em_iters)
         self._m_step_nu(expectations, datas, inputs, masks, tags, optimizer, num_iters, **kwargs)
@@ -835,17 +834,6 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
             self.inv_sigmas = np.log(sqerr / weight[:, None] + 1e-16)
 
     def _m_step_nu(self, expectations, datas, inputs, masks, tags, optimizer, num_iters, **kwargs):
-        """
-        The shape parameter nu determines a gamma prior.  We have
-        
-            w_n ~ Gamma(nu/2, nu/2)
-            y_n ~ N(mu, sigma^2 / w_n)
-
-        To update w_n, we can samples w_n's from 
-        their conditional gamma distribution, as above, 
-        and then update nu_n to maximize their probability.
-        """
-        # Compute the precisions w for each data point
         K, D = self.K, self.D
         E_taus = np.zeros(K)
         E_logtaus = np.zeros(K)
