@@ -29,6 +29,9 @@ extensions.append(
               )
 )
 
+extensions = cythonize(extensions)
+
+
 setup(name='ssm',
       version='0.0.1',
       description='State space models in python',
