@@ -814,7 +814,7 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
                 taus.append(alpha / beta)
 
             # Fit the weighted linear regressions for each K and D
-            J = np.zeros((K, D, D*lags + M + 1, D*lags + M + 1))
+            J = np.tile(np.eye(D * lags + M + 1)[None, None, :, :], (K, D, 1, 1))
             h = np.zeros((K, D,  D*lags + M + 1,))
             for x, y, Ez, tau in zip(xs, ys, Ezs, taus):
                 robust_ar_statistics(Ez, tau, x, y, J, h)
