@@ -175,7 +175,7 @@ class RecurrentTransitions(InputDrivenTransitions):
     """
     Generalization of the input driven HMM in which the observations serve as future inputs
     """
-    def __init__(self, K, D, M):
+    def __init__(self, K, D, M=0, solver="lbfgs"):
         super(RecurrentTransitions, self).__init__(K, D, M)
 
         # Parameters linking past observations to state distribution
@@ -184,7 +184,7 @@ class RecurrentTransitions(InputDrivenTransitions):
         # Store a scikit learn logistic regression object for warm starting
         from sklearn.linear_model import LogisticRegression
         self._lr = LogisticRegression(
-            fit_intercept=False, multi_class="multinomial", solver="sag", warm_start=True)
+            fit_intercept=False, multi_class="multinomial", solver=solver, warm_start=True)
 
     @property
     def params(self):
@@ -212,7 +212,7 @@ class RecurrentTransitions(InputDrivenTransitions):
         log_Ps = log_Ps + np.dot(data[:-1], self.Rs.T)[:, None, :]
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
-    def m_step(self, expectations, datas, inputs, masks, tags, optimizer="adam", num_iters=10, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         """
         Fit a logistic regression for the transitions.
         
@@ -227,7 +227,6 @@ class RecurrentTransitions(InputDrivenTransitions):
             z = np.array([np.random.choice(K, p=p) for p in Ez])
             zps.append(z[:-1])
             zns.append(z[1:])
-
 
         X = np.vstack([np.hstack((one_hot(zp, K), input[1:], data[:-1])) 
                        for zp, input, data in zip(zps, inputs, datas)])
@@ -274,7 +273,7 @@ class RecurrentOnlyTransitions(_Transitions):
     next state.  Get rid of the transition matrix and replace it
     with a constant bias r.
     """
-    def __init__(self, K, D, M=0):
+    def __init__(self, K, D, M=0,  solver="lbfgs"):
         super(RecurrentOnlyTransitions, self).__init__(K, D, M)
 
         # Parameters linking past observations to state distribution
@@ -285,7 +284,7 @@ class RecurrentOnlyTransitions(_Transitions):
         # Store a scikit learn logistic regression object for warm starting
         from sklearn.linear_model import LogisticRegression
         self._lr = LogisticRegression(
-            fit_intercept=False, multi_class="multinomial", solver="sag", warm_start=True)
+            fit_intercept=False, multi_class="multinomial", solver=solver, warm_start=True)
 
     @property
     def params(self):
