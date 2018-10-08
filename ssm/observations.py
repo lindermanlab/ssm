@@ -537,8 +537,8 @@ class AutoRegressiveObservations(_Observations):
 
             # Update each row of the AR matrix
             for d in range(D):
-                # Note: a prior would go here
-                Jk = np.zeros((D * lags + M + 1, D * lags + M + 1))
+                # This is a weak prior centered on zero
+                Jk = 1e-8 * np.eye(D * lags + M + 1)
                 hk = np.zeros((D * lags + M + 1,))                
                 for x, y, Ez in zip(xs, ys, Ezs):
                     scale = Ez[:, k]

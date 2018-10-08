@@ -7,16 +7,16 @@
 import numpy as np
 cimport numpy as np
 
-from libc.math cimport log, exp, fmax
+from libc.math cimport log, exp, fmax, INFINITY
 
-cdef double logsumexp(double[::1] x):
+cdef double logsumexp(double[::1] x) nogil:
     cdef int i, N
     cdef double m, out
 
     N = x.shape[0]
 
     # find the max
-    m = -np.inf
+    m = -INFINITY
     for i in range(N):
         m = fmax(m, x[i])
 
