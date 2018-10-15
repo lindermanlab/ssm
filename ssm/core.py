@@ -7,6 +7,7 @@ import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.misc import logsumexp
 from autograd.misc.optimizers import sgd, adam
+from autograd.tracer import getval
 from autograd import grad
 
 from ssm.primitives import hmm_normalizer, hmm_expected_states, hmm_filter, viterbi
@@ -34,7 +35,10 @@ class _HMM(object):
         self._fitting_methods = \
             dict(sgd=partial(self._fit_sgd, "sgd"),
                  adam=partial(self._fit_sgd, "adam"),
-                 em=self._fit_em)
+                 em=self._fit_em,
+                 stochastic_em=partial(self._fit_stochastic_em, "adam"),
+                 stochastic_em_sgd=partial(self._fit_stochastic_em, "sgd"),
+                 )
 
     @property
     def params(self):
@@ -170,7 +174,7 @@ class _HMM(object):
         :return total log probability of the data.
         """
         elp = self.log_prior()
-        for (Ez, Ezzp1), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
+        for (Ez, Ezzp1, _), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
             log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
             log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
             log_likes = self.observations.log_likelihoods(data, input, mask, tag)
@@ -203,6 +207,61 @@ class _HMM(object):
         optimizers = dict(sgd=sgd, adam=adam, adam_with_convergence_check=adam_with_convergence_check)
         self.params = \
             optimizers[optimizer](grad(_objective), self.params, callback=_print_progress, **kwargs)
+
+        return lls
+
+    def _fit_stochastic_em(self, optimizer, datas, inputs, masks, tags, num_epochs=100, **kwargs):
+        """
+        Replace the M-step of EM with a stochastic gradient update using the ELBO computed
+        on a minibatch of data. 
+        """
+        M = len(datas)
+        T = sum([data.shape[0] for data in datas])
+        
+        perm = [np.random.permutation(M) for _ in range(num_epochs)]
+        def _get_minibatch(itr):
+            epoch = itr // M
+            m = itr % M
+            i = perm[epoch][m]
+            return datas[i], inputs[i], masks[i], tags[i]
+
+        def _objective(params, itr):
+            # Grab a minibatch of data
+            data, input, mask, tag = _get_minibatch(itr)
+            Ti = data.shape[0]
+
+            # E step: compute expected latent states with current parameters
+            Ez, Ezzp1, _ = self.expected_states(data, input, mask, tag) 
+
+            # M step: set the parameter and compute the (normalized) objective function
+            self.params = params
+            log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
+            log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+            log_likes = self.observations.log_likelihoods(data, input, mask, tag)
+
+            # Compute the expected log probability 
+            # (Scale by number of length of this minibatch.)
+            obj = self.log_prior()
+            obj += np.sum(Ez[0] * log_pi0) * M
+            obj += np.sum(Ezzp1 * log_Ps) * (T - M) / (Ti - 1)
+            obj += np.sum(Ez * log_likes) * T / Ti
+            assert np.isfinite(obj)
+
+            return -obj / T
+
+        lls = []
+        pbar = tqdm.trange(num_epochs * M)
+        def _print_progress(params, itr, g):
+            epoch = itr // M
+            m = itr % M
+            lls.append(-T * _objective(params, itr))
+            pbar.set_description("Epoch {} Itr {} LP: {:.1f}".format(epoch, m, lls[-1]))
+            pbar.update(1)
+        
+        # Run the optimizer
+        optimizers = dict(sgd=sgd, adam=adam)
+        self.params = \
+            optimizers[optimizer](grad(_objective), self.params, callback=_print_progress, num_iters=num_epochs * M)
 
         return lls
 

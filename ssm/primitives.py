@@ -3,6 +3,7 @@ import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.misc import logsumexp
 from autograd.extend import primitive, defvjp
+from autograd.tracer import getval
 from functools import partial
 
 from ssm.messages import forward_pass, backward_pass, backward_sample, grad_hmm_normalizer
@@ -23,10 +24,9 @@ def hmm_normalizer(log_pi0, log_Ps, ll):
     
 def _make_grad_hmm_normalizer(argnum, ans, log_pi0, log_Ps, ll):
     # Unbox the inputs if necessary
-    unbox = lambda x: x if isinstance(x, np.ndarray) else x._value
-    log_pi0 = unbox(log_pi0)
-    log_Ps = unbox(log_Ps)
-    ll = unbox(ll)
+    log_pi0 = getval(log_pi0)
+    log_Ps = getval(log_Ps)
+    ll = getval(ll)
 
     # Make sure everything is C contiguous
     to_c = lambda arr: np.copy(arr, 'C') if not arr.flags['C_CONTIGUOUS'] else arr
@@ -62,9 +62,9 @@ def hmm_expected_states(log_pi0, log_Ps, ll):
 
     # Make sure everything is C contiguous
     to_c = lambda arr: np.copy(arr, 'C') if not arr.flags['C_CONTIGUOUS'] else arr
-    log_pi0 = to_c(log_pi0)
-    log_Ps = to_c(log_Ps)
-    ll = to_c(ll)
+    log_pi0 = to_c(getval(log_pi0))
+    log_Ps = to_c(getval(log_Ps))
+    ll = to_c(getval(ll))
 
     alphas = np.zeros((T, K))
     forward_pass(log_pi0, log_Ps, ll, alphas)
