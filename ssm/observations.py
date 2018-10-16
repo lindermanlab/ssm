@@ -921,3 +921,75 @@ class RecurrentRobustAutoRegressiveObservations(
     pass
 
 
+class VonMisesObservations(_Observations):
+    def __init__(self, K, D, M=0):
+        super(VonMisesObservations, self).__init__(K, D, M)
+        self.mus = npr.randn(K, D)
+        max_k = 9
+        self.log_kappas = np.log(-1*npr.uniform(low=-1*max_k, high=0, size=(K, D)))
+
+    @property
+    def params(self):
+        return self.mus, self.log_kappas
+
+    @params.setter
+    def params(self, value):
+        self.mus, self.log_kappas = value
+
+    def permute(self, perm):
+        self.mus = self.mus[perm]
+        self.log_kappas = self.log_kappas[perm]
+
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
+        # TODO: add spherical k-means for initialization
+        pass
+
+    def log_likelihoods(self, data, input, mask, tag):
+        from autograd.scipy.special import i0
+        # Compute the log likelihood of the data under each of the K classes
+        # Return a TxK array of probability of data[t] under class k
+        mus, kappas = self.mus, np.exp(self.log_kappas)
+        mask = np.ones_like(data, dtype=bool) if mask is None else mask
+
+        return np.sum(
+            (kappas*(np.cos(data[:, None, :] - mus)) - np.log(2 * np.pi)
+             - np.log(i0(kappas)))
+            * mask[:, None, :], axis=2)
+
+    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
+        D, mus, kappas = self.D, self.mus, np.exp(self.log_kappas)
+        return npr.vonmises(self.mus[z], kappas[z], D)
+
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        from autograd.scipy.special import i0, i1
+        x = np.concatenate(datas)
+
+        weights = np.concatenate([Ez for Ez, _, _ in expectations])
+
+        # convert angles to 2D representation and employ closed form solutions
+        x_k = np.stack((np.sin(x), np.cos(x)), axis=1)
+
+        r_k = np.tensordot(weights.T, x_k, (-1, 0))
+
+        r_norm = np.sqrt(np.sum(r_k ** 2, 1))
+        mus_k = r_k / r_norm[:, None]
+        r_bar = r_norm / weights.sum(0)[:, None]
+
+        # truncated newton approximation with 2 iterations
+        kappa_0 = r_bar * (2 - r_bar ** 2) / (1 - r_bar ** 2)
+
+        kappa_1 = kappa_0 - ((i1(kappa_0)/i0(kappa_0)) - r_bar) / \
+                  (1 - (i1(kappa_0)/i0(kappa_0)) ** 2 - (i1(kappa_0)/i0(kappa_0)) / kappa_0)
+        kappa_2 = kappa_1 - ((i1(kappa_1)/i0(kappa_1)) - r_bar) / \
+                  (1 - (i1(kappa_1)/i0(kappa_1)) ** 2 - (i1(kappa_1)/i0(kappa_1)) / kappa_1)
+
+        for k in range(self.K):
+            self.mus[k] = np.arctan2(*mus_k[k])
+            self.log_kappas[k] = np.log(kappa_2[k])
+
+    def smooth(self, expectations, data, input, tag):
+        mus = self.mus
+        return expectations.dot(mus)
+
+
