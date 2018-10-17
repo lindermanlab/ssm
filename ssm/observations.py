@@ -346,7 +346,7 @@ class PoissonObservations(_Observations):
         return np.sum(lls * mask[:, None, :], axis=2)
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
-        lambdas = np.exp(self.inv_lambdas)
+        lambdas = np.exp(self.log_lambdas)
         return npr.poisson(lambdas[z])
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
