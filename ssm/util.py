@@ -86,8 +86,11 @@ def ensure_args_are_lists(f):
     def wrapper(self, datas, inputs=None, masks=None, tags=None, **kwargs):
         datas = [datas] if not isinstance(datas, (list, tuple)) else datas
         
+        M = (self.M,) if isinstance(self.M, int) else self.M
+        assert isinstance(M, tuple)
+
         if inputs is None:
-            inputs = [np.zeros((data.shape[0], self.M)) for data in datas]
+            inputs = [np.zeros((data.shape[0],) + M) for data in datas]
         elif not isinstance(inputs, (list, tuple)):
             inputs = [inputs]
 
@@ -109,9 +112,12 @@ def ensure_args_are_lists(f):
 def ensure_elbo_args_are_lists(f):
     def wrapper(self, variational_params, datas, inputs=None, masks=None, tags=None, **kwargs):
         datas = [datas] if not isinstance(datas, (list, tuple)) else datas
+
+        M = (self.M,) if isinstance(self.M, int) else self.M
+        assert isinstance(M, tuple)
         
         if inputs is None:
-            inputs = [np.zeros((data.shape[0], self.M)) for data in datas]
+            inputs = [np.zeros((data.shape[0],) + M) for data in datas]
         elif not isinstance(inputs, (list, tuple)):
             inputs = [inputs]
 
@@ -133,7 +139,9 @@ def ensure_elbo_args_are_lists(f):
 def ensure_args_not_none(f):
     def wrapper(self, data, input=None, mask=None, tag=None, **kwargs):
         assert data is not None
-        input = np.zeros((data.shape[0], self.M)) if input is None else input
+        M = (self.M,) if isinstance(self.M, int) else self.M
+        assert isinstance(M, tuple)
+        input = np.zeros((data.shape[0],) + M) if input is None else input
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return f(self, data, input=input, mask=mask, tag=tag, **kwargs)
     return wrapper
@@ -143,7 +151,9 @@ def ensure_slds_args_not_none(f):
     def wrapper(self, variational_mean, data, input=None, mask=None, tag=None, **kwargs):
         assert variational_mean is not None
         assert data is not None
-        input = np.zeros((data.shape[0], self.M)) if input is None else input
+        M = (self.M,) if isinstance(self.M, int) else self.M
+        assert isinstance(M, tuple)
+        input = np.zeros((data.shape[0],) + M) if input is None else input
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return f(self, variational_mean, data, input=input, mask=mask, tag=tag, **kwargs)
     return wrapper
