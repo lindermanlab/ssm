@@ -3,7 +3,7 @@ import autograd.numpy.random as npr
 
 from ssm.models import HMM
 
-def test_hmm_likelihood(T=100, K=5, D=2):
+def test_hmm_likelihood(T=1000, K=5, D=2):
     # Create a true HMM
     A = npr.rand(K, K)
     A /= A.sum(axis=1, keepdims=True)
@@ -37,7 +37,7 @@ def test_hmm_likelihood(T=100, K=5, D=2):
     assert np.allclose(true_lkhd, test_lkhd)
 
 
-def test_expectations(T=100, K=20, D=2):
+def test_expectations(T=1000, K=20, D=2):
     # Create a true HMM
     A = npr.rand(K, K)
     A /= A.sum(axis=1, keepdims=True)
@@ -80,7 +80,7 @@ def test_expectations(T=100, K=20, D=2):
     assert np.allclose(true_E_trans, test_E_trans)
 
 
-def test_viterbi(T=100, K=20, D=2):
+def test_viterbi(T=1000, K=20, D=2):
     # Create a true HMM
     A = npr.rand(K, K)
     A /= A.sum(axis=1, keepdims=True)
