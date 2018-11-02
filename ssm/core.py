@@ -412,8 +412,11 @@ class _SwitchingLDS(object):
 
     @ensure_slds_args_not_none
     def most_likely_states(self, variational_mean, data, input=None, mask=None, tag=None):
-        Ez, _ = self.expected_states(variational_mean, data, input, mask, tag)
-        return np.argmax(Ez, axis=1)
+        log_pi0 = self.init_state_distn.log_initial_state_distn(variational_mean, input, mask, tag)
+        log_Ps = self.transitions.log_transition_matrices(variational_mean, input, mask, tag)
+        log_likes = self.dynamics.log_likelihoods(variational_mean, input, np.ones_like(variational_mean, dtype=bool), tag)
+        log_likes += self.emissions.log_likelihoods(data, input, mask, tag, variational_mean)
+        return viterbi(log_pi0, log_Ps, log_likes)
 
     @ensure_slds_args_not_none
     def smooth(self, variational_mean, data, input=None, mask=None, tag=None):
@@ -431,24 +434,22 @@ class _SwitchingLDS(object):
         return np.nan
 
     @ensure_elbo_args_are_lists
-    def elbo(self, variational_params, datas, inputs=None, masks=None, tags=None, n_samples=1):
+    def elbo(self, variational_posterior, datas, inputs=None, masks=None, tags=None, n_samples=1):
         """
         Lower bound on the marginal likelihood p(y | theta) 
         using variational posterior q(x; phi) where phi = variational_params
         """
         elbo = 0
-        for data, input, mask, tag, (q_mu, q_sigma_inv) in \
-            zip(datas, inputs, masks, tags, variational_params):
+        for sample in range(n_samples):
+            # Sample x from the variational posterior
+            xs = variational_posterior.sample()
 
-            q_sigma = np.exp(q_sigma_inv)
-            for sample in range(n_samples):
-                # log p(theta)
-                elbo += self.log_prior()
+            # log p(theta)
+            elbo += self.log_prior()
 
-                # Sample x from the variational posterior
-                x = q_mu + np.sqrt(q_sigma) * npr.randn(data.shape[0], self.D)
+            # log p(x, y | theta) = log \sum_z p(x, y, z | theta)            
+            for x, data, input, mask, tag in zip(xs, datas, inputs, masks, tags):
 
-                # Compute log p(x | theta) = log \sum_z p(x, z | theta)
                 # The "mask" for x is all ones
                 x_mask = np.ones_like(x, dtype=bool)
                 log_pi0 = self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
@@ -457,32 +458,27 @@ class _SwitchingLDS(object):
                 log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
                 elbo += hmm_normalizer(log_pi0, log_Ps, log_likes)
 
-                # -log q(x)
-                elbo -= np.sum(-0.5 * np.log(2 * np.pi * q_sigma))
-                elbo -= np.sum(-0.5 * (x - q_mu)**2 / q_sigma)
-
-                assert np.isfinite(elbo)
+            # -log q(x)
+            elbo -= variational_posterior.log_density(xs)
+            assert np.isfinite(elbo)
         
         return elbo / n_samples
 
-    def _fit_svi(self, datas, inputs, masks, tags, learning=True, optimizer="adam", print_intvl=1, **kwargs):
+    def _fit_svi(self, variational_posterior, datas, inputs, masks, tags, 
+                 learning=True, optimizer="adam", print_intvl=1, **kwargs):
         """
         Fit with stochastic variational inference using a 
         mean field Gaussian approximation for the latent states x_{1:T}.
         """
         T = sum([data.shape[0] for data in datas])
 
-        # Initialize the variational posterior parameters
-        variational_params = [self.emissions.initialize_variational_params(data, input, mask, tag) 
-                              for data, input, mask, tag in zip(datas, inputs, masks, tags)]
-
         def _objective(params, itr):
             if learning:
-                self.params, variational_params = params
+                self.params, variational_posterior.params = params
             else:
-                variational_params = params
+                variational_posterior.params = params
 
-            obj = self.elbo(variational_params, datas, inputs, masks, tags)
+            obj = self.elbo(variational_posterior, datas, inputs, masks, tags)
             return -obj / T
 
         elbos = []
@@ -493,20 +489,17 @@ class _SwitchingLDS(object):
         
         optimizers = dict(sgd=sgd, adam=adam, adam_with_convergence_check=adam_with_convergence_check)
         initial_params = (self.params, variational_params) if learning else variational_params
-        results = \
-            optimizers[optimizer](grad(_objective), 
-                initial_params,
-                callback=_print_progress,
-                **kwargs)
+        results = optimizers[optimizer](grad(_objective), 
+                                        initial_params,
+                                        callback=_print_progress,
+                                        **kwargs)
 
         if learning:
-            self.params, variational_params = results
+            self.params, variational_posterior.params = results
         else:
-            variational_params = results
-
-        # unpack outputs as necessary
-        variational_params = variational_params[0] if len(variational_params) == 1 else variational_params
-        return elbos, variational_params
+            variational_posterior.params = results
+        
+        return elbos
 
     @ensure_args_are_lists
     def fit(self, datas, inputs=None, masks=None, tags=None, method="svi", initialize=True, **kwargs):
