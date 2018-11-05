@@ -53,7 +53,7 @@ def test_grad_hmm_normalizer(T=1000, K=3):
     assert np.allclose(dll, grad(hmm_normalizer_np, argnum=2)(log_pi0, log_Ps, ll))
 
 
-def test_autograd_primitive(T=1000, K=3):
+def test_hmm_normalizer_primitive(T=1000, K=3):
     # check reverse-mode to second order
     log_pi0, log_Ps, ll = make_parameters(T, K)
     check_grads(hmm_normalizer, argnum=1, modes=['rev'], order=1)(log_pi0, log_Ps, ll)
@@ -78,3 +78,4 @@ def test_backward_pass(T=1000, K=5, D=2):
     backward_pass(log_Ps, ll, test_betas)
     
     assert np.allclose(true_betas, test_betas)
+

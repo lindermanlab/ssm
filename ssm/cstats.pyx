@@ -109,18 +109,151 @@ cpdef _blocks_to_bands_upper(double[:,:,::1] Ad, double[:, :, ::1] Aod):
     return np.asarray(U)
 
 
-cpdef blocks_to_bands(double[:,:,::1] Ad, double[:, :, ::1] Aod, lower=True):
+# Now do the reverse -- convert bands to blocks
+cpdef _bands_to_blocks_lower(double[:, ::1] A_banded):
     """
-    Convert a block tridiagonal matrix to the banded matrix representation 
-    required for scipy banded solvers. 
+    Convert a banded matrix to a block tridiagonal matrix using the "lower form."
 
     C.f. https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.solveh_banded.html
     """
-    assert Ad.ndim == 3  
-    assert Ad.shape[2] == Ad.shape[1]
-    assert Aod.ndim == 3
-    assert Aod.shape[0] == Ad.shape[0]-1
-    assert Aod.shape[1] == Ad.shape[1]
-    assert Aod.shape[2] == Ad.shape[1]
+    cdef int T, D, t, d, u, i, j, trow, drow
+    cdef double[:, :, ::1] Ad, Aod
 
-    return _blocks_to_bands_lower(Ad, Aod) if lower else _blocks_to_bands_upper(Ad, Aod)
+    D = A_banded.shape[0] // 2
+    assert A_banded.shape[0] == D * 2
+    T = A_banded.shape[1] // D
+    assert A_banded.shape[1] == T * D
+
+    Ad = np.zeros((T, D, D))
+    Aod = np.zeros((T-1, D, D))
+
+    for t in range(T):
+        for u in range(2 * D):
+            for d in range(D):
+                j = t * D + d
+                i = u + j
+
+                # Convert i into trow, drow indices
+                trow = i // D
+                drow = i % D
+
+                if trow >= T:
+                  continue 
+                
+                if t == trow:
+                    Ad[t, drow, d] = A_banded[u, j]
+                elif t == trow - 1:
+                    Aod[t, drow, d] = A_banded[u, j]
+
+    # Fill in the upper triangle of the diagonal blocks
+    # for t in range(T):
+    #     for d in range(D):
+    #         for drow in range(d):
+    #             Ad[t, drow, d] = Ad[t, d, drow]
+
+    return np.asarray(Ad), np.asarray(Aod)
+
+
+cpdef _bands_to_blocks_upper(double[:,::1] A_banded):
+    """
+    Convert a banded matrix to a block tridiagonal matrix using the "upper form."
+
+    C.f. https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.solveh_banded.html
+    """
+    cdef int T, D, t, d, u, i, j, trow, drow
+    cdef double[:, :, ::1] Ad, Aod
+
+    D = A_banded.shape[0] // 2
+    assert A_banded.shape[0] == D * 2
+    T = A_banded.shape[1] // D
+    assert A_banded.shape[1] == T * D
+
+    Ad = np.zeros((T, D, D))
+    Aod = np.zeros((T-1, D, D))
+
+    for t in range(T):
+        for u in range(2 * D):
+            for d in range(D):
+                j = t * D + d
+                i = u + j - (2 * D - 1)
+
+                if i < 0:
+                    continue
+
+                # Convert i into trow, drow indices
+                trow = i // D
+                drow = i % D
+                
+                if trow >= T:
+                    continue
+
+                if t == trow:
+                    Ad[t, drow, d] = A_banded[u, j]
+                elif t == trow + 1:
+                    Aod[t-1, drow, d] = A_banded[u, j]
+                # else: U[u, j] = 0
+
+    # Fill in the lower triangle of the diagonal blocks
+    # for t in range(T):
+    #     for drow in range(D):
+    #         for d in range(drow):
+    #             Ad[t, drow, d] = Ad[t, d, drow]
+
+    return np.asarray(Ad), np.asarray(Aod)
+
+
+cpdef transpose_banded(l_and_u, double[:, ::1] A_banded):
+    cdef int l, u, d, i, dd, j, D, N
+    l = l_and_u[0]
+    u = l_and_u[1]
+    D = A_banded.shape[0]
+    N = A_banded.shape[1]
+
+    cdef double[:, ::1] A_banded_T = np.zeros_like(A_banded)
+
+    for d in range(D):
+        for j in range(N):
+            # Writing entry from 
+            # A.T[i, j] = A[j, i] = A_banded[u + j - i, i] = A_banded[u + l - D] = A_banded[D - 1 - d]
+            i = d + j - l
+            if i < 0 or i >= N:
+                continue
+
+            A_banded_T[d, j] = A_banded[D-1-d, i]
+
+    return np.asarray(A_banded_T)
+
+
+cpdef vjp_cholesky_banded_lower(double[:, ::1] L_bar, 
+                                double[:, ::1] L_banded, 
+                                double[:, ::1] A_banded,
+                                double[:, ::1] A_bar):
+    """
+    Fill in A_bar with the elementwise gradient of L wrt A times L_bar
+
+    NOTE: L_bar is updated in place!
+    """
+    
+    cdef int D, N, i, j, k
+    D = A_banded.shape[0]
+    N = A_banded.shape[1]
+
+    # Compute the gradient
+    for i in range(N-1, -1, -1):
+        for j in range(i, max(i-D, -1), -1):
+            if j == i:
+                # A_bar[i, i] = 0.5 * L_bar[i, i] / L[i, i]
+                A_bar[0, j] = 0.5 * L_bar[0, j] / L_banded[0, j]
+            else:
+                # A_bar[i, j] = L_bar[i, j] / L[j, j]
+                A_bar[i-j, j] = L_bar[i - j, j] / L_banded[0, j]
+                # L_bar[j, j] -= L_bar[i, j] * L[i, j] / L[j, j]
+                L_bar[0, j] -= L_bar[i - j, j] * L_banded[i - j, j] / L_banded[0, j]
+
+            for k in range(j-1, max(i-D, -1), -1):
+                L_bar[i-k, k] -= A_bar[i-j, j] * L_banded[j-k, k]
+                L_bar[j-k, k] -= A_bar[i-j, j] * L_banded[i-k, k]
+
+    # TODO: Divide the lower diagonal entries by 2 since this will be unbanded
+
+

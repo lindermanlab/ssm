@@ -195,3 +195,6 @@ cpdef grad_hmm_normalizer(double[:,:,::1] log_Ps,
     # d_log_pi0 = d_log_likes[0]
     for k in range(K):
         d_log_pi0[k] = d_log_likes[0, k]
+
+
+# def grad_cholesky_banded
