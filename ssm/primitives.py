@@ -9,7 +9,7 @@ from functools import partial
 
 from ssm.cstats import _blocks_to_bands_lower, _blocks_to_bands_upper, \
                        _bands_to_blocks_lower, _bands_to_blocks_upper, \
-                       transpose_banded, vjp_cholesky_banded_lower
+                       _transpose_banded, vjp_cholesky_banded_lower
 
 from ssm.messages import forward_pass, backward_pass, backward_sample, grad_hmm_normalizer
 
@@ -154,7 +154,24 @@ def viterbi(log_pi0, log_Ps, ll):
     return z
 
 
-# Helpers
+""" 
+Block tridiagonal system operations:
+
+The following functions work on matrices of the form:
+
+    A = [Ad[0],    Aod[0],   0,      ...                    ]
+        [Aod[0].T, Ad[1],    Aod[1], 0,      ...            ]
+        [0,        Aod[1].T, Ad[2],  Aod[2], 0,    ...      ]
+        [          ...       ...     ...     ...   ...      ]
+        [                            ...   Ad[T-1], Aod[T-1]]
+        [                                  Aod[T-1].T, Ad[T]]
+
+This is a banded Hermitian matrix, and scipy.linalg has fast
+solvers for such systems. The result is itself a banded matrix.
+
+The precision matrix of a linear dynamical system has exactly
+this form.  
+"""
 def bands_to_blocks(A_banded, lower=True):
     """
     Convert a banded matrix to a block tridiagonal matrix.
@@ -195,6 +212,20 @@ defvjp(blocks_to_bands,
        partial(_make_grad_blocks_to_bands, 1))
 
 
+@primitive
+def transpose_banded(l_and_u, A_banded):
+    A_banded = to_c(A_banded)
+    return _transpose_banded(l_and_u, A_banded)
+
+def grad_transpose_banded(ans, l_and_u, A_banded):
+    l, u = l_and_u
+    def vjp(g):
+        return transpose_banded((u, l), g)
+    return vjp
+
+defvjp(transpose_banded, None, grad_transpose_banded)
+
+
 # Gradient of cholesky_banded
 def grad_cholesky_banded(L_banded, A_banded, lower=True):
     assert lower, "Only implemented lower form so far. Need to do some \
@@ -222,7 +253,7 @@ def vjp_solve_banded_b(C, l_and_u, A_banded, b, **kwargs):
     # \bar{b} = A^{-T} \bar{C}
     l, u = l_and_u
     A_banded = to_c(A_banded)
-    
+
     def vjp(C_bar):
         return solve_banded((u, l), transpose_banded((l, u), A_banded), C_bar)
     return vjp
@@ -271,7 +302,7 @@ def vjp_solveh_banded_A(C, A_banded, b, lower=True, **kwargs):
         A_bar = np.zeros_like(A_banded)
         for j in range(N):
             for d in range(D):
-                i = d + j if lower else d + j - u 
+                i = d + j if lower else d + j - D + 1 
                 if i < 0 or i >= N:
                     continue
 
@@ -289,115 +320,86 @@ def vjp_solveh_banded_A(C, A_banded, b, lower=True, **kwargs):
 
 defvjp(solveh_banded, vjp_solveh_banded_A, vjp_solveh_banded_b)
 
-""" 
-Block tridiagonal system operations:
-
-The following functions work on matrices of the form:
-
-    A = [Ad[0],    Aod[0],   0,      ...                    ]
-        [Aod[0].T, Ad[1],    Aod[1], 0,      ...            ]
-        [0,        Aod[1].T, Ad[2],  Aod[2], 0,    ...      ]
-        [          ...       ...     ...     ...   ...      ]
-        [                            ...   Ad[T-1], Aod[T-1]]
-        [                                  Aod[T-1].T, Ad[T]]
-
-This is a banded Hermitian matrix, and scipy.linalg has fast
-solvers for such systems. The result is itself a banded matrix.
-
-The precision matrix of a linear dynamical system has exactly
-this form.
-"""
-def solve_block_tridiag(Ad, Aod, b, lower=True):
-    """
-    Solve a block tridiagonal system Ax = b for x, where A is 
-    block tridiagonal.
-    """
-    A_banded = blocks_to_bands(Ad, Aod, lower=lower)
-    x_flat = solveh_banded(A_banded, np.ravel(b), lower=lower)
-    return np.reshape(x_flat, b.shape)
-
-
-def cholesky_block_tridiag(Ad, Aod, lower=True):
-    """
-    Compute the Cholesky decomposition of a block tridiagonal matrix.
-    """
-    A_banded = blocks_to_bands(Ad, Aod, lower=lower)
-    return cholesky_banded(A_banded, lower=lower)
-    
-
-def logdet_block_tridiag(Ad, Aod, lower=True):
-    """
-    Compute the log determinant of a block tridiagonal matrix.
-    """
-    A_banded = blocks_to_bands(Ad, Aod, lower=lower)
-    L = cholesky_banded(A_banded, lower=lower)
-
-    # Get diagonal of Cholesky decomposition. Depends on lower or upper.
-    diag = L[0] if lower else L[-1]
-
-    # The log determinant of A is 2 * the sum of the diagonal
-    return 2 * np.sum(np.log(diag))
-
-
-def sample_block_tridiag(Ad, Aod, mu=0, lower=True, size=1, z=None):
-    T, D, _ = Ad.shape
-    A_upper_diag = Aod if not lower else np.swapaxes(Aod, 1, 2).copy("C")
-    A_banded = blocks_to_bands(Ad, A_upper_diag, lower=False)
-    U = cholesky_banded(A_banded, lower=False)
-
-    # If lower = False, we have (U^T U)^{-1} = U^{-1} U^{-T} = AA^T = Sigma
-    # where A = U^{-1}.  Samples are Az = U^{-1}z = x, or equivalently Ux = z.
-    z = npr.randn(T*D, size) if z is None else z
-    samples = np.reshape(solve_banded((0, 2*D-1), U, z).T, (size, T, D))
-
-    # Add the mean
-    samples += mu
-
-    return samples
-
 
 # LDS operations 
-def _convert_lds_to_block_tridiag(As, Qinv_halves):
-    T, D, _ = Qinv_halves.shape
-    assert Qinv_halves.shape[2] == D
-    assert As.shape == (T, D, D)
-
-    # Construnct Q^{-1} matrices
-    Qinvs = np.matmul(Qinv_halves, np.swapaxes(Qinv_halves, -1, -2))
-    
-    # Construct blocks of the block tridiagonal precision matrix
-    nQinvAs = -np.matmul(Qinvs, As)
-    J_lower_diag = nQinvAs[:-1]
-    J_diag = -np.matmul(np.swapaxes(As, -1, -2), nQinvAs) + Qinvs
-    return J_diag, J_lower_diag
-
-
-def cholesky_lds(As, Qinv_halves):
-    J_diag, J_lower_diag = _convert_lds_to_block_tridiag(As, Qinv_halves)
-    return cholesky_block_tridiag(J_diag, J_lower_diag, lower=True)
-
-
-def solve_lds(As, Qinv_halves, b):
-    J_diag, J_lower_diag = _convert_lds_to_block_tridiag(As, Qinv_halves)
-    return solve_block_tridiag(J_diag, J_lower_diag, b, lower=True)
-
-
-def lds_normalizer(x, As, Qinv_halves, h):
+def convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts):
     """
-    Compute the log normalizer of a linear dynamical system with 
-    natural parameters J and h.  J is a block tridiagonal matrix.
+    Parameterize the LDS in terms of pairwise linear Gaussian dynamics
+    and per-timestep Gaussian observations.
 
-    The log normalizer is log p(x | J, h)
+        p(x_{1:T}; theta) 
+            = [prod_{t=1}^{T-1} N(x_{t+1} | A_t x_t + b_t, Q_t)] 
+                * [prod_{t=1}^T N(x_t | m_t, R_t)]  
+
+    We can rewrite this as a Gaussian with a block tridiagonal precision
+    matrix J.  The blocks of this matrix are:
+
+    J_{t,t} = A_t.T Q_t^{-1} A_t + Q_{t-1}^{-1} + R_t^{-1}
+
+    J_{t,t+1} = -Q_t^{-1} A_t
+
+    The linear term is h_t
+
+    h_t = -A_t.T Q_t^{-1} b_t + Q_{t-1}^{-1} b_{t-1} + R_t^{-1} m_t 
+
+    We parameterize the model in terms of 
+
+    theta = {A_t, b_t, Q_t^{-1/2}}_{t=1}^{T-1},  {m_t, R_t^{-1/2}}_{t=1}^T
+    """
+    T, D = ms.shape
+    assert As.shape == (T-1, D, D)
+    assert bs.shape == (T-1, D)
+    assert Qi_sqrts.shape == (T-1, D, D)
+    assert Ri_sqrts.shape == (T, D, D)
+
+    # Construnct the inverse covariance matrices
+    Qis = np.matmul(Qi_sqrts, np.swapaxes(Qi_sqrts, -1, -2))
+    Ris = np.matmul(Ri_sqrts, np.swapaxes(Ri_sqrts, -1, -2))
+
+    # Construct the joint, block-tridiagonal precision matrix
+    J_lower_diag = -np.matmul(Qis, As)
+    J_diag = np.concatenate([-np.matmul(np.swapaxes(As, -1, -2), J_lower_diag), np.zeros((1, D, D))]) \
+           + np.concatenate([np.zeros((1, D, D)), Qis]) \
+           + Ris
+
+    # Construct the linear term
+    h = np.concatenate([np.matmul(J_lower_diag, bs[:, :, None])[:, :, 0], np.zeros((1, D))]) \
+      + np.concatenate([np.zeros((1, D)), np.matmul(Qis, bs[:, :, None])[:, :, 0]]) \
+      + np.matmul(Ris, ms[:, :, None])[:, :, 0]
+
+    return J_diag, J_lower_diag, h
+
+
+def cholesky_lds(As, bs, Qi_sqrts, ms, Ri_sqrts):
+    J_diag, J_lower_diag, _ = convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts)
+    J_banded = blocks_to_bands(J_diag, J_lower_diag, lower=True)
+    return cholesky_banded(J_banded, lower=True)
+
+
+def solve_lds(As, bs, Qi_sqrts, ms, Ri_sqrts, v):
+    J_diag, J_lower_diag, _ = convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts)
+    J_banded = blocks_to_bands(J_diag, J_lower_diag, lower=True)
+    x_flat = solveh_banded(J_banded, np.ravel(v), lower=True)
+    return np.reshape(x_flat, v.shape)
+
+
+def lds_normalizer(x, As, bs, Qi_sqrts, ms, Ri_sqrts):
+    """
+    Compute the log normalizer of a linear dynamical system.
     """
     T, D = x.shape
-    assert As.shape == (T, D, D)
-    assert Qinv_halves.shape == (T, D, D)
-    assert h.shape == (T, D)
+    assert As.shape == (T-1, D, D)
+    assert bs.shape == (T-1, D)
+    assert Qi_sqrts.shape == (T-1, D, D)
+    assert ms.shape == (T, D)
+    assert Ri_sqrts.shape == (T, D, D)
 
     # Convert to block form
-    J_diag, J_lower_diag = _convert_lds_to_block_tridiag(As, Qinv_halves)
+    J_diag, J_lower_diag, h = convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts)
 
-    
+    # Convert blocks to banded form so we can capitalize on Lapack code
+    J_banded = blocks_to_bands(J_diag, J_lower_diag, lower=True)
+
     # -1/2 x^T J x = -1/2 \sum_{t=1}^T x_t.T J_tt x_t
     ll = -1/2 * np.sum(np.matmul(x[:, None, :], np.matmul(J_diag, x[:, :, None])))
 
@@ -410,7 +412,8 @@ def lds_normalizer(x, As, Qinv_halves, h):
     # -1/2 h^T J^{-1} h = -1/2 h^T (LL^T)^{-1} h
     #                   = -1/2 h^T L^{-T} L^{-1} h
     #                   = -1/2 (L^{-1}h)^T (L^{-1} h)
-    L = cholesky_block_tridiag(J_diag, J_lower_diag, lower=True)
+    # L = cholesky_block_tridiag(J_diag, J_lower_diag, lower=True)
+    L = cholesky_banded(J_banded, lower=True)
     Linv_h = solve_banded((2*D-1, 0), L, h.ravel())
     ll -= 1/2 * np.sum(Linv_h * Linv_h)
 
@@ -420,3 +423,34 @@ def lds_normalizer(x, As, Qinv_halves, h):
     ll -= 1/2 * T * D * np.log(2 * np.pi)
 
     return ll
+
+
+def lds_sample(As, bs, Qi_sqrts, ms, Ri_sqrts, size=1, z=None):
+    """
+    Sample a linear dynamical system
+    """
+    T, D = ms.shape
+    assert As.shape == (T-1, D, D)
+    assert bs.shape == (T-1, D)
+    assert Qi_sqrts.shape == (T-1, D, D)
+    assert Ri_sqrts.shape == (T, D, D)
+
+    # Convert to block form
+    J_diag, J_lower_diag, h = convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts)
+
+    # Convert blocks to banded form so we can capitalize on Lapack code
+    J_banded = A_banded = blocks_to_bands(J_diag, J_lower_diag, lower=True)
+    L = cholesky_banded(J_banded, lower=True)
+    U = transpose_banded((2*D-1, 0), L)
+
+    # When lower = False, we have (U^T U)^{-1} = U^{-1} U^{-T} = AA^T = Sigma
+    # where A = U^{-1}.  Samples are Az = U^{-1}z = x, or equivalently Ux = z.
+    z = npr.randn(T*D, size) if z is None else np.reshape(z, (T*D, size))
+    samples = np.reshape(solve_banded((0, 2*D-1), U, z).T, (size, T, D))
+
+    # Get the mean mu = J^{-1} h
+    mu = np.reshape(solveh_banded(J_banded, np.ravel(h), lower=True), (T, D))
+
+    # Add the mean
+    return samples + mu
+    

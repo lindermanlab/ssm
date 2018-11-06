@@ -202,7 +202,7 @@ cpdef _bands_to_blocks_upper(double[:,::1] A_banded):
     return np.asarray(Ad), np.asarray(Aod)
 
 
-cpdef transpose_banded(l_and_u, double[:, ::1] A_banded):
+cpdef _transpose_banded(l_and_u, double[:, ::1] A_banded):
     cdef int l, u, d, i, dd, j, D, N
     l = l_and_u[0]
     u = l_and_u[1]

@@ -1,7 +1,7 @@
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.misc import logsumexp
-from autograd import grad
+from autograd import grad, elementwise_grad
 from autograd.test_util import check_grads
 
 from ssm.messages import forward_pass, backward_pass, grad_hmm_normalizer
@@ -78,4 +78,3 @@ def test_backward_pass(T=1000, K=5, D=2):
     backward_pass(log_Ps, ll, test_betas)
     
     assert np.allclose(true_betas, test_betas)
-
