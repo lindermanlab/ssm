@@ -12,7 +12,7 @@ from autograd import grad
 
 from ssm.primitives import hmm_normalizer, hmm_expected_states, hmm_filter, viterbi
 from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
-    ensure_slds_args_not_none, ensure_elbo_args_are_lists, adam_with_convergence_check
+    ensure_slds_args_not_none, ensure_variational_args_are_lists, adam_with_convergence_check
 
 class _HMM(object):
     """
@@ -358,8 +358,7 @@ class _SwitchingLDS(object):
         self.init_state_distn = copy.deepcopy(arhmm.init_state_distn)
         self.transitions = copy.deepcopy(arhmm.transitions)
         self.dynamics = copy.deepcopy(arhmm.observations)
-        print("Done")
-
+        
     def permute(self, perm):
         """
         Permute the discrete latent states.
@@ -424,7 +423,7 @@ class _SwitchingLDS(object):
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
-        Ez, _ = self.expected_states(variational_mean, data, input, mask, tag)
+        Ez, _, _ = self.expected_states(variational_mean, data, input, mask, tag)
         return self.emissions.smooth(Ez, variational_mean, data, input, tag)
 
     @ensure_args_are_lists
@@ -433,7 +432,7 @@ class _SwitchingLDS(object):
                       "the ELBO instead.")
         return np.nan
 
-    @ensure_elbo_args_are_lists
+    @ensure_variational_args_are_lists
     def elbo(self, variational_posterior, datas, inputs=None, masks=None, tags=None, n_samples=1):
         """
         Lower bound on the marginal likelihood p(y | theta) 
@@ -465,13 +464,14 @@ class _SwitchingLDS(object):
         return elbo / n_samples
 
     def _fit_svi(self, variational_posterior, datas, inputs, masks, tags, 
-                 learning=True, optimizer="adam", print_intvl=1, **kwargs):
+                 learning=True, optimizer="adam", num_iters=100, **kwargs):
         """
         Fit with stochastic variational inference using a 
         mean field Gaussian approximation for the latent states x_{1:T}.
         """
-        T = sum([data.shape[0] for data in datas])
 
+        # Define the objective (negative ELBO)
+        T = sum([data.shape[0] for data in datas])
         def _objective(params, itr):
             if learning:
                 self.params, variational_posterior.params = params
@@ -480,18 +480,23 @@ class _SwitchingLDS(object):
 
             obj = self.elbo(variational_posterior, datas, inputs, masks, tags)
             return -obj / T
-
-        elbos = []
+        initial_params = (self.params, variational_posterior.params) if learning else variational_params
+        
+        # Set up the progress bar
+        elbos = [-_objective(initial_params, 0) * T]
+        pbar = tqdm.trange(num_iters)
+        pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
         def _print_progress(params, itr, g):
             elbos.append(-_objective(params, itr) * T)
-            if itr % print_intvl == 0:
-                print("Iteration {}.  ELBO: {:.1f}".format(itr, elbos[-1]))
+            pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
+            pbar.update()
         
+        # Run the optimizer
         optimizers = dict(sgd=sgd, adam=adam, adam_with_convergence_check=adam_with_convergence_check)
-        initial_params = (self.params, variational_params) if learning else variational_params
         results = optimizers[optimizer](grad(_objective), 
                                         initial_params,
                                         callback=_print_progress,
+                                        num_iters=num_iters,
                                         **kwargs)
 
         if learning:
@@ -501,8 +506,11 @@ class _SwitchingLDS(object):
         
         return elbos
 
-    @ensure_args_are_lists
-    def fit(self, datas, inputs=None, masks=None, tags=None, method="svi", initialize=True, **kwargs):
+    @ensure_variational_args_are_lists
+    def fit(self, variational_posterior, datas, 
+            inputs=None, masks=None, tags=None, method="svi", 
+            initialize=True, **kwargs):
+
         if method not in self._fitting_methods:
             raise Exception("Invalid method: {}. Options are {}".\
                             format(method, self._fitting_methods.keys()))
@@ -510,15 +518,16 @@ class _SwitchingLDS(object):
         if initialize:
             self.initialize(datas, inputs, masks, tags)
 
-        return self._fitting_methods[method](datas, inputs, masks, tags, learning=True, **kwargs)
+        return self._fitting_methods[method](variational_posterior, datas, inputs, masks, tags, learning=True, **kwargs)
 
-    @ensure_args_are_lists
-    def approximate_posterior(self, datas, inputs=None, masks=None, tags=None, method="svi", **kwargs):
+    @ensure_variational_args_are_lists
+    def approximate_posterior(self, variational_posterior, datas, inputs=None, masks=None, tags=None, 
+                              method="svi", **kwargs):
         if method not in self._fitting_methods:
             raise Exception("Invalid method: {}. Options are {}".\
                             format(method, self._fitting_methods.keys()))
 
-        return self._fitting_methods[method](datas, inputs, masks, tags, learning=False, **kwargs)
+        return self._fitting_methods[method](variational_posterior, datas, inputs, masks, tags, learning=False, **kwargs)
 
 
 class _LDS(_SwitchingLDS):
@@ -551,7 +560,7 @@ class _LDS(_SwitchingLDS):
         warnings.warn("Log probability of LDS is not yet implemented.")
         return np.nan
 
-    @ensure_elbo_args_are_lists
+    @ensure_variational_args_are_lists
     def elbo(self, variational_params, datas, inputs=None, masks=None, tags=None, n_samples=1):
         """
         Lower bound on the marginal likelihood p(y | theta) 

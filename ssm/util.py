@@ -106,12 +106,12 @@ def ensure_args_are_lists(f):
     return wrapper
 
 
-def ensure_elbo_args_are_lists(f):
-    def wrapper(self, variational_params, datas, inputs=None, masks=None, tags=None, **kwargs):
+def ensure_variational_args_are_lists(f):
+    def wrapper(self, arg0, datas, inputs=None, masks=None, tags=None, **kwargs):
         datas = [datas] if not isinstance(datas, (list, tuple)) else datas
         
         if inputs is None:
-            inputs = [np.zeros((data.shape[0], self.M)) for data in datas]
+            inputs = [np.zeros((data.shape[0], 0)) for data in datas]
         elif not isinstance(inputs, (list, tuple)):
             inputs = [inputs]
 
@@ -125,7 +125,7 @@ def ensure_elbo_args_are_lists(f):
         elif not isinstance(tags, (list, tuple)):
             tags = [tags]
 
-        return f(self, variational_params, datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
+        return f(self, arg0, datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
 
     return wrapper
 

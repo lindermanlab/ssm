@@ -1,14 +1,16 @@
+import time
+
 from autograd import elementwise_grad
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.test_util import check_grads
 
-
 from ssm.primitives import \
     blocks_to_bands, bands_to_blocks, transpose_banded, \
     solveh_banded, solve_banded, convert_lds_to_block_tridiag, \
     lds_log_probability, grad_cholesky_banded, cholesky_banded, \
-    cholesky_lds, solve_lds, lds_sample
+    cholesky_lds, solve_lds, lds_sample, lds_mean, \
+    convert_lds_to_block_tridiag
 
 
 def make_lds_parameters(T=20, D=2):
@@ -103,7 +105,7 @@ def test_transpose_banded():
         assert np.allclose(abT[l+1+i, :-i-1], ab[u-i-1, i+1:])
 
 
-def test_lds_log_probability(T=25, D=4, S=3):
+def test_lds_log_probability(T=25, D=4):
     """
     Test lds_log_probability correctness
     """
@@ -132,7 +134,33 @@ def test_lds_log_probability(T=25, D=4, S=3):
     assert np.allclose(ll_true, ll_test)
 
 
-def test_lds_sample(T=25, D=4, size=3):
+def test_lds_mean(T=25, D=4):
+    """
+    Test lds_mean correctness
+    """
+    As, bs, Qi_sqrts, ms, Ri_sqrts = make_lds_parameters(T, D)
+    J_diag, J_lower_diag, h = convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts)
+
+    # Convert to dense matrix
+    J_full = np.zeros((T*D, T*D))
+    for t in range(T):
+        J_full[t*D:(t+1)*D, t*D:(t+1)*D] = J_diag[t]
+
+    for t in range(T-1):
+        J_full[t*D:(t+1)*D, (t+1)*D:(t+2)*D] = J_lower_diag[t].T
+        J_full[(t+1)*D:(t+2)*D, t*D:(t+1)*D] = J_lower_diag[t]
+    
+    Sigma = np.linalg.inv(J_full)
+    mu_true = Sigma.dot(h.ravel()).reshape((T, D))
+    
+    
+    # Solve with the banded solver
+    mu_test = lds_mean(As, bs, Qi_sqrts, ms, Ri_sqrts)
+
+    assert np.allclose(mu_true, mu_test)
+
+
+def test_lds_sample(T=25, D=4):
     """
     Test lds_sample correctness
     """
@@ -148,15 +176,15 @@ def test_lds_sample(T=25, D=4, size=3):
         J_full[t*D:(t+1)*D, (t+1)*D:(t+2)*D] = J_lower_diag[t].T
         J_full[(t+1)*D:(t+2)*D, t*D:(t+1)*D] = J_lower_diag[t]
     
-    z = npr.randn(T*D, size)
+    z = npr.randn(T*D,)
 
     # Sample directly
     L = np.linalg.cholesky(J_full)
-    xtrue = np.linalg.solve(L.T, z).T.reshape(size, T, D) 
+    xtrue = np.linalg.solve(L.T, z).reshape(T, D) 
     xtrue += np.linalg.solve(J_full, h.reshape(T*D)).reshape(T, D)
 
     # Solve with the banded solver
-    xtest = lds_sample(As, bs, Qi_sqrts, ms, Ri_sqrts, size=size, z=z)
+    xtest = lds_sample(As, bs, Qi_sqrts, ms, Ri_sqrts, z=z)
 
     assert np.allclose(xtrue, xtest)
 
@@ -302,12 +330,83 @@ def test_lds_sample_grad(T=10, D=2):
     check_grads(lds_sample, argnum=2, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts, z=z)
     check_grads(lds_sample, argnum=3, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts, z=z)
     check_grads(lds_sample, argnum=4, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts, z=z)
+
+
+def test_lds_log_probability_perf(T=1000, D=10, N_iter=10):
+    """
+    Compare performance of banded method vs message passing in pylds.
+    """
+    print("Comparing methods for T={} D={}".format(T, D))
+
+    from pylds.lds_messages_interface import kalman_info_filter, kalman_filter
     
+    # Convert LDS parameters into info form for pylds
+    As, bs, Qi_sqrts, ms, Ri_sqrts = make_lds_parameters(T, D)
+    Qis = np.matmul(Qi_sqrts, np.swapaxes(Qi_sqrts, -1, -2))
+    Ris = np.matmul(Ri_sqrts, np.swapaxes(Ri_sqrts, -1, -2))
+    x = npr.randn(T, D)
+
+    print("Timing banded method")
+    start = time.time()
+    for itr in range(N_iter):
+        lds_log_probability(x, As, bs, Qi_sqrts, ms, Ri_sqrts)
+    stop = time.time()
+    print("Time per iter: {:.4f}".format((stop - start) / N_iter))
+
+    # Compare to Kalman Filter
+    mu_init = np.zeros(D)
+    sigma_init = np.eye(D)
+    Bs = np.ones((D, 1))
+    sigma_states = np.linalg.inv(Qis)
+    Cs = np.eye(D)
+    Ds = np.zeros((D, 1))
+    sigma_obs = np.linalg.inv(Ris)
+    inputs = bs
+    data = ms
+
+    print("Timing PyLDS message passing (kalman_filter)")
+    start = time.time()
+    for itr in range(N_iter):
+        kalman_filter(mu_init, sigma_init, 
+            np.concatenate([As, np.eye(D)[None, :, :]]), Bs, np.concatenate([sigma_states, np.eye(D)[None, :, :]]), 
+            Cs, Ds, sigma_obs, inputs, data)
+    stop = time.time()
+    print("Time per iter: {:.4f}".format((stop - start) / N_iter))
+
+    # Info form comparison
+    J_init = np.zeros((D, D))
+    h_init = np.zeros(D)
+    log_Z_init = 0
+
+    J_diag, J_lower_diag, h = convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts)
+    J_pair_21 = J_lower_diag
+    J_pair_22 = J_diag[1:]
+    J_pair_11 = J_diag[:-1]
+    J_pair_11[1:] = 0
+    h_pair_2 = h[1:]
+    h_pair_1 = h[:-1]
+    h_pair_1[1:] = 0
+    log_Z_pair = 0
+
+    J_node = np.zeros((T, D, D))
+    h_node = np.zeros((T, D))
+    log_Z_node = 0
+
+    print("Timing PyLDS message passing (kalman_info_filter)")
+    start = time.time()
+    for itr in range(N_iter):
+        kalman_info_filter(J_init, h_init, log_Z_init, 
+            J_pair_11, J_pair_21, J_pair_22, h_pair_1, h_pair_2, log_Z_pair,
+            J_node, h_node, log_Z_node)
+    stop = time.time()
+    print("Time per iter: {:.4f}".format((stop - start) / N_iter))
+   
 
 if __name__ == "__main__":
     test_blocks_to_banded()
     test_transpose_banded()
     test_lds_log_probability()
+    test_lds_mean()
     test_lds_sample()
     test_blocks_to_banded_grad()
     test_transpose_banded_grad()
@@ -318,5 +417,7 @@ if __name__ == "__main__":
     test_solve_lds_grad()
     test_lds_log_probability_grad()
     test_lds_sample_grad()
+    for D in range(2, 21, 2):
+        test_lds_log_probability_perf(T=1000, D=D)
 
     

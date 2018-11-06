@@ -8,9 +8,7 @@ from autograd.scipy.stats import dirichlet
 from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
-from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
-    ensure_elbo_args_are_lists, adam_with_convergence_check, one_hot, \
-    logistic, relu
+from ssm.util import adam_with_convergence_check, one_hot, logistic, relu
 
 
 class _Transitions(object):

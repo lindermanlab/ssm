@@ -419,7 +419,7 @@ def lds_log_probability(x, As, bs, Qi_sqrts, ms, Ri_sqrts):
     return ll
 
 
-def lds_sample(As, bs, Qi_sqrts, ms, Ri_sqrts, size=1, z=None):
+def lds_sample(As, bs, Qi_sqrts, ms, Ri_sqrts, z=None):
     """
     Sample a linear dynamical system
     """
@@ -439,12 +439,31 @@ def lds_sample(As, bs, Qi_sqrts, ms, Ri_sqrts, size=1, z=None):
 
     # When lower = False, we have (U^T U)^{-1} = U^{-1} U^{-T} = AA^T = Sigma
     # where A = U^{-1}.  Samples are Az = U^{-1}z = x, or equivalently Ux = z.
-    z = npr.randn(T*D, size) if z is None else np.reshape(z, (T*D, size))
-    samples = np.reshape(solve_banded((0, 2*D-1), U, z).T, (size, T, D))
+    z = npr.randn(T*D,) if z is None else np.reshape(z, (T*D,))
+    samples = np.reshape(solve_banded((0, 2*D-1), U, z), (T, D))
 
     # Get the mean mu = J^{-1} h
     mu = np.reshape(solveh_banded(J_banded, np.ravel(h), lower=True), (T, D))
 
     # Add the mean
     return samples + mu
+
+
+def lds_mean(As, bs, Qi_sqrts, ms, Ri_sqrts):
+    """
+    Compute the posterior mean of the linear dynamical system
+    """
+    T, D = ms.shape
+    assert As.shape == (T-1, D, D)
+    assert bs.shape == (T-1, D)
+    assert Qi_sqrts.shape == (T-1, D, D)
+    assert Ri_sqrts.shape == (T, D, D)
+
+    # Convert to block form
+    J_diag, J_lower_diag, h = convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts)
+
+    # Convert blocks to banded form so we can capitalize on Lapack code
+    J_banded = blocks_to_bands(J_diag, J_lower_diag, lower=True)
+
+    return solveh_banded(J_banded, h.ravel(), lower=True).reshape((T, D))
     
