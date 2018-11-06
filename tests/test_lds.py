@@ -7,7 +7,7 @@ from autograd.test_util import check_grads
 from ssm.primitives import \
     blocks_to_bands, bands_to_blocks, transpose_banded, \
     solveh_banded, solve_banded, convert_lds_to_block_tridiag, \
-    lds_normalizer, grad_cholesky_banded, cholesky_banded, \
+    lds_log_probability, grad_cholesky_banded, cholesky_banded, \
     cholesky_lds, solve_lds, lds_sample
 
 
@@ -48,7 +48,7 @@ def make_block_tridiag(T, D):
 
 def test_blocks_to_banded(T=5, D=3):
     """
-    Test that we get the right conversion out
+    Test blocks_to_banded correctness
     """
     Ad = np.zeros((T, D, D))
     Aod = np.zeros((T-1, D, D))
@@ -83,6 +83,9 @@ def test_blocks_to_banded(T=5, D=3):
 
 
 def test_transpose_banded():
+    """
+    Test transpose_banded correctness
+    """
     l, u = 1, 2
     ab = np.array([[0,  0, -1, -1, -1],
                    [0,  2,  2,  2,  2],
@@ -100,10 +103,9 @@ def test_transpose_banded():
         assert np.allclose(abT[l+1+i, :-i-1], ab[u-i-1, i+1:])
 
 
-
-def test_lds_normalizer(T=25, D=4, S=3):
+def test_lds_log_probability(T=25, D=4, S=3):
     """
-    Compare block tridiag and full sampling
+    Test lds_log_probability correctness
     """
     As, bs, Qi_sqrts, ms, Ri_sqrts = make_lds_parameters(T, D)
     J_diag, J_lower_diag, h = convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts)
@@ -125,14 +127,14 @@ def test_lds_normalizer(T=25, D=4, S=3):
     ll_true = multivariate_normal.logpdf(x.ravel(), mu.ravel(), Sigma)
 
     # Solve with the banded solver
-    ll_test = lds_normalizer(x, As, bs, Qi_sqrts, ms, Ri_sqrts)
+    ll_test = lds_log_probability(x, As, bs, Qi_sqrts, ms, Ri_sqrts)
 
     assert np.allclose(ll_true, ll_test)
 
 
 def test_lds_sample(T=25, D=4, size=3):
     """
-    Compare block tridiag and full sampling
+    Test lds_sample correctness
     """
     As, bs, Qi_sqrts, ms, Ri_sqrts = make_lds_parameters(T, D)
     J_diag, J_lower_diag, h = convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts)
@@ -161,6 +163,9 @@ def test_lds_sample(T=25, D=4, size=3):
 
 # Test the gradients
 def test_blocks_to_banded_grad(T=25, D=4):
+    """
+    Test blocks_to_banded gradient
+    """
     J_diag, J_lower_diag, J_full = make_block_tridiag(T, D)
     J_diag = np.tile(J_diag[None, :, :], (T, 1, 1))
     J_lower_diag = np.tile(J_lower_diag[None, :, :], (T-1, 1, 1))
@@ -169,9 +174,23 @@ def test_blocks_to_banded_grad(T=25, D=4):
     check_grads(blocks_to_bands, argnum=1, modes=['rev'], order=1)(J_diag, J_lower_diag)
 
 
-def test_cholesky_banded_grad(T=10, D=4):
+def test_transpose_banded_grad(T=25, D=4):
+    """
+    Test transpose_banded gradient
+    """
     J_diag, J_lower_diag, J_full = make_block_tridiag(T, D)
+    J_diag = np.tile(J_diag[None, :, :], (T, 1, 1))
+    J_lower_diag = np.tile(J_lower_diag[None, :, :], (T-1, 1, 1))
+    J_banded = blocks_to_bands(J_diag, J_lower_diag, lower=True)
 
+    check_grads(transpose_banded, argnum=1, modes=['rev'], order=1)((2*D-1, 0), J_banded)
+    
+
+def test_cholesky_banded_grad(T=10, D=4):
+    """
+    Test cholesky_banded gradient
+    """
+    J_diag, J_lower_diag, J_full = make_block_tridiag(T, D)
     L = np.linalg.cholesky(J_full)
     dJ_bar_true = elementwise_grad(np.linalg.cholesky)(J_full)
 
@@ -191,6 +210,9 @@ def test_cholesky_banded_grad(T=10, D=4):
 
 
 def test_solve_banded_grad(T=10, D=4):
+    """
+    Test solve_banded gradient
+    """
     J_diag, J_lower_diag, J_full = make_block_tridiag(T, D)
     
     L_full = np.linalg.cholesky(J_full)
@@ -200,8 +222,7 @@ def test_solve_banded_grad(T=10, D=4):
 
     b = npr.randn(T * D)
 
-    # The gradient wrt A is tricky to do with numerical gradients 
-    # because A must be invertible.  Instead, check against regular solves.
+    # Check gradient against that of regular solve.
     g_true = elementwise_grad(np.linalg.solve)(L_full, b)
     g_test = elementwise_grad(solve_banded, argnum=1)((2*D-1, 0), L_banded, b)
     assert np.allclose(np.diag(g_true), g_test[0])
@@ -213,6 +234,9 @@ def test_solve_banded_grad(T=10, D=4):
 
 
 def test_solveh_banded_grad(T=10, D=4):
+    """
+    Test solveh_banded gradient
+    """
     J_diag, J_lower_diag, J_full = make_block_tridiag(T, D)
     J_diag = np.tile(J_diag[None, :, :], (T, 1, 1))
     J_lower_diag = np.tile(J_lower_diag[None, :, :], (T-1, 1, 1))
@@ -228,39 +252,48 @@ def test_solveh_banded_grad(T=10, D=4):
 
 
 def test_cholesky_lds_grad(T=10, D=4):
+    """
+    Test cholesky_lds gradient
+    """
     As, bs, Qi_sqrts, ms, Ri_sqrts = make_lds_parameters(T, D)
     
     check_grads(cholesky_lds, argnum=0, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts)
-    check_grads(cholesky_lds, argnum=1, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts)
     check_grads(cholesky_lds, argnum=2, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts)
-    check_grads(cholesky_lds, argnum=3, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts)
     check_grads(cholesky_lds, argnum=4, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts)
     
+
 def test_solve_lds_grad(T=10, D=4):
+    """
+    Test solve_lds gradient
+    """
     As, bs, Qi_sqrts, ms, Ri_sqrts = make_lds_parameters(T, D)
     v = npr.randn(T, D)
 
     check_grads(solve_lds, argnum=0, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts, v)
-    check_grads(solve_lds, argnum=1, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts, v)
     check_grads(solve_lds, argnum=2, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts, v)
-    check_grads(solve_lds, argnum=3, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts, v)
     check_grads(solve_lds, argnum=4, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts, v)
     check_grads(solve_lds, argnum=5, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts, v)
 
 
-def test_lds_normalizer_grad(T=10, D=2):
+def test_lds_log_probability_grad(T=10, D=2):
+    """
+    Test lds_log_probability gradient
+    """ 
     As, bs, Qi_sqrts, ms, Ri_sqrts = make_lds_parameters(T, D)
     x = npr.randn(T, D)    
 
-    check_grads(lds_normalizer, argnum=0, modes=['rev'], order=1)(x, As, bs, Qi_sqrts, ms, Ri_sqrts)
-    check_grads(lds_normalizer, argnum=1, modes=['rev'], order=1)(x, As, bs, Qi_sqrts, ms, Ri_sqrts)
-    check_grads(lds_normalizer, argnum=2, modes=['rev'], order=1)(x, As, bs, Qi_sqrts, ms, Ri_sqrts)
-    check_grads(lds_normalizer, argnum=3, modes=['rev'], order=1)(x, As, bs, Qi_sqrts, ms, Ri_sqrts)
-    check_grads(lds_normalizer, argnum=4, modes=['rev'], order=1)(x, As, bs, Qi_sqrts, ms, Ri_sqrts)
-    check_grads(lds_normalizer, argnum=5, modes=['rev'], order=1)(x, As, bs, Qi_sqrts, ms, Ri_sqrts)
+    check_grads(lds_log_probability, argnum=0, modes=['rev'], order=1)(x, As, bs, Qi_sqrts, ms, Ri_sqrts)
+    check_grads(lds_log_probability, argnum=1, modes=['rev'], order=1)(x, As, bs, Qi_sqrts, ms, Ri_sqrts)
+    check_grads(lds_log_probability, argnum=2, modes=['rev'], order=1)(x, As, bs, Qi_sqrts, ms, Ri_sqrts)
+    check_grads(lds_log_probability, argnum=3, modes=['rev'], order=1)(x, As, bs, Qi_sqrts, ms, Ri_sqrts)
+    check_grads(lds_log_probability, argnum=4, modes=['rev'], order=1)(x, As, bs, Qi_sqrts, ms, Ri_sqrts)
+    check_grads(lds_log_probability, argnum=5, modes=['rev'], order=1)(x, As, bs, Qi_sqrts, ms, Ri_sqrts)
 
 
 def test_lds_sample_grad(T=10, D=2):
+    """
+    Test lds_sample gradient
+    """ 
     As, bs, Qi_sqrts, ms, Ri_sqrts = make_lds_parameters(T, D)
     z = npr.randn(T, D)    
 
@@ -274,15 +307,16 @@ def test_lds_sample_grad(T=10, D=2):
 if __name__ == "__main__":
     test_blocks_to_banded()
     test_transpose_banded()
-    test_lds_normalizer()
+    test_lds_log_probability()
     test_lds_sample()
     test_blocks_to_banded_grad()
+    test_transpose_banded_grad()
     test_cholesky_banded_grad()
     test_solve_banded_grad()
     test_solveh_banded_grad()
     test_cholesky_lds_grad()
     test_solve_lds_grad()
-    test_lds_normalizer_grad()
+    test_lds_log_probability_grad()
     test_lds_sample_grad()
 
     

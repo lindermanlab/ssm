@@ -202,10 +202,8 @@ cpdef _bands_to_blocks_upper(double[:,::1] A_banded):
     return np.asarray(Ad), np.asarray(Aod)
 
 
-cpdef _transpose_banded(l_and_u, double[:, ::1] A_banded):
-    cdef int l, u, d, i, dd, j, D, N
-    l = l_and_u[0]
-    u = l_and_u[1]
+cpdef _transpose_banded(int l, int u, double[:, ::1] A_banded):
+    cdef int d, i, dd, j, D, N
     D = A_banded.shape[0]
     N = A_banded.shape[1]
 
@@ -254,6 +252,51 @@ cpdef vjp_cholesky_banded_lower(double[:, ::1] L_bar,
                 L_bar[i-k, k] -= A_bar[i-j, j] * L_banded[j-k, k]
                 L_bar[j-k, k] -= A_bar[i-j, j] * L_banded[i-k, k]
 
-    # TODO: Divide the lower diagonal entries by 2 since this will be unbanded
+
+cpdef _vjp_solve_banded_A(double[:, ::1] A_bar,
+                          double[:, ::1] b_bar,
+                          double[:, ::1] C_bar,
+                          double[:, ::1] C, 
+                          int u, 
+                          double[:, ::1] A_banded):
+
+    cdef int D, N, K, d, j, i, k
+
+    D = A_banded.shape[0]
+    N = A_banded.shape[1]
+    K = C_bar.shape[1]
+
+    # Fill in the gradients of the banded matrix
+    for d in range(D):
+        for j in range(N):
+            i = d + j - u
+            if i >= 0 and i < N:
+                for k in range(K):
+                    A_bar[d, j] -= b_bar[i, k] * C[j, k]
 
 
+cpdef _vjp_solveh_banded_A(double[:, ::1] A_bar,
+                           double[:, ::1] b_bar,
+                           double[:, ::1] C_bar,
+                           double[:, ::1] C, 
+                           bint lower, 
+                           double[:, ::1] A_banded):
+
+    cdef int D, N, K, d, j, i, k
+
+    D = A_banded.shape[0]
+    N = A_banded.shape[1]
+    K = C_bar.shape[1]
+
+    # Fill in the gradients of the banded matrix
+    for j in range(N):
+        for d in range(D):
+            i = d + j if lower else d + j - D + 1 
+            if i < 0 or i >= N:
+                continue
+
+            for k in range(K):
+                A_bar[d, j] -= b_bar[i, k] * C[j, k]
+                # If off-diagonal, also include the cross term
+                if i != j:
+                    A_bar[d, j] -= b_bar[j, k] * C[i, k]

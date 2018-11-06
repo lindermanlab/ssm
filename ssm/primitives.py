@@ -9,7 +9,8 @@ from functools import partial
 
 from ssm.cstats import _blocks_to_bands_lower, _blocks_to_bands_upper, \
                        _bands_to_blocks_lower, _bands_to_blocks_upper, \
-                       _transpose_banded, vjp_cholesky_banded_lower
+                       _transpose_banded, vjp_cholesky_banded_lower, \
+                       _vjp_solve_banded_A, _vjp_solveh_banded_A
 
 from ssm.messages import forward_pass, backward_pass, backward_sample, grad_hmm_normalizer
 
@@ -215,7 +216,7 @@ defvjp(blocks_to_bands,
 @primitive
 def transpose_banded(l_and_u, A_banded):
     A_banded = to_c(A_banded)
-    return _transpose_banded(l_and_u, A_banded)
+    return _transpose_banded(l_and_u[0], l_and_u[1], A_banded)
 
 def grad_transpose_banded(ans, l_and_u, A_banded):
     l, u = l_and_u
@@ -258,27 +259,28 @@ def vjp_solve_banded_b(C, l_and_u, A_banded, b, **kwargs):
         return solve_banded((u, l), transpose_banded((l, u), A_banded), C_bar)
     return vjp
 
-
 def vjp_solve_banded_A(C, l_and_u, A_banded, b, **kwargs):
     # \bar{A} = -A^{-T} \bar{C} C^T  = -\bar{B} C^T
     l, u = l_and_u
     D, N = A_banded.shape
     assert D == l + u + 1
 
+    C = to_c(C)
     A_banded = to_c(A_banded)
+    b = to_c(b)
 
     def vjp(C_bar):
         b_bar = solve_banded((u, l), transpose_banded((l, u), A_banded), C_bar)
-
-        # Fill in the gradients of the banded matrix
         A_bar = np.zeros_like(A_banded)
-        for d in range(D):
-            for j in range(N):
-                i = d + j - u
-                if i >= 0 and i < N:
-                    A_bar[d, j] = -np.dot(b_bar[i], C[j])
+        K = b.shape[1] if b.ndim == 2 else 1
+        _vjp_solve_banded_A(A_bar, 
+                            b_bar.reshape(-1, K), 
+                            C_bar.reshape(-1, K), 
+                            C.reshape(-1, K), 
+                            u, A_banded)
         return A_bar
     return vjp
+
 
 defvjp(solve_banded, None, vjp_solve_banded_A, vjp_solve_banded_b)
 
@@ -292,29 +294,21 @@ def vjp_solveh_banded_b(C, A_banded, b, lower=True, **kwargs):
 
 def vjp_solveh_banded_A(C, A_banded, b, lower=True, **kwargs):
     # \bar{A} = -A^{-T} \bar{C} C^T  = -\bar{B} C^T
-
-    D, N = A_banded.shape
+    C = to_c(C)
+    A_banded = to_c(A_banded)
+    b = to_c(b)
     
     def vjp(C_bar):
         b_bar = solveh_banded(A_banded, C_bar, lower=lower, **kwargs)
-
-        # Fill in the gradients of the banded matrix
         A_bar = np.zeros_like(A_banded)
-        for j in range(N):
-            for d in range(D):
-                i = d + j if lower else d + j - D + 1 
-                if i < 0 or i >= N:
-                    continue
+        K = b.shape[1] if b.ndim == 2 else 1
+        _vjp_solveh_banded_A(A_bar, 
+                             b_bar.reshape(-1, K), 
+                             C_bar.reshape(-1, K), 
+                             C.reshape(-1, K), 
+                             lower, 
+                             A_banded)
 
-                if i == j:
-                    A_bar[d, j] = -np.dot(b_bar[i], C[j])
-
-                else:
-                    A_bar[d, j] = -(np.dot(b_bar[i], C[j]) + np.dot(b_bar[j], C[i]))
-
-        # A_bar is the gradient of a full matrix.  A_banded is only one
-        # half of the matrix (upper or lower).  We need to double the 
-        # off diagonal entries since they would be counted twice
         return A_bar
     return vjp
 
@@ -383,7 +377,7 @@ def solve_lds(As, bs, Qi_sqrts, ms, Ri_sqrts, v):
     return np.reshape(x_flat, v.shape)
 
 
-def lds_normalizer(x, As, bs, Qi_sqrts, ms, Ri_sqrts):
+def lds_log_probability(x, As, bs, Qi_sqrts, ms, Ri_sqrts):
     """
     Compute the log normalizer of a linear dynamical system.
     """
