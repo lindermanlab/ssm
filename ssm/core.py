@@ -348,7 +348,7 @@ class _SwitchingLDS(object):
         self.emissions.params = value[3]
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, num_em_iters=25, verbose=False):
+    def initialize(self, datas, inputs=None, masks=None, tags=None, num_em_iters=25):
         # First initialize the observation model
         self.emissions.initialize(datas, inputs, masks, tags)
 
@@ -365,7 +365,7 @@ class _SwitchingLDS(object):
                      copy.deepcopy(self.dynamics))
 
         arhmm.fit(xs, inputs=inputs, masks=xmasks, tags=tags, 
-                  method="em", num_em_iters=num_em_iters, num_iters=10, verbose=verbose)
+                  method="em", num_em_iters=num_em_iters, num_iters=10)
 
         self.init_state_distn = copy.deepcopy(arhmm.init_state_distn)
         self.transitions = copy.deepcopy(arhmm.transitions)
