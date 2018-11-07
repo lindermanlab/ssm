@@ -76,29 +76,6 @@ class VariationalPosterior(object):
         raise NotImplemented
 
 
-def _initialize_linear_emissions_mean(model, data, mask, input, tag):
-    # y = Cx + d + noise; C orthogonal.  
-    # xhat = (C^T C)^{-1} C^T (y-d)
-    T = data.shape[0]
-    C, d = self.model.emissions.Cs[0], self.model.emissions.ds[0]
-    C_pseudoinv = np.linalg.solve(C.T.dot(C), C.T).T
-
-    # TODO: We don't want to project data, we want to project the 
-    # data after it's been passed back through the link function. 
-    # E.g. for Poisson data with exp link, we want to model log(data)
-
-    if not np.all(mask):
-        data = interpolate_data(data, mask)        
-        # We would like to find the PCA coordinates in the face of missing data
-        # To do so, alternate between running PCA and imputing the missing entries
-        for itr in range(25):
-            q_mu = (data-d).dot(C_pseudoinv)
-            data[:, ~mask[0]] = (q_mu.dot(C.T) + d)[:, ~mask[0]]
-
-    # Project data to get the mean
-    return (data-d).dot(C_pseudoinv)
-    
-
 class SLDSMeanFieldVariationalPosterior(VariationalPosterior):
     """
     Mean field variational posterior for the continuous latent 
@@ -107,7 +84,7 @@ class SLDSMeanFieldVariationalPosterior(VariationalPosterior):
     @ensure_variational_args_are_lists
     def __init__(self, model, datas, 
                  inputs=None, masks=None, tags=None,
-                 initial_variance=0.0001):
+                 initial_variance=0.01):
 
         super(SLDSMeanFieldVariationalPosterior, self).\
             __init__(model, datas, masks, tags)
@@ -140,11 +117,7 @@ class SLDSMeanFieldVariationalPosterior(VariationalPosterior):
 
     def _initialize_variational_params(self, data, input, mask, tag):
         T = data.shape[0]
-        if isinstance(self.model, _LinearEmissions):
-            q_mu = _initialize_linear_emissions_mean(model, data)
-        else:
-            q_mu = np.zeros((T, self.D))
-            
+        q_mu = self.model.emissions.invert(data, input=input, mask=mask, tag=tag)    
         q_sigma_inv = np.log(self.initial_variance) * np.ones((T, self.D))
         return q_mu, q_sigma_inv
 
@@ -175,7 +148,7 @@ class SLDSTriDiagVariationalPosterior(VariationalPosterior):
     @ensure_variational_args_are_lists
     def __init__(self, model, datas, 
                  inputs=None, masks=None, tags=None,
-                 initial_variance=0.0001):
+                 initial_variance=0.01):
 
         super(SLDSTriDiagVariationalPosterior, self).\
             __init__(model, datas, masks, tags)
@@ -217,16 +190,16 @@ class SLDSTriDiagVariationalPosterior(VariationalPosterior):
         D = self.D
 
         # Initialize the mean with the linear model, if applicable
-        if isinstance(self.model, _LinearEmissions):
-            ms = _initialize_linear_emissions_mean(model, data)
-        else:
-            ms = np.zeros((T, D))
-
-        # Initialize with weak covariance between adjacent time steps
+        ms = self.model.emissions.invert(data, input=input, mask=mask, tag=tag)
+        
+        # Initialize with no covariance between adjacent time steps
+        # NOTE: it's important to initialize A and Q to be nonzero,
+        # otherwise the gradients wrt them are zero and they never
+        # change during optimization!
         As = np.repeat(np.eye(D)[None, :, :], T-1, axis=0)
         bs = np.zeros((T-1, D))
         Qi_sqrts = np.repeat(np.eye(D)[None, :, :], T-1, axis=0)
-        Ri_sqrts = np.sqrt(self.initial_variance) * np.repeat(np.eye(D)[None, :, :], T, axis=0)
+        Ri_sqrts = 1./np.sqrt(self.initial_variance) * np.repeat(np.eye(D)[None, :, :], T, axis=0)
         return As, bs, Qi_sqrts, ms, Ri_sqrts
 
     def sample(self):

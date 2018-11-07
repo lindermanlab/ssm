@@ -129,9 +129,12 @@ rslds = SLDS(D_obs, K, D_latent,
              emissions="gaussian",
              single_subspace=True)
 
+# Initialize the model with the observed data
+rslds.initialize(y)
+
+# Fit with variational inference
 q = SLDSTriDiagVariationalPosterior(rslds, y)
-q = SLDSMeanFieldVariationalPosterior(rslds, y)
-elbos = rslds.fit(q, y, num_iters=1000)
+elbos = rslds.fit(q, y, num_iters=1000, initialize=False)
 xhat = q.mean[0]
 zhat = rslds.most_likely_states(xhat, y)
 

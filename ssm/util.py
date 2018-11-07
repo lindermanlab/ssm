@@ -2,40 +2,9 @@ from warnings import warn
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
-from autograd.misc.optimizers import unflatten_optimizer
 
 from scipy.optimize import linear_sum_assignment
 
-@unflatten_optimizer
-def adam_with_convergence_check(grad, x, callback=None, max_iters=10000, 
-    step_size=0.001, b1=0.9, b2=0.999, eps=10**-8, tol=1e-6,
-    ):
-    """Adam as described in http://arxiv.org/pdf/1412.6980.pdf.
-    It's basically RMSprop with momentum and some correction terms."""
-    converged = False
-    m = np.zeros(len(x))
-    v = np.zeros(len(x))
-    for i in range(max_iters):
-        g = grad(x, i)
-        if callback: 
-            callback(x, i, g)
-
-        m = (1 - b1) * g      + b1 * m  # First  moment estimate.
-        v = (1 - b2) * (g**2) + b2 * v  # Second moment estimate.
-        mhat = m / (1 - b1**(i + 1))    # Bias correction.
-        vhat = v / (1 - b2**(i + 1))
-        dx = -step_size*mhat/(np.sqrt(vhat) + eps)
-        x = x + dx
-
-        # check for convergence
-        if np.mean(abs(dx)) < tol:
-            converged = True
-            break 
-
-    if not converged:
-        warn("Adam failed to converge in {} iterations.".format(max_iters))
-
-    return x
 
 def compute_state_overlap(z1, z2, K1=None, K2=None):
     assert z1.dtype == int and z2.dtype == int
@@ -51,6 +20,7 @@ def compute_state_overlap(z1, z2, K1=None, K2=None):
             overlap[k1, k2] = np.sum((z1 == k1) & (z2 == k2))
     return overlap
 
+
 def find_permutation(z1, z2, K1=None, K2=None):
     overlap = compute_state_overlap(z1, z2, K1=K1, K2=K2)
     K1, K2 = overlap.shape
@@ -65,6 +35,7 @@ def find_permutation(z1, z2, K1=None, K2=None):
         perm = np.concatenate((perm, unused))
 
     return perm
+
 
 def random_rotation(n, theta=None):
     if theta is None:
@@ -87,7 +58,7 @@ def ensure_args_are_lists(f):
         datas = [datas] if not isinstance(datas, (list, tuple)) else datas
         
         if inputs is None:
-            inputs = [np.zeros((data.shape[0], self.M)) for data in datas]
+            inputs = [np.zeros((data.shape[0], 0)) for data in datas]
         elif not isinstance(inputs, (list, tuple)):
             inputs = [inputs]
 
@@ -133,7 +104,7 @@ def ensure_variational_args_are_lists(f):
 def ensure_args_not_none(f):
     def wrapper(self, data, input=None, mask=None, tag=None, **kwargs):
         assert data is not None
-        input = np.zeros((data.shape[0], self.M)) if input is None else input
+        input = np.zeros((data.shape[0], 0)) if input is None else input
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return f(self, data, input=input, mask=mask, tag=tag, **kwargs)
     return wrapper
@@ -143,7 +114,7 @@ def ensure_slds_args_not_none(f):
     def wrapper(self, variational_mean, data, input=None, mask=None, tag=None, **kwargs):
         assert variational_mean is not None
         assert data is not None
-        input = np.zeros((data.shape[0], self.M)) if input is None else input
+        input = np.zeros((data.shape[0], 0)) if input is None else input
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return f(self, variational_mean, data, input=input, mask=mask, tag=tag, **kwargs)
     return wrapper

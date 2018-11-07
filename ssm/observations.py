@@ -10,7 +10,7 @@ from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
 from ssm.util import random_rotation, ensure_args_are_lists, ensure_args_not_none, \
-    logistic, logit, adam_with_convergence_check, one_hot, generalized_newton_studentst_dof
+    logistic, logit, one_hot, generalized_newton_studentst_dof
 from ssm.preprocessing import interpolate_data
 from ssm.cstats import robust_ar_statistics
 
@@ -48,7 +48,7 @@ class _Observations(object):
         """
         If M-step cannot be done in closed form for the transitions, default to SGD.
         """
-        optimizer = dict(sgd=sgd, adam=adam, adam_with_convergence_check=adam_with_convergence_check)[optimizer]
+        optimizer = dict(sgd=sgd, adam=adam)[optimizer]
         
         # expected log joint
         def _expected_log_joint(expectations):

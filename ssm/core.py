@@ -1,18 +1,18 @@
 import copy
 import warnings
 from functools import partial
-import tqdm
+from tqdm.auto import trange
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.misc import logsumexp
-from autograd.misc.optimizers import sgd, adam
 from autograd.tracer import getval
 from autograd import grad
 
+from ssm.optimizers import adam_step, rmsprop_step, sgd_step
 from ssm.primitives import hmm_normalizer, hmm_expected_states, hmm_filter, viterbi
 from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
-    ensure_slds_args_not_none, ensure_variational_args_are_lists, adam_with_convergence_check
+    ensure_slds_args_not_none, ensure_variational_args_are_lists
 
 class _HMM(object):
     """
@@ -187,27 +187,33 @@ class _HMM(object):
         return elp
     
     # Model fitting
-    def _fit_sgd(self, optimizer, datas, inputs, masks, tags, print_intvl=10, **kwargs):
+    def _fit_sgd(self, optimizer, datas, inputs, masks, tags, num_iters=1000, **kwargs):
         """
         Fit the model with maximum marginal likelihood.
         """
         T = sum([data.shape[0] for data in datas])
-        
         def _objective(params, itr):
             self.params = params
             obj = self.log_probability(datas, inputs, masks, tags)
             return -obj / T
 
-        lls = []
-        def _print_progress(params, itr, g):
-            lls.append(self.log_probability(datas, inputs, masks, tags)._value)
-            if itr % print_intvl == 0:
-                print("Iteration {}.  LL: {}".format(itr, lls[-1]))
+        # Initialize the parameters
+        params = self.params
         
-        optimizers = dict(sgd=sgd, adam=adam, adam_with_convergence_check=adam_with_convergence_check)
-        self.params = \
-            optimizers[optimizer](grad(_objective), self.params, callback=_print_progress, **kwargs)
+        # Set up the progress bar
+        lls = [-_objective(params, 0) * T]
+        pbar = trange(num_iters)
+        pbar.set_description("Epoch {} Itr {} LP: {:.1f}".format(0, 0, lls[-1]))
 
+        # Run the optimizer
+        step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
+        state = None
+        for itr in pbar:
+            params, g, state = step(grad(_objective), params, itr, state, **kwargs)
+            lls.append(-_objective(params, 0) * T)
+            pbar.set_description("LP: {:.1f}".format(lls[-1]))
+            pbar.update(1)
+        
         return lls
 
     def _fit_stochastic_em(self, optimizer, datas, inputs, masks, tags, num_epochs=100, **kwargs):
@@ -218,6 +224,7 @@ class _HMM(object):
         M = len(datas)
         T = sum([data.shape[0] for data in datas])
         
+        # A helper to grab a minibatch of data
         perm = [np.random.permutation(M) for _ in range(num_epochs)]
         def _get_minibatch(itr):
             epoch = itr // M
@@ -225,6 +232,7 @@ class _HMM(object):
             i = perm[epoch][m]
             return datas[i], inputs[i], masks[i], tags[i]
 
+        # Define the objective (negative ELBO)
         def _objective(params, itr):
             # Grab a minibatch of data
             data, input, mask, tag = _get_minibatch(itr)
@@ -249,20 +257,25 @@ class _HMM(object):
 
             return -obj / T
 
-        lls = []
-        pbar = tqdm.trange(num_epochs * M)
-        def _print_progress(params, itr, g):
+        # Initialize the parameters
+        params = self.params
+        
+        # Set up the progress bar
+        lls = [-_objective(params, 0) * T]
+        pbar = trange(num_epochs * M)
+        pbar.set_description("Epoch {} Itr {} LP: {:.1f}".format(0, 0, lls[-1]))
+
+        # Run the optimizer
+        step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
+        state = None
+        for itr in pbar:
+            params, g, state = step(grad(_objective), params, itr, state, **kwargs)
             epoch = itr // M
             m = itr % M
             lls.append(-T * _objective(params, itr))
             pbar.set_description("Epoch {} Itr {} LP: {:.1f}".format(epoch, m, lls[-1]))
             pbar.update(1)
         
-        # Run the optimizer
-        optimizers = dict(sgd=sgd, adam=adam)
-        self.params = \
-            optimizers[optimizer](grad(_objective), self.params, callback=_print_progress, num_iters=num_epochs * M)
-
         return lls
 
     def _fit_em(self, datas, inputs, masks, tags, num_em_iters=100, **kwargs):
@@ -272,11 +285,10 @@ class _HMM(object):
         E step: compute E[z_t] and E[z_t, z_{t+1}] with message passing;
         M-step: analytical maximization of E_{p(z | x)} [log p(x, z; theta)].
         """
-        pbar = tqdm.trange(num_em_iters)
-
         lls = [self.log_probability(datas, inputs, masks, tags)]
+
+        pbar = trange(num_em_iters)
         pbar.set_description("LP: {:.1f}".format(lls[-1]))
-        
         for itr in pbar:
             # E step: compute expected latent states with current parameters
             expectations = [self.expected_states(data, input, mask, tag) 
@@ -341,7 +353,7 @@ class _SwitchingLDS(object):
         self.emissions.initialize(datas, inputs, masks, tags)
 
         # Get the initialized variational mean for the data
-        xs = [self.emissions.initialize_variational_params(data, input, mask, tag)[0]
+        xs = [self.emissions.invert(data, input, mask, tag)
               for data, input, mask, tag in zip(datas, inputs, masks, tags)]
         xmasks = [np.ones_like(x, dtype=bool) for x in xs]
 
@@ -398,7 +410,7 @@ class _SwitchingLDS(object):
             x[t] = self.dynamics.sample_x(z[t], x[:t], input=input[t], tag=tag)
 
         # Sample observations given latent states
-        y = self.emissions.sample_y(z, x, input=input, tag=tag)
+        y = self.emissions.sample(z, x, input=input, tag=tag)
         return z, x, y
 
     @ensure_slds_args_not_none
@@ -469,7 +481,6 @@ class _SwitchingLDS(object):
         Fit with stochastic variational inference using a 
         mean field Gaussian approximation for the latent states x_{1:T}.
         """
-
         # Define the objective (negative ELBO)
         T = sum([data.shape[0] for data in datas])
         def _objective(params, itr):
@@ -480,29 +491,29 @@ class _SwitchingLDS(object):
 
             obj = self.elbo(variational_posterior, datas, inputs, masks, tags)
             return -obj / T
-        initial_params = (self.params, variational_posterior.params) if learning else variational_params
+
+        # Initialize the parameters
+        params = (self.params, variational_posterior.params) if learning else variational_params
         
         # Set up the progress bar
-        elbos = [-_objective(initial_params, 0) * T]
-        pbar = tqdm.trange(num_iters)
-        pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
-        def _print_progress(params, itr, g):
+        elbos = [-_objective(params, 0) * T]
+        pbar = trange(num_iters)
+        pbar.set_description("ELBO: {:.1f}".format(elbos[0]))
+
+        # Run the optimizer
+        step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
+        state = None
+        for itr in pbar:
+            params, g, state = step(grad(_objective), params, itr, state)
             elbos.append(-_objective(params, itr) * T)
             pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
             pbar.update()
         
-        # Run the optimizer
-        optimizers = dict(sgd=sgd, adam=adam, adam_with_convergence_check=adam_with_convergence_check)
-        results = optimizers[optimizer](grad(_objective), 
-                                        initial_params,
-                                        callback=_print_progress,
-                                        num_iters=num_iters,
-                                        **kwargs)
-
+        # Save the final parameters
         if learning:
-            self.params, variational_posterior.params = results
+            self.params, variational_posterior.params = params
         else:
-            variational_posterior.params = results
+            variational_posterior.params = params
         
         return elbos
 
@@ -546,7 +557,8 @@ class _LDS(_SwitchingLDS):
     @ensure_slds_args_not_none    
     def expected_states(self, variational_mean, data, input=None, mask=None, tag=None):
         return np.ones((variational_mean.shape[0], 1)), \
-               np.ones((variational_mean.shape[0], 1, 1)), 
+               np.ones((variational_mean.shape[0], 1, 1)), \
+               0
 
     @ensure_slds_args_not_none
     def most_likely_states(self, variational_mean, data, input=None, mask=None, tag=None):
@@ -561,32 +573,28 @@ class _LDS(_SwitchingLDS):
         return np.nan
 
     @ensure_variational_args_are_lists
-    def elbo(self, variational_params, datas, inputs=None, masks=None, tags=None, n_samples=1):
+    def elbo(self, variational_posterior, datas, inputs=None, masks=None, tags=None, n_samples=1):
         """
         Lower bound on the marginal likelihood p(y | theta) 
         using variational posterior q(x; phi) where phi = variational_params
         """
         elbo = 0
-        for data, input, mask, tag, (q_mu, q_sigma_inv) in \
-            zip(datas, inputs, masks, tags, variational_params):
+        for sample in range(n_samples):
+            # Sample x from the variational posterior
+            xs = variational_posterior.sample()
 
-            q_sigma = np.exp(q_sigma_inv)
-            for sample in range(n_samples):
-                # log p(theta)
-                elbo += self.log_prior()
+            # log p(theta)
+            elbo += self.log_prior()
 
-                # Sample x from the variational posterior
-                x = q_mu + np.sqrt(q_sigma) * npr.randn(data.shape[0], self.D)
-                x_mask = np.ones_like(x, dtype=bool)
-                # Compute log p(y, x | theta) 
+            # Compute log p(y, x | theta) 
+            for x, data, input, mask, tag in zip(xs, datas, inputs, masks, tags):
+                x_mask = np.ones_like(x, dtype=bool)    
                 elbo += np.sum(self.dynamics.log_likelihoods(x, input, x_mask, tag))
                 elbo += np.sum(self.emissions.log_likelihoods(data, input, mask, tag, x))
                 
-                # -log q(x)
-                elbo -= np.sum(-0.5 * np.log(2 * np.pi * q_sigma))
-                elbo -= np.sum(-0.5 * (x - q_mu)**2 / q_sigma)
-
-                assert np.isfinite(elbo)
-        
+            # -log q(x)
+            elbo -= variational_posterior.log_density(xs)
+            assert np.isfinite(elbo)
+    
         return elbo / n_samples
 
