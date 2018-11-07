@@ -52,15 +52,29 @@ def interpolate_data(data, mask):
     return interp_data
 
 
-def trend_filter(data):
+def trend_filter(data, npoly=1, nexp=0):
     """
     Subtract a linear trend from the data
     """
     from sklearn.linear_model import LinearRegression
-    lr = LinearRegression()
+    lr = LinearRegression(fit_intercept=True)
     T = data.shape[0]
-    lr.fit(np.arange(T)[:, None], data)
-    trend = lr.predict(np.arange(T)[:, None])
+    t = np.arange(T)
+
+    # Create feature matrix
+    features = np.zeros((T, npoly + nexp))
+
+    # Polynomial of given order (npoly)
+    for k in range(npoly):
+        features[:, k] = t**(k+1)
+
+    # Exponential functions (logarithmically spaced)
+    for k in range(nexp):
+        tau = T / (k+1)
+        features[:, npoly+k] = np.exp(-t / tau)
+        
+    lr.fit(features, data)
+    trend = lr.predict(features)
     return data - trend
 
 def standardize(data, mask): 
