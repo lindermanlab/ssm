@@ -493,7 +493,10 @@ class _SwitchingLDS(object):
             return -obj / T
 
         # Initialize the parameters
-        params = (self.params, variational_posterior.params) if learning else variational_params
+        if learning:
+            params = (self.params, variational_posterior.params) 
+        else:
+            params = variational_posterior.params
         
         # Set up the progress bar
         elbos = [-_objective(params, 0) * T]
@@ -506,6 +509,10 @@ class _SwitchingLDS(object):
         for itr in pbar:
             params, g, state = step(grad(_objective), params, itr, state)
             elbos.append(-_objective(params, itr) * T)
+
+            # TODO: Check for convergence -- early stopping
+
+            # Update progress bar
             pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
             pbar.update()
         
