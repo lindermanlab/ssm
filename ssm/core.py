@@ -331,7 +331,9 @@ class _SwitchingLDS(object):
         self.emissions = emissions
         
         # Only allow fitting by SVI
-        self._fitting_methods = dict(svi=self._fit_svi)
+        self._fitting_methods = \
+            dict(svi=self._fit_svi,
+                 vem=self._fit_variational_em)
 
     @property
     def params(self):
@@ -474,6 +476,89 @@ class _SwitchingLDS(object):
             assert np.isfinite(elbo)
         
         return elbo / n_samples
+
+    def _lower_elbo(self, variational_posterior, datas, inputs, masks, tags, n_samples=1):
+        """
+        A lower bound on the ELBO that permits exact optimization of conjugate 
+        global parameters of the SLDS.  
+
+        L(theta, gamma, phi) = E_{q(x; phi)}[Q(theta, x) + log p(y | x; gamma) - log q(x; phi)]
+
+        where 
+
+        Q(theta, x) = E_p(z | x, theta')[log p(x, z; theta)]    <- theta' = current value of theta
+
+        For fixed theta' and x, we can evaluate p(z | x, theta') and its expectations.
+        We do not backpropagate through this posterior computation since that would 
+        amount to doing gradient ascent on the regular elbo defined above. 
+        """
+        lelbo = 0
+        for sample in range(n_samples):
+            # Sample x from the variational posterior
+            xs = variational_posterior.sample()
+
+        raise NotImplemented
+
+
+    def _fit_variational_em(self, variational_posterior, datas, inputs, masks, tags, 
+                 learning=True, alpha=.25, optimizer="adam", num_iters=100, **kwargs):
+        """
+        Let gamma denote the emission parameters and theta denote the transition
+        and initial discrete state parameters. This is a mix of EM and SVI:
+            1. Sample x ~ q(x; phi)
+            2. Compute L(x, theta') E_p(z | x, theta)[log p(x, z; theta')]
+            3. Set theta = (1 - alpha) theta + alpha * argmax L(x, theta')
+            4. Set gamma = gamma + eps * nabla log p(y | x; gamma)
+            5. Set phi = phi + eps * dx/dphi * d/dx [L(x, theta) + log p(y | x; gamma) - log q(x; phi)]
+        """
+
+        # Optimize the standard ELBO when updating gamma and phi
+        T = sum([data.shape[0] for data in datas])
+        def _gamma_phi_objective(params, itr):
+            self.emissions.params, variational_posterior.params = params
+            obj = self.elbo(variational_posterior, datas, inputs, masks, tags)
+            return -obj / T
+
+        # Initialize the parameters
+        gamma_phi = (self.emissions.params, variational_posterior.params) 
+        
+        # Set up the progress bar
+        elbos = [-_gamma_phi_objective(gamma_phi, 0) * T]
+        pbar = trange(num_iters)
+        pbar.set_description("ELBO: {:.1f}".format(elbos[0]))
+
+        # Run the optimizer
+        step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
+        state = None
+        for itr in pbar:
+            # Update the initial state, transition, and dynamics parameters with EM
+            xs = variational_posterior.sample()
+
+            # E step: compute expected latent states with current parameters
+            expectations = [self.expected_states(x, data, input, mask, tag) 
+                            for x, data, input, mask, tag in zip(xs, datas, inputs, masks, tags)]
+
+            # M step: maximize expected log joint wrt parameters
+            # TODO: Only do a partial update
+            x_masks = [np.ones_like(x, dtype=bool) for x in xs]
+            self.init_state_distn.m_step(expectations, xs, inputs, x_masks, tags, **kwargs)
+            self.transitions.m_step(expectations, xs, inputs, x_masks, tags, **kwargs)
+            self.dynamics.m_step(expectations, xs, inputs, x_masks, tags, **kwargs)
+
+            # Update the emission and variational posterior parameters 
+            gamma_phi, g, state = step(grad(_gamma_phi_objective), gamma_phi, itr, state)
+            elbos.append(-_gamma_phi_objective(gamma_phi, itr) * T)
+
+            # TODO: Check for convergence -- early stopping
+
+            # Update progress bar
+            pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
+            pbar.update()
+        
+        # Save the final emission and variational parameters
+        self.emissions.params, variational_posterior.params = gamma_phi
+        
+        return elbos
 
     def _fit_svi(self, variational_posterior, datas, inputs, masks, tags, 
                  learning=True, optimizer="adam", num_iters=100, **kwargs):
