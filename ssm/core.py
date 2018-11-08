@@ -9,7 +9,7 @@ from autograd.scipy.misc import logsumexp
 from autograd.tracer import getval
 from autograd import grad
 
-from ssm.optimizers import adam_step, rmsprop_step, sgd_step
+from ssm.optimizers import adam_step, rmsprop_step, sgd_step, convex_combination
 from ssm.primitives import hmm_normalizer, hmm_expected_states, hmm_filter, viterbi
 from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
     ensure_slds_args_not_none, ensure_variational_args_are_lists
