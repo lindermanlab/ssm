@@ -392,28 +392,45 @@ class _SwitchingLDS(object):
                self.dynamics.log_prior() + \
                self.emissions.log_prior()
 
-    def sample(self, T, input=None, tag=None):
-        K, D = self.K, self.D
-        input = np.zeros((T, self.M)) if input is None else input
-        mask = np.ones((T, D), dtype=bool)
+    def sample(self, T, input=None, tag=None, prefix=None, with_noise=True):
+        N, K, D = self.N, self.K, self.D
         
-        # Initialize outputs
-        z = np.zeros(T, dtype=int)
-        x = np.zeros((T, D))
-        
-        # Sample discrete and continuous latent states
-        pi0 = np.exp(self.init_state_distn.log_initial_state_distn(x, input, mask, tag))
-        z[0] = npr.choice(self.K, p=pi0)
-        x[0] = self.dynamics.sample_x(z[0], x[:0], tag=tag)
+        # If prefix is given, pad the output with it
+        if prefix is None:
+            pad = 1
+            z = np.zeros(T+1, dtype=int)
+            x = np.zeros((T+1, D))
+            data = np.zeros((T+1, D))
+            input = np.zeros((T+1, self.M)) if input is None else input
+            xmask = np.ones((T+1, D), dtype=bool)
 
-        for t in range(1, T):
-            Pt = np.exp(self.transitions.log_transition_matrices(x[t-1:t+1], input[t-1:t+1], mask=mask[t-1:t+1], tag=tag))[0]
+            # Sample the first state from the initial distribution
+            pi0 = np.exp(self.init_state_distn.log_initial_state_distn(data, input, xmask, tag))
+            z[0] = npr.choice(self.K, p=pi0)
+            x[0] = self.dynamics.sample_x(z[0], x[:0], tag=tag, with_noise=with_noise)
+        
+        else:
+            zhist, xhist, yhist = prefix
+            pad = len(zhist)
+            assert zhist.dtype == int and zhist.min() >= 0 and zhist.max() < K
+            assert xhist.shape == (pad, D)
+            assert xhist.shape == (pad, N)
+
+            z = np.concatenate((zhist, np.zeros(T, dtype=int)))
+            x = np.concatenate((xhist, np.zeros((T, D))))
+            input = np.zeros((T+pad, self.M)) if input is None else input
+            xmask = np.ones((T+pad, D), dtype=bool)
+        
+        # Sample z and x 
+        for t in range(pad, T+pad):
+            Pt = np.exp(self.transitions.log_transition_matrices(x[t-1:t+1], input[t-1:t+1], mask=xmask[t-1:t+1], tag=tag))[0]
             z[t] = npr.choice(self.K, p=Pt[z[t-1]])
             x[t] = self.dynamics.sample_x(z[t], x[:t], input=input[t], tag=tag)
 
         # Sample observations given latent states
+        # TODO: sample in the loop above? 
         y = self.emissions.sample(z, x, input=input, tag=tag)
-        return z, x, y
+        return z[pad:], x[pad:], y[pad:]
 
     @ensure_slds_args_not_none
     def expected_states(self, variational_mean, data, input=None, mask=None, tag=None):
@@ -477,31 +494,8 @@ class _SwitchingLDS(object):
         
         return elbo / n_samples
 
-    def _lower_elbo(self, variational_posterior, datas, inputs, masks, tags, n_samples=1):
-        """
-        A lower bound on the ELBO that permits exact optimization of conjugate 
-        global parameters of the SLDS.  
-
-        L(theta, gamma, phi) = E_{q(x; phi)}[Q(theta, x) + log p(y | x; gamma) - log q(x; phi)]
-
-        where 
-
-        Q(theta, x) = E_p(z | x, theta')[log p(x, z; theta)]    <- theta' = current value of theta
-
-        For fixed theta' and x, we can evaluate p(z | x, theta') and its expectations.
-        We do not backpropagate through this posterior computation since that would 
-        amount to doing gradient ascent on the regular elbo defined above. 
-        """
-        lelbo = 0
-        for sample in range(n_samples):
-            # Sample x from the variational posterior
-            xs = variational_posterior.sample()
-
-        raise NotImplemented
-
-
     def _fit_variational_em(self, variational_posterior, datas, inputs, masks, tags, 
-                 learning=True, alpha=.25, optimizer="adam", num_iters=100, **kwargs):
+                 learning=True, alpha=.75, optimizer="adam", num_iters=100, **kwargs):
         """
         Let gamma denote the emission parameters and theta denote the transition
         and initial discrete state parameters. This is a mix of EM and SVI:
@@ -536,16 +530,19 @@ class _SwitchingLDS(object):
 
             # E step: compute expected latent states with current parameters
             expectations = [self.expected_states(x, data, input, mask, tag) 
-                            for x, data, input, mask, tag in zip(xs, datas, inputs, masks, tags)]
+                            for x, data, input, mask, tag 
+                            in zip(xs, datas, inputs, masks, tags)]
 
             # M step: maximize expected log joint wrt parameters
-            # TODO: Only do a partial update
+            # Note: Only do a partial update toward the M step for this sample of xs
             x_masks = [np.ones_like(x, dtype=bool) for x in xs]
-            self.init_state_distn.m_step(expectations, xs, inputs, x_masks, tags, **kwargs)
-            self.transitions.m_step(expectations, xs, inputs, x_masks, tags, **kwargs)
-            self.dynamics.m_step(expectations, xs, inputs, x_masks, tags, **kwargs)
-
+            for distn in [self.init_state_distn, self.transitions, self.dynamics]:
+                curr_prms = copy.deepcopy(distn.params)
+                distn.m_step(expectations, xs, inputs, x_masks, tags, **kwargs)
+                distn.params = convex_combination(curr_prms, distn.params, alpha)
+            
             # Update the emission and variational posterior parameters 
+            # TODO: Reuse the same samples of xs. 
             gamma_phi, g, state = step(grad(_gamma_phi_objective), gamma_phi, itr, state)
             elbos.append(-_gamma_phi_objective(gamma_phi, itr) * T)
 

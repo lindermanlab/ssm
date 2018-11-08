@@ -24,6 +24,19 @@ def unflatten_optimizer_step(step):
     return _step
 
 
+def convex_combination(curr, target, alpha):
+    """
+    Output next = (1-alpha) * target + alpha * curr
+    where target, curr, and next can be trees of nested
+    containers with arrays/scalars at the leaves.
+    Assume curr and target have the same structure.
+    """
+    assert alpha >= 0 and alpha <= 1
+    _curr, unflatten = flatten(curr)
+    _target, _ = flatten(target)
+    return unflatten(alpha * _curr + (1-alpha) * _target)
+
+
 @unflatten_optimizer_step
 def sgd_step(grad, x, itr, state=None, step_size=0.1, mass=0.9):
     # Stochastic gradient descent with momentum.
