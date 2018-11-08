@@ -425,7 +425,7 @@ class _SwitchingLDS(object):
         for t in range(pad, T+pad):
             Pt = np.exp(self.transitions.log_transition_matrices(x[t-1:t+1], input[t-1:t+1], mask=xmask[t-1:t+1], tag=tag))[0]
             z[t] = npr.choice(self.K, p=Pt[z[t-1]])
-            x[t] = self.dynamics.sample_x(z[t], x[:t], input=input[t], tag=tag)
+            x[t] = self.dynamics.sample_x(z[t], x[:t], input=input[t], tag=tag, with_noise=with_noise)
 
         # Sample observations given latent states
         # TODO: sample in the loop above? 
