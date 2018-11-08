@@ -414,7 +414,7 @@ class _SwitchingLDS(object):
             pad = len(zhist)
             assert zhist.dtype == int and zhist.min() >= 0 and zhist.max() < K
             assert xhist.shape == (pad, D)
-            assert xhist.shape == (pad, N)
+            assert yhist.shape == (pad, N)
 
             z = np.concatenate((zhist, np.zeros(T, dtype=int)))
             x = np.concatenate((xhist, np.zeros((T, D))))
