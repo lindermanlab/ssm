@@ -1,4 +1,5 @@
 # SSM: Bayesian learning and inference for state space models 
+[![Test status](https://travis-ci.org/slinderman/ssm.svg?branch=master)](https://travis-ci.org/slinderman/ssm)
 
 This package has fast and flexible code for simulating, learning, and performing inference in a variety of state space models. 
 Currently, it supports:
