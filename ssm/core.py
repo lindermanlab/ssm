@@ -7,7 +7,8 @@ import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.misc import logsumexp
 from autograd.tracer import getval
-from autograd import grad
+from autograd.misc import flatten
+from autograd import value_and_grad
 
 from ssm.optimizers import adam_step, rmsprop_step, sgd_step, convex_combination
 from ssm.primitives import hmm_normalizer, hmm_expected_states, hmm_filter, viterbi
@@ -31,14 +32,6 @@ class _HMM(object):
         self.init_state_distn = init_state_distn
         self.transitions = transitions
         self.observations = observations
-        
-        self._fitting_methods = \
-            dict(sgd=partial(self._fit_sgd, "sgd"),
-                 adam=partial(self._fit_sgd, "adam"),
-                 em=self._fit_em,
-                 stochastic_em=partial(self._fit_stochastic_em, "adam"),
-                 stochastic_em_sgd=partial(self._fit_stochastic_em, "sgd"),
-                 )
 
     @property
     def params(self):
@@ -209,8 +202,8 @@ class _HMM(object):
         step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
         state = None
         for itr in pbar:
-            params, g, state = step(grad(_objective), params, itr, state, **kwargs)
-            lls.append(-_objective(params, 0) * T)
+            params, val, g, state = step(value_and_grad(_objective), params, itr, state, **kwargs)
+            lls.append(-val * T)
             pbar.set_description("LP: {:.1f}".format(lls[-1]))
             pbar.update(1)
         
@@ -269,10 +262,10 @@ class _HMM(object):
         step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
         state = None
         for itr in pbar:
-            params, g, state = step(grad(_objective), params, itr, state, **kwargs)
+            params, val, g, state = step(value_and_grad(_objective), params, itr, state, **kwargs)
             epoch = itr // M
             m = itr % M
-            lls.append(-T * _objective(params, itr))
+            lls.append(-val * T)
             pbar.set_description("Epoch {} Itr {} LP: {:.1f}".format(epoch, m, lls[-1]))
             pbar.update(1)
         
@@ -307,14 +300,22 @@ class _HMM(object):
 
     @ensure_args_are_lists
     def fit(self, datas, inputs=None, masks=None, tags=None, method="sgd", initialize=True, **kwargs):
-        if method not in self._fitting_methods:
+        _fitting_methods = \
+            dict(sgd=partial(self._fit_sgd, "sgd"),
+                 adam=partial(self._fit_sgd, "adam"),
+                 em=self._fit_em,
+                 stochastic_em=partial(self._fit_stochastic_em, "adam"),
+                 stochastic_em_sgd=partial(self._fit_stochastic_em, "sgd"),
+                 )
+
+        if method not in _fitting_methods:
             raise Exception("Invalid method: {}. Options are {}".\
                             format(method, self._fitting_methods.keys()))
 
         if initialize:
             self.initialize(datas, inputs=inputs, masks=masks, tags=tags)
 
-        return self._fitting_methods[method](datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
+        return _fitting_methods[method](datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
 
 
 class _SwitchingLDS(object):
@@ -329,11 +330,6 @@ class _SwitchingLDS(object):
         self.transitions = transitions
         self.dynamics = dynamics
         self.emissions = emissions
-        
-        # Only allow fitting by SVI
-        self._fitting_methods = \
-            dict(svi=self._fit_svi,
-                 vem=self._fit_variational_em)
 
     @property
     def params(self):
@@ -494,68 +490,82 @@ class _SwitchingLDS(object):
         
         return elbo / n_samples
 
-    def _fit_variational_em(self, variational_posterior, datas, inputs, masks, tags, 
-                 learning=True, alpha=.75, optimizer="adam", num_iters=100, **kwargs):
+    @ensure_variational_args_are_lists
+    def _surrogate_elbo(self, variational_posterior, datas, inputs=None, masks=None, tags=None, 
+        alpha=0.75, **kwargs):
         """
-        Let gamma denote the emission parameters and theta denote the transition
-        and initial discrete state parameters. This is a mix of EM and SVI:
-            1. Sample x ~ q(x; phi)
-            2. Compute L(x, theta') E_p(z | x, theta)[log p(x, z; theta')]
-            3. Set theta = (1 - alpha) theta + alpha * argmax L(x, theta')
-            4. Set gamma = gamma + eps * nabla log p(y | x; gamma)
-            5. Set phi = phi + eps * dx/dphi * d/dx [L(x, theta) + log p(y | x; gamma) - log q(x; phi)]
+        Lower bound on the marginal likelihood p(y | gamma) 
+        using variational posterior q(x; phi) where phi = variational_params
+        and gamma = emission parameters.  As part of computing this objective, 
+        we optimize q(z | x) and take a natural gradient step wrt theta, the 
+        parameters of the dynamics model.
+
+        Note that the surrogate ELBO is a lower bound on the ELBO above. 
+           E_p(z | x, y)[log p(z, x, y)]
+           = E_p(z | x, y)[log p(z, x, y) - log p(z | x, y) + log p(z | x, y)]
+           = E_p(z | x, y)[log p(x, y) + log p(z | x, y)]
+           = log p(x, y) + E_p(z | x, y)[log p(z | x, y)]
+           = log p(x, y) -H[p(z | x, y)]
+          <= log p(x, y) 
+        with equality only when p(z | x, y) is atomic.  The gap equals the
+        entropy of the posterior on z. 
         """
+        # log p(theta)
+        elbo = self.log_prior()
 
-        # Optimize the standard ELBO when updating gamma and phi
-        T = sum([data.shape[0] for data in datas])
-        def _gamma_phi_objective(params, itr):
-            self.emissions.params, variational_posterior.params = params
-            obj = self.elbo(variational_posterior, datas, inputs, masks, tags)
-            return -obj / T
+        # Sample x from the variational posterior
+        xs = variational_posterior.sample()
 
-        # Initialize the parameters
-        gamma_phi = (self.emissions.params, variational_posterior.params) 
-        
-        # Set up the progress bar
-        elbos = [-_gamma_phi_objective(gamma_phi, 0) * T]
-        pbar = trange(num_iters)
-        pbar.set_description("ELBO: {:.1f}".format(elbos[0]))
+        # Inner optimization: find the true posterior p(z | x, y; theta).
+        # Then maximize the inner ELBO wrt theta,
+        # 
+        #    E_p(z | x, y; theta_fixed)[log p(z, x, y; theta).
+        # 
+        # This can be seen as a natural gradient step in theta
+        # space.  Note: we do not want to compute gradients wrt x or the
+        # emissions parameters backward throgh this optimization step, 
+        # so we unbox them first.
+        xs_unboxed = [getval(x) for x in xs]
+        emission_params_boxed = self.emissions.params
+        flat_emission_params_boxed, unflatten = flatten(emission_params_boxed)
+        self.emissions.params = unflatten(getval(flat_emission_params_boxed))
 
-        # Run the optimizer
-        step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
-        state = None
-        for itr in pbar:
-            # Update the initial state, transition, and dynamics parameters with EM
-            xs = variational_posterior.sample()
+        # E step: compute the true posterior p(z | x, y, theta_fixed) and 
+        # the necessary expectations under this posterior.
+        expectations = [self.expected_states(x, data, input, mask, tag) 
+                        for x, data, input, mask, tag 
+                        in zip(xs_unboxed, datas, inputs, masks, tags)]
 
-            # E step: compute expected latent states with current parameters
-            expectations = [self.expected_states(x, data, input, mask, tag) 
-                            for x, data, input, mask, tag 
-                            in zip(xs, datas, inputs, masks, tags)]
+        # M step: maximize expected log joint wrt parameters
+        # Note: Only do a partial update toward the M step for this sample of xs
+        x_masks = [np.ones_like(x, dtype=bool) for x in xs_unboxed]
+        for distn in [self.init_state_distn, self.transitions, self.dynamics]:
+            curr_prms = copy.deepcopy(distn.params)
+            distn.m_step(expectations, xs_unboxed, inputs, x_masks, tags, **kwargs)
+            distn.params = convex_combination(curr_prms, distn.params, alpha)
 
-            # M step: maximize expected log joint wrt parameters
-            # Note: Only do a partial update toward the M step for this sample of xs
-            x_masks = [np.ones_like(x, dtype=bool) for x in xs]
-            for distn in [self.init_state_distn, self.transitions, self.dynamics]:
-                curr_prms = copy.deepcopy(distn.params)
-                distn.m_step(expectations, xs, inputs, x_masks, tags, **kwargs)
-                distn.params = convex_combination(curr_prms, distn.params, alpha)
+        # Box up the emission parameters again before computing the ELBO
+        self.emissions.params = emission_params_boxed
+
+        # Compute expected log likelihood E_q(z | x, y) [log p(z, x, y; theta)]
+        for (Ez, Ezzp1, _), x, x_mask, data, mask, input, tag in \
+            zip(expectations, xs, x_masks, datas, masks, inputs, tags):
             
-            # Update the emission and variational posterior parameters 
-            # TODO: Reuse the same samples of xs. 
-            gamma_phi, g, state = step(grad(_gamma_phi_objective), gamma_phi, itr, state)
-            elbos.append(-_gamma_phi_objective(gamma_phi, itr) * T)
+            # Compute expected log likelihood (inner ELBO)
+            log_pi0 = self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
+            log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
+            log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
+            log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
 
-            # TODO: Check for convergence -- early stopping
+            elbo += np.sum(Ez[0] * log_pi0)
+            elbo += np.sum(Ezzp1 * log_Ps)
+            elbo += np.sum(Ez * log_likes)
 
-            # Update progress bar
-            pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
-            pbar.update()
+        # -log q(x)
+        elbo -= variational_posterior.log_density(xs)
+        assert np.isfinite(elbo)
         
-        # Save the final emission and variational parameters
-        self.emissions.params, variational_posterior.params = gamma_phi
-        
-        return elbos
+        return elbo
 
     def _fit_svi(self, variational_posterior, datas, inputs, masks, tags, 
                  learning=True, optimizer="adam", num_iters=100, **kwargs):
@@ -589,8 +599,8 @@ class _SwitchingLDS(object):
         step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
         state = None
         for itr in pbar:
-            params, g, state = step(grad(_objective), params, itr, state)
-            elbos.append(-_objective(params, itr) * T)
+            params, val, g, state = step(value_and_grad(_objective), params, itr, state)
+            elbos.append(-val * T)
 
             # TODO: Check for convergence -- early stopping
 
@@ -606,28 +616,92 @@ class _SwitchingLDS(object):
         
         return elbos
 
+    def _fit_variational_em(self, variational_posterior, datas, inputs, masks, tags, 
+                 learning=True, alpha=.75, optimizer="adam", num_iters=100, **kwargs):
+        """
+        Let gamma denote the emission parameters and theta denote the transition
+        and initial discrete state parameters. This is a mix of EM and SVI:
+            1. Sample x ~ q(x; phi)
+            2. Compute L(x, theta') E_p(z | x, theta)[log p(x, z; theta')]
+            3. Set theta = (1 - alpha) theta + alpha * argmax L(x, theta')
+            4. Set gamma = gamma + eps * nabla log p(y | x; gamma)
+            5. Set phi = phi + eps * dx/dphi * d/dx [L(x, theta) + log p(y | x; gamma) - log q(x; phi)]
+        """
+        # Optimize the standard ELBO when updating gamma (emissions params) 
+        # and phi (variational params)
+        T = sum([data.shape[0] for data in datas])
+        def _objective(params, itr):
+            if learning:
+                self.emissions.params, variational_posterior.params = params
+            else:
+                variational_posterior.params = params
+
+            obj = self._surrogate_elbo(variational_posterior, datas, inputs, masks, tags, **kwargs)
+            return -obj / T
+
+        # Initialize the parameters
+        if learning:
+            params = (self.emissions.params, variational_posterior.params) 
+        else:
+            params = variational_posterior.params
+        
+        # Set up the progress bar
+        elbos = [-_objective(params, 0) * T]
+        pbar = trange(num_iters)
+        pbar.set_description("Surrogate ELBO: {:.1f}".format(elbos[0]))
+
+        # Run the optimizer
+        step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
+        state = None
+        for itr in pbar:
+            # Update the emission and variational posterior parameters 
+            params, val, g, state = step(value_and_grad(_objective), params, itr, state)
+            elbos.append(-val * T)
+
+            # Update progress bar
+            pbar.set_description("Surrogate ELBO: {:.1f}".format(elbos[-1]))
+            pbar.update()
+        
+        # Save the final emission and variational parameters
+        if learning:
+            self.emissions.params, variational_posterior.params = params
+        else:
+            variational_posterior.params = params
+        
+        return elbos
+
     @ensure_variational_args_are_lists
     def fit(self, variational_posterior, datas, 
             inputs=None, masks=None, tags=None, method="svi", 
             initialize=True, **kwargs):
 
-        if method not in self._fitting_methods:
+        # Specify fitting methods
+        _fitting_methods = dict(svi=self._fit_svi,
+                                vem=self._fit_variational_em)
+
+        if method not in _fitting_methods:
             raise Exception("Invalid method: {}. Options are {}".\
                             format(method, self._fitting_methods.keys()))
 
         if initialize:
             self.initialize(datas, inputs, masks, tags)
 
-        return self._fitting_methods[method](variational_posterior, datas, inputs, masks, tags, learning=True, **kwargs)
+        return _fitting_methods[method](variational_posterior, datas, inputs, masks, tags, 
+            learning=True, **kwargs)
 
     @ensure_variational_args_are_lists
     def approximate_posterior(self, variational_posterior, datas, inputs=None, masks=None, tags=None, 
                               method="svi", **kwargs):
-        if method not in self._fitting_methods:
-            raise Exception("Invalid method: {}. Options are {}".\
-                            format(method, self._fitting_methods.keys()))
+        # Specify fitting methods
+        _fitting_methods = dict(svi=self._fit_svi,
+                                vem=self._fit_variational_em_new)
 
-        return self._fitting_methods[method](variational_posterior, datas, inputs, masks, tags, learning=False, **kwargs)
+        if method not in _fitting_methods:
+            raise Exception("Invalid method: {}. Options are {}".\
+                            format(method, _fitting_methods.keys()))
+
+        return _fitting_methods[method](variational_posterior, datas, inputs, masks, tags, 
+            learning=False, **kwargs)
 
 
 class _LDS(_SwitchingLDS):
