@@ -8,7 +8,7 @@ from autograd.scipy.stats import dirichlet
 from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
-from ssm.util import one_hot, logistic, relu
+from ssm.util import one_hot, logistic, relu, batch_mahalanobis
 
 
 class _Transitions(object):
@@ -324,7 +324,6 @@ class RecurrentOnlyTransitions(_Transitions):
             zps.append(z[:-1])
             zns.append(z[1:])
 
-
         X = np.vstack([np.hstack((input[1:], data[:-1])) 
                        for input, data in zip(inputs, datas)])
         y = np.concatenate(zns)
@@ -361,6 +360,111 @@ class RecurrentOnlyTransitions(_Transitions):
         self.r[used] = self._lr.intercept_
         
 
+class RBFRecurrentTransitions(_Transitions):
+    """
+    Recurrent transitions with radial basis functions for parameterizing
+    the next state probability given current continuous data. We have,
+
+    p(z_{t+1} = k | z_t, x_t) 
+        \propto N(x_t | \mu_k, \Sigma_k) \times \pi_{z_t, z_{t+1})
+
+    where {\mu_k, \Sigma_k, \pi_k}_{k=1}^K are learned parameters. 
+    Equivalently,
+
+    log p(z_{t+1} = k | z_t, x_t)
+        = log N(x_t | \mu_k, \Sigma_k) + log \pi_{z_t, z_{t+1}) + const
+        = -D/2 log(2\pi) -1/2 log |Sigma_k| 
+          -1/2 (x - \mu_k)^T \Sigma_k^{-1} (x-\mu_k)
+          + log \pi{z_t, z_{t+1}}
+
+    The difference between this and the recurrent model above is that the 
+    log transition matrices are quadratic functions of x rather than linear.
+
+    While we're at it, there's no harm in adding a linear term to the log
+    transition matrices to capture input dependencies. 
+    """
+    def __init__(self, K, D, M):
+        super(RBFRecurrentTransitions, self).__init__(K, D, M=M)
+
+        # Baseline transition probabilities
+        Ps = .95 * np.eye(K) + .05 * npr.rand(K, K)
+        Ps /= Ps.sum(axis=1, keepdims=True)
+        self.log_Ps = np.log(Ps)
+
+        # RBF parameters
+        self.mus = npr.randn(K, D)
+        self._sqrt_Sigmas = npr.randn(K, D, D)
+
+        # Parameters linking input to state distribution
+        self.Ws = npr.randn(K, M)
+
+    @property
+    def params(self):
+        return self.log_Ps, self.mus, self._sqrt_Sigmas, self.Ws
+    
+    @params.setter
+    def params(self, value):
+        self.log_Ps, self.mus, self._sqrt_Sigmas, self.Ws = value
+
+    @property
+    def Sigmas(self):
+        return np.matmul(self._sqrt_Sigmas, np.swapaxes(self._sqrt_Sigmas, -1, -2))
+
+    def initialize(self, datas, inputs, masks, tags):
+        # Fit a GMM to the data to set the means and covariances
+        from sklearn.mixture import GaussianMixture
+        gmm = GaussianMixture(self.K, covariance_type="full")
+        gmm.fit(np.vstack(datas))
+        self.mus = gmm.means_
+        self._sqrt_Sigmas = np.linalg.cholesky(gmm.covariances_)
+        
+    def permute(self, perm):
+        """
+        Permute the discrete latent states.
+        """
+        self.log_Ps = self.log_Ps[np.ix_(perm, perm)]
+        self.mus = self.mus[perm]
+        self.sqrt_Sigmas = self.sqrt_Sigmas[perm]
+        self.Ws = self.Ws[perm]
+
+    def log_transition_matrices(self, data, input, mask, tag):
+        assert np.all(mask), "Recurrent models require that all data are present."
+
+        T = data.shape[0]
+        assert input.shape[0] == T
+        K, D = self.K, self.D
+        
+        # Previous state effect
+        log_Ps = np.tile(self.log_Ps[None, :, :], (T-1, 1, 1)) 
+
+        # RBF function, quadratic term
+        Ls = np.linalg.cholesky(self.Sigmas)                             # (K, D, D)
+        diff = data[:-1, None, :] - self.mus                             # (T-1, K, D)
+        M = batch_mahalanobis(Ls, diff)                                  # (T-1, K)
+        log_Ps = log_Ps + -0.5 * M[:, None, :]
+
+        # RBF function, Gaussian normalizer
+        # L_diag = np.reshape(Ls, Ls.shape[:-2] + (-1,))[..., ::D + 1]
+        L_diag = np.array([np.diag(L) for L in Ls])                      # (K, D)
+        half_log_det = np.sum(np.log(abs(L_diag)), axis=-1)              # (K,)
+        log_normalizer = -0.5 * D * np.log(2 * np.pi) - half_log_det     # (K,)
+        log_Ps = log_Ps + log_normalizer[None, None, :]
+
+        # Input effect
+        log_Ps = log_Ps + np.dot(input[1:], self.Ws.T)[:, None, :]
+        return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
+
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        """
+        We want to optimize :math:`\sum_t \log p(z_{t_1} | z_t, x_t; theta) wrt theta
+
+        As written above, neglecting the normalizing constant, each term 
+        is linear in z_t, quadratic in x_t.  If we only optimized the numerator,
+        this would be equivalent to a Gaussian mixture model.  Maybe this is a
+        good starting point. 
+        """
+        super(RBFRecurrentTransitions, self).m_step(expectations, datas, inputs, masks, tags, **kwargs)
+    
 
 # Allow general nonlinear emission models with neural networks
 class NeuralNetworkRecurrentTransitions(_Transitions):

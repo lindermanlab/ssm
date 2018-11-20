@@ -8,6 +8,7 @@ from ssm.transitions import \
     InputDrivenTransitions, \
     RecurrentTransitions, \
     RecurrentOnlyTransitions, \
+    RBFRecurrentTransitions, \
     NeuralNetworkRecurrentTransitions
 
 from ssm.observations import \
@@ -78,6 +79,7 @@ def HMM(K, D, M=0,
         inputdriven=InputDrivenTransitions,
         recurrent=RecurrentTransitions,
         recurrent_only=RecurrentOnlyTransitions,
+        rbf_recurrent=RBFRecurrentTransitions,
         nn_recurrent=NeuralNetworkRecurrentTransitions
         )
     if transitions not in transition_classes:
@@ -164,6 +166,7 @@ def SLDS(N, K, D, M=0,
         inputdriven=InputDrivenTransitions,
         recurrent=RecurrentTransitions,
         recurrent_only=RecurrentOnlyTransitions,
+        rbf_recurrent=RBFRecurrentTransitions,
         nn_recurrent=NeuralNetworkRecurrentTransitions
         )
 
