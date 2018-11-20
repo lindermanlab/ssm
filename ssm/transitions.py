@@ -383,7 +383,7 @@ class RBFRecurrentTransitions(_Transitions):
     While we're at it, there's no harm in adding a linear term to the log
     transition matrices to capture input dependencies. 
     """
-    def __init__(self, K, D, M):
+    def __init__(self, K, D, M=0):
         super(RBFRecurrentTransitions, self).__init__(K, D, M=M)
 
         # Baseline transition probabilities

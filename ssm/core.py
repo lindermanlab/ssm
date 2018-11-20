@@ -430,9 +430,10 @@ class _SwitchingLDS(object):
 
     @ensure_slds_args_not_none
     def expected_states(self, variational_mean, data, input=None, mask=None, tag=None):
-        log_pi0 = self.init_state_distn.log_initial_state_distn(variational_mean, input, mask, tag)
-        log_Ps = self.transitions.log_transition_matrices(variational_mean, input, mask, tag)
-        log_likes = self.dynamics.log_likelihoods(variational_mean, input, np.ones_like(variational_mean, dtype=bool), tag)
+        x_mask = np.ones_like(variational_mean, dtype=bool)
+        log_pi0 = self.init_state_distn.log_initial_state_distn(variational_mean, input, x_mask, tag)
+        log_Ps = self.transitions.log_transition_matrices(variational_mean, input, x_mask, tag)
+        log_likes = self.dynamics.log_likelihoods(variational_mean, input, x_mask, tag)
         log_likes += self.emissions.log_likelihoods(data, input, mask, tag, variational_mean)
         return hmm_expected_states(log_pi0, log_Ps, log_likes)
 
@@ -694,7 +695,7 @@ class _SwitchingLDS(object):
                               method="svi", **kwargs):
         # Specify fitting methods
         _fitting_methods = dict(svi=self._fit_svi,
-                                vem=self._fit_variational_em_new)
+                                vem=self._fit_variational_em)
 
         if method not in _fitting_methods:
             raise Exception("Invalid method: {}. Options are {}".\
