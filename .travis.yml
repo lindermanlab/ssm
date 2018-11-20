@@ -17,7 +17,7 @@ before_install:
   - conda update --yes conda
   - conda config --add channels conda-forge
 install:
-  - conda install --yes python=$TRAVIS_PYTHON_VERSION pip numpy scipy matplotlib cython nose scikit-learn
+  - conda install --yes python=$TRAVIS_PYTHON_VERSION pip numpy scipy matplotlib cython nose scikit-learn future
   - pip install tqdm autograd pyhsmm pylds
   - pip install -v -e .
 script: nosetests
