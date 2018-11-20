@@ -131,7 +131,7 @@ def test_lds_log_probability(T=25, D=4):
     # Solve with the banded solver
     ll_test = lds_log_probability(x, As, bs, Qi_sqrts, ms, Ri_sqrts)
 
-    assert np.allclose(ll_true, ll_test)
+    assert np.allclose(ll_true, ll_test), "True LL {} != Test LL {}".format(ll_true, ll_test)
 
 
 def test_lds_mean(T=25, D=4):
