@@ -100,10 +100,10 @@ class GaussianObservations(_Observations):
         self.mus = km.cluster_centers_
         sigmas = np.array([np.var(data[km.labels_ == k], axis=0)
                            for k in range(self.K)])
-        self.inv_sigmas = np.log(sigmas + 1e-8)
+        self.inv_sigmas = np.log(sigmas + 1e-16)
         
     def log_likelihoods(self, data, input, mask, tag):
-        mus, sigmas = self.mus, np.exp(self.inv_sigmas)
+        mus, sigmas = self.mus, np.exp(self.inv_sigmas) + 1e-16
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return -0.5 * np.sum(
             (np.log(2 * np.pi * sigmas) + (data[:, None, :] - mus)**2 / sigmas) 
@@ -160,7 +160,7 @@ class StudentsTObservations(_Observations):
         self.mus = km.cluster_centers_
         sigmas = np.array([np.var(data[km.labels_ == k], axis=0)
                            for k in range(self.K)])
-        self.inv_sigmas = np.log(sigmas + 1e-8)
+        self.inv_sigmas = np.log(sigmas + 1e-16)
         self.inv_nus = np.log(4) * np.ones(self.K)
         
     def log_likelihoods(self, data, input, mask, tag):
@@ -221,7 +221,7 @@ class StudentsTObservations(_Observations):
         for E_tau, (Ez, _, _), y in zip(E_taus, expectations, datas):
             sqerr += np.sum(Ez[:, :, None] * E_tau * (y[:, None, :] - self.mus)**2, axis=0) 
             weight += np.sum(Ez[:, :, None], axis=0)
-        self.inv_sigmas = np.log(sqerr / weight + 1e-8)
+        self.inv_sigmas = np.log(sqerr / weight + 1e-16)
 
     def _m_step_nu(self, expectations, datas, inputs, masks, tags):
         """
@@ -353,7 +353,7 @@ class PoissonObservations(_Observations):
         x = np.concatenate(datas)
         weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
-            self.log_lambdas[k] = np.log(np.average(x, axis=0, weights=weights[:,k]) + 1e-8)
+            self.log_lambdas[k] = np.log(np.average(x, axis=0, weights=weights[:,k]) + 1e-16)
 
     def smooth(self, expectations, data, input, tag):
         """
@@ -469,7 +469,7 @@ class AutoRegressiveObservations(_Observations):
             
             resid = y - lr.predict(x)
             sigmas = np.var(resid, axis=0)
-            self.inv_sigmas[k] = np.log(sigmas + 1e-8)
+            self.inv_sigmas[k] = np.log(sigmas + 1e-16)
         
     def _compute_mus(self, data, input, mask, tag):
         assert np.all(mask), "ARHMM cannot handle missing data"
@@ -538,7 +538,7 @@ class AutoRegressiveObservations(_Observations):
             # Update each row of the AR matrix
             for d in range(D):
                 # This is a weak prior centered on zero
-                Jk = 1e-8 * np.eye(D * lags + M + 1)
+                Jk = 1e-16 * np.eye(D * lags + M + 1)
                 hk = np.zeros((D * lags + M + 1,))                
                 for x, y, Ez in zip(xs, ys, Ezs):
                     scale = Ez[:, k]
@@ -633,7 +633,7 @@ class IndependentAutoRegressiveObservations(_Observations):
                 
                 resid = y - lr.predict(x)
                 sigmas = np.var(resid, axis=0)
-                self.inv_sigmas[k, d] = np.log(sigmas + 1e-8)
+                self.inv_sigmas[k, d] = np.log(sigmas + 1e-16)
         
     def _compute_mus(self, data, input, mask, tag):
         T, D = data.shape
@@ -904,7 +904,7 @@ class _RecurrentAutoRegressiveObservationsMixin(AutoRegressiveObservations):
             
             resid = y - lr.predict(x)
             sigmas = np.var(resid, axis=0)
-            self.inv_sigmas[k] = np.log(sigmas + 1e-8)
+            self.inv_sigmas[k] = np.log(sigmas + 1e-16)
             assert np.all(np.isfinite(self.inv_sigmas))
 
 
