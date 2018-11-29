@@ -437,7 +437,7 @@ def lds_sample(As, bs, Qi_sqrts, ms, Ri_sqrts, z=None):
     L = cholesky_banded(J_banded, lower=True)
     U = transpose_banded((2*D-1, 0), L)
 
-    # When lower = False, we have (U^T U)^{-1} = U^{-1} U^{-T} = AA^T = Sigma
+    # We have (U^T U)^{-1} = U^{-1} U^{-T} = AA^T = Sigma
     # where A = U^{-1}.  Samples are Az = U^{-1}z = x, or equivalently Ux = z.
     z = npr.randn(T*D,) if z is None else np.reshape(z, (T*D,))
     samples = np.reshape(solve_banded((0, 2*D-1), U, z), (T, D))

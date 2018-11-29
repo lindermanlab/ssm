@@ -1,10 +1,18 @@
+from tqdm.auto import trange
 import autograd.numpy as np
 from sklearn.decomposition import PCA
 
 def pca_with_imputation(D, datas, masks, num_iters=20):
-    if isinstance(datas, (list, tuple)) and isinstance(masks, (list, tuple)):
-        data = np.concatenate(datas)
-        mask = np.concatenate(masks)
+    datas = [datas] if not isinstance(datas, (list, tuple)) else datas
+    if masks is not None:
+        masks = [masks] if not isinstance(masks, (list, tuple)) else masks
+        assert np.all([m.shape == d.shape for d, m in zip(datas, masks)])
+    else:
+        masks = [np.ones_like(data, dtype=bool) for data in datas]
+
+    # Flatten the data and masks
+    data = np.concatenate(datas)
+    mask = np.concatenate(masks)
     
     if np.any(~mask):
         # Fill in missing data with mean to start
@@ -30,6 +38,56 @@ def pca_with_imputation(D, datas, masks, num_iters=20):
     assert all([x.shape[0] == data.shape[0] for x, data in zip(xs, datas)])
 
     return pca, xs
+
+
+def factor_analysis_with_imputation(D, datas, masks=None, num_iters=50):
+    datas = [datas] if not isinstance(datas, (list, tuple)) else datas
+    if masks is not None:
+        masks = [masks] if not isinstance(masks, (list, tuple)) else masks
+        assert np.all([m.shape == d.shape for d, m in zip(datas, masks)])
+    else:
+        masks = [np.ones_like(data, dtype=bool) for data in datas]
+    N = datas[0].shape[1]
+
+    # Make the factor analysis model
+    from pybasicbayes.models import FactorAnalysis
+    fa = FactorAnalysis(N, D, alpha_0=1e-3, beta_0=1e-3)
+    fa.regression.sigmasq_flat = np.ones(N)
+    for data, mask in zip(datas, masks):
+        fa.add_data(data, mask=mask)
+    fa.set_empirical_mean()
+
+    # Fit with EM
+    lls = [fa.log_likelihood()]
+    pbar = trange(num_iters)
+    pbar.set_description("Itr {} LP: {:.1f}".format(0, lls[-1]))
+    for itr in pbar:
+        fa.EM_step()
+        lls.append(fa.log_likelihood())
+
+        pbar.set_description("Itr {} LP: {:.1f}".format(itr, lls[-1]))
+        pbar.update(1)
+    lls = np.array(lls)
+
+    # Get the continuous states and rotate them with SVD
+    # so that the emission matrix C is orthogonal and sorted
+    # in order of decreasing explained variance
+    xs = [states.Z for states in fa.data_list]
+    C, S, VT = np.linalg.svd(fa.W, full_matrices=False)
+    xhats = [x.dot(VT.T) * S for x in xs]
+
+    # Test that we got this right
+    for x, xhat in zip(xs, xhats):
+        y = x.dot(fa.W.T) + fa.mean
+        yhat = xhat.dot(C.T) + fa.mean
+        assert np.allclose(y, yhat)
+
+    # Strip out the data from the factor analysis model, 
+    # update the emission matrix
+    fa.regression.A = C
+    fa.data_list = []
+
+    return fa, xhats, lls
 
 
 def interpolate_data(data, mask):
