@@ -74,7 +74,7 @@ def factor_analysis_with_imputation(D, datas, masks=None, num_iters=50):
     # in order of decreasing explained variance
     xs = [states.Z for states in fa.data_list]
     C, S, VT = np.linalg.svd(fa.W, full_matrices=False)
-    xhats = [x.dot(VT.T) * S for x in xs]
+    xhats = [x.dot(VT.T) for x in xs]
 
     # Test that we got this right
     for x, xhat in zip(xs, xhats):
@@ -84,7 +84,7 @@ def factor_analysis_with_imputation(D, datas, masks=None, num_iters=50):
 
     # Strip out the data from the factor analysis model, 
     # update the emission matrix
-    fa.regression.A = C
+    fa.regression.A = C * S
     fa.data_list = []
 
     return fa, xhats, lls
