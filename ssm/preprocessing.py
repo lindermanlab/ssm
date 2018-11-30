@@ -79,7 +79,7 @@ def factor_analysis_with_imputation(D, datas, masks=None, num_iters=50):
     # Test that we got this right
     for x, xhat in zip(xs, xhats):
         y = x.dot(fa.W.T) + fa.mean
-        yhat = xhat.dot(C.T) + fa.mean
+        yhat = xhat.dot((C * S).T) + fa.mean
         assert np.allclose(y, yhat)
 
     # Strip out the data from the factor analysis model, 
