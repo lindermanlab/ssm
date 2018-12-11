@@ -293,7 +293,7 @@ class _HMM(object):
         return lls
 
     @ensure_args_are_lists
-    def fit(self, datas, inputs=None, masks=None, tags=None, method="sgd", initialize=True, **kwargs):
+    def fit(self, datas, inputs=None, masks=None, tags=None, method="em", initialize=True, **kwargs):
         _fitting_methods = \
             dict(sgd=partial(self._fit_sgd, "sgd"),
                  adam=partial(self._fit_sgd, "adam"),
