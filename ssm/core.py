@@ -189,12 +189,9 @@ class _HMM(object):
             self.params = params
             obj = self.log_probability(datas, inputs, masks, tags)
             return -obj / T
-
-        # Initialize the parameters
-        params = self.params
         
         # Set up the progress bar
-        lls = [-_objective(params, 0) * T]
+        lls = [-_objective(self.params, 0) * T]
         pbar = trange(num_iters)
         pbar.set_description("Epoch {} Itr {} LP: {:.1f}".format(0, 0, lls[-1]))
 
@@ -202,7 +199,7 @@ class _HMM(object):
         step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
         state = None
         for itr in pbar:
-            params, val, g, state = step(value_and_grad(_objective), params, itr, state, **kwargs)
+            self.params, val, g, state = step(value_and_grad(_objective), self.params, itr, state, **kwargs)
             lls.append(-val * T)
             pbar.set_description("LP: {:.1f}".format(lls[-1]))
             pbar.update(1)
@@ -250,11 +247,8 @@ class _HMM(object):
 
             return -obj / T
 
-        # Initialize the parameters
-        params = self.params
-        
         # Set up the progress bar
-        lls = [-_objective(params, 0) * T]
+        lls = [-_objective(self.params, 0) * T]
         pbar = trange(num_epochs * M)
         pbar.set_description("Epoch {} Itr {} LP: {:.1f}".format(0, 0, lls[-1]))
 
@@ -262,7 +256,7 @@ class _HMM(object):
         step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
         state = None
         for itr in pbar:
-            params, val, g, state = step(value_and_grad(_objective), params, itr, state, **kwargs)
+            self.params, val, g, state = step(value_and_grad(_objective), self.params, itr, state, **kwargs)
             epoch = itr // M
             m = itr % M
             lls.append(-val * T)
