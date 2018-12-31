@@ -10,7 +10,7 @@ from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
 from ssm.util import random_rotation, ensure_args_are_lists, ensure_args_not_none, \
-    logistic, logit, one_hot, generalized_newton_studentst_dof
+    logistic, logit, one_hot, generalized_newton_studentst_dof, fit_linear_regression
 from ssm.preprocessing import interpolate_data
 from ssm.cstats import robust_ar_statistics
 
@@ -453,22 +453,36 @@ class AutoRegressiveObservations(_Observations):
 
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         # Initialize with linear regressions
-        from sklearn.linear_model import LinearRegression
-        data = np.concatenate(datas) 
-        input = np.concatenate(inputs)
-        T = data.shape[0]
+        # from sklearn.linear_model import LinearRegression
+        # data = np.concatenate(datas) 
+        # input = np.concatenate(inputs)
+        # T = data.shape[0]
 
-        for k in range(self.K):
-            ts = npr.choice(T-self.lags, replace=False, size=(T-self.lags)//self.K)
-            x = np.column_stack([data[ts + l] for l in range(self.lags)] + [input[ts]])
-            y = data[ts+self.lags]
-            lr = LinearRegression().fit(x, y)
-            self.As[k] = lr.coef_[:, :self.D * self.lags]
-            self.Vs[k] = lr.coef_[:, self.D * self.lags:]
-            self.bs[k] = lr.intercept_
+        # for k in range(self.K):
+        #     ts = npr.choice(T-self.lags, replace=False, size=(T-self.lags)//self.K)
+        #     x = np.column_stack([data[ts + l] for l in range(self.lags)] + [input[ts]])
+        #     y = data[ts+self.lags]
+        #     lr = LinearRegression().fit(x, y)
+        #     self.As[k] = lr.coef_[:, :self.D * self.lags]
+        #     self.Vs[k] = lr.coef_[:, self.D * self.lags:]
+        #     self.bs[k] = lr.intercept_
             
-            resid = y - lr.predict(x)
-            sigmas = np.var(resid, axis=0)
+        #     resid = y - lr.predict(x)
+        #     sigmas = np.var(resid, axis=0)
+        #     self.inv_sigmas[k] = np.log(sigmas + 1e-16)
+        Ts = [data.shape[0] for data in datas]
+        for k in range(self.K):
+            ts = [npr.choice(T-self.lags, replace=False, size=(T-self.lags)//self.K) 
+                  for T in Ts]
+            Xs = [np.column_stack([data[t + l] for l in range(self.lags)] + [input[t]])
+                  for t, data, input in zip(ts, datas, inputs)]
+            ys = [data[t+self.lags] for t, data in zip(ts, datas)]
+
+            # Solve the linear regression
+            coef_, intercept_, sigmas = fit_linear_regression(Xs, ys)
+            self.As[k] = coef_[:, :self.D * self.lags]
+            self.Vs[k] = coef_[:, self.D * self.lags:]
+            self.bs[k] = intercept_
             self.inv_sigmas[k] = np.log(sigmas + 1e-16)
         
     def _compute_mus(self, data, input, mask, tag):

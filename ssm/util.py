@@ -2,8 +2,11 @@ from warnings import warn
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
+from autograd.scipy.misc import logsumexp
+from autograd.scipy.linalg import block_diag
+from autograd import grad
 
-from scipy.optimize import linear_sum_assignment
+from scipy.optimize import linear_sum_assignment, minimize
 
 
 def compute_state_overlap(z1, z2, K1=None, K2=None):
@@ -202,3 +205,127 @@ def generalized_newton_studentst_dof(E_tau, E_logtau, nu0=1, max_iter=100, nu_mi
              "at tolerance {} in {} iterations.".format(tol, itr))
 
     return nu
+
+def fit_multiclass_logistic_regression(X, y, bias=None, K=None, W0=None, mu0=0, sigmasq0=1, solver="lbfgs", verbose=False):
+    """
+    Fit a multiclass logistic regression 
+
+        y_i ~ Cat(softmax(W x_i))
+
+    y is a one hot vector in {0, 1}^K  
+    x_i is a vector in R^D
+    W is a matrix R^{K x D}
+
+    The log likelihood is,
+
+        L(W) = sum_i sum_k y_ik * w_k^T x_i - logsumexp(W x_i)
+    
+    The prior is w_k ~ Norm(mu0, diag(sigmasq0)).
+    """
+    N, D = X.shape
+    assert y.shape[0] == N
+
+    # Make sure y is one hot
+    if y.ndim == 1 or y.shape[1] == 1:
+        assert y.dtype == int and y.min() >= 0
+        K = y.max() + 1 if K is None else K
+        y_oh = np.zeros((N, K), dtype=int)
+        y_oh[np.arange(N), y] = 1
+
+    else:
+        K = y.shape[1]
+        assert y.min() == 0 and y.max() == 1 and np.allclose(y.sum(1), 1)
+        y_oh = y
+
+    # Check that bias is correct shape
+    if bias is not None:
+        assert bias.shape == (K,) or bias.shape == (N, K)
+    else:
+        bias = np.zeros((K,))
+
+    def loss(W_flat):
+        W = np.reshape(W_flat, (K, D))
+        scores = np.dot(X, W.T) + bias
+        lp = np.sum(y_oh * scores) - np.sum(logsumexp(scores, axis=1))
+        prior = np.sum(-0.5 * (W - mu0)**2 / sigmasq0)
+        return -(lp + prior) / N
+
+    W0 = W0 if W0 is not None else np.zeros((K, D))
+    assert W0.shape == (K, D)
+
+    itr = [0]
+    def callback(W_flat):
+        itr[0] += 1
+        print("Iteration {} loss: {:.3f}".format(itr[0], loss(W_flat)))
+
+    result = minimize(loss, np.ravel(W0), jac=grad(loss), 
+                      method="BFGS", 
+                      callback=callback if verbose else None, 
+                      options=dict(maxiter=1000, disp=verbose))
+
+    W = np.reshape(result.x, (K, D))
+    return W
+
+def fit_linear_regression(Xs, ys, weights=None, 
+                          mu0=0, sigmasq0=1, alpha0=1, beta0=1, 
+                          fit_intercept=True):
+    """
+    Fit a linear regression y_i ~ N(Wx_i + b, diag(S)) for W, b, S.
+    
+    :param Xs: array or list of arrays
+    :param ys: array or list of arrays
+    :param fit_intercept:  if False drop b
+    """
+    Xs = Xs if isinstance(Xs, (list, tuple)) else [Xs]
+    ys = Xs if isinstance(ys, (list, tuple)) else [ys]
+    assert len(Xs) == len(ys)
+
+    D = Xs[0].shape[1]
+    P = ys[0].shape[1]
+    assert all([X.shape[1] == D for X in Xs])
+    assert all([y.shape[1] == P for y in ys])
+    assert all([X.shape[0] == y.shape[0] for X, y in zip(Xs, ys)])
+    
+    mu0 = mu0 * np.zeros((P, D))
+    sigmasq0 = sigmasq0 * np.eye(D)
+
+    if weights is None:
+        weights = [np.ones(X.shape[0]) for X in Xs]
+
+    # Add weak prior on intercept
+    if fit_intercept:
+        mu0 = np.column_stack((mu0, np.zeros(P)))
+        sigmasq0 = block_diag(sigmasq0, np.eye(10))
+
+    # Compute the posterior
+    J = np.linalg.inv(sigmasq0)
+    h = np.dot(J, mu0.T)
+
+    for X, y in zip(Xs, ys):
+        X = np.column_stack((X, np.ones(X.shape[0]))) if fit_intercept else X
+        J += np.dot(X.T * weights, X)
+        h += np.dot(X.T * weights, y)
+    
+    # Solve for the MAP estimate    
+    W = np.linalg.solve(J, h).T
+
+    # Compute the residual and the posterior variance
+    alpha = alpha0 
+    beta = beta0 * np.ones(P)
+    for X, y in zip(Xs, ys):
+        resid = y - np.dot(X, W.T)
+        alpha += 0.5 * np.sum(weights)
+        beta += 0.5 * np.sum(weights[:, None] * resid**2, axis=0)
+
+    # Get MAP estimate of posterior mode of precision
+    sigmasq = beta / (alpha + 1e-16)
+
+    if fit_intercept:
+        return W[:,:-1], W[:,-1], sigmasq
+    else:
+        return W, sigmasq
+        
+
+
+
+

@@ -28,16 +28,20 @@ def pca_with_imputation(D, datas, masks, num_iters=20):
             # Fill in missing data with PCA predictions
             pred = pca.inverse_transform(x)
             fulldata[~mask] = pred[~mask]
+
+        ll = pca.score(fulldata)
+
     else:
         pca = PCA(D)
         x = pca.fit_transform(data)
-        
+        ll = pca.score(data)
+
     # Unpack xs
     xs = np.split(x, np.cumsum([len(data) for data in datas])[:-1])
     assert len(xs) == len(datas)
     assert all([x.shape[0] == data.shape[0] for x, data in zip(xs, datas)])
 
-    return pca, xs
+    return pca, xs, ll
 
 
 def factor_analysis_with_imputation(D, datas, masks=None, num_iters=50):

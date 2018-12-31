@@ -8,7 +8,7 @@ from autograd.scipy.stats import dirichlet
 from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
-from ssm.util import one_hot, logistic, relu, batch_mahalanobis
+from ssm.util import one_hot, logistic, relu, batch_mahalanobis, fit_multiclass_logistic_regression
 
 
 class _Transitions(object):
@@ -173,16 +173,12 @@ class RecurrentTransitions(InputDrivenTransitions):
     """
     Generalization of the input driven HMM in which the observations serve as future inputs
     """
-    def __init__(self, K, D, M=0, solver="lbfgs"):
+    def __init__(self, K, D, M=0, kappa=0, solver="lbfgs"):
         super(RecurrentTransitions, self).__init__(K, D, M)
+        self.kappa = kappa
 
         # Parameters linking past observations to state distribution
-        self.Rs = npr.randn(K, D)
-
-        # Store a scikit learn logistic regression object for warm starting
-        from sklearn.linear_model import LogisticRegression
-        self._lr = LogisticRegression(
-            fit_intercept=False, multi_class="multinomial", solver=solver, warm_start=True)
+        self.Rs = np.zeros((K, D))
 
     @property
     def params(self):
@@ -217,7 +213,6 @@ class RecurrentTransitions(InputDrivenTransitions):
         Technically, this is a stochastic M-step since the states 
         are sampled from their posterior marginals.
         """
-        
         K, M, D = self.K, self.M, self.D
 
         zps, zns = [], []
@@ -230,40 +225,16 @@ class RecurrentTransitions(InputDrivenTransitions):
                        for zp, input, data in zip(zps, inputs, datas)])
         y = np.concatenate(zns)
 
-        # Determine the number of states used
-        used = np.unique(y)
-        K_used = len(used)
-        unused = np.setdiff1d(np.arange(K), used)
-        
-        # Reset parameters before filling in
-        self.log_Ps = np.zeros((K, K))
-        self.Ws = np.zeros((K, M))
-        self.Rs = np.zeros((K, D))
-
-        if K_used == 1:
-            warn("RecurrentTransitions: Only using 1 state in expectation. "
-                 "M-step cannot proceed. Resetting transition parameters.")
-            return
-
         # Fit the logistic regression
-        self._lr.fit(X, y)
+        W0 = np.column_stack([self.log_Ps.T, self.Ws, self.Rs])
+        mu0 = np.column_stack([self.kappa * np.eye(K), np.zeros((K, M+D))])
+        coef_ = fit_multiclass_logistic_regression(X, y, K=K, W0=W0, mu0=mu0, sigmasq0=1)
 
         # Extract the coefficients
-        assert self._lr.coef_.shape[0] == (K_used if K_used > 2 else 1)
-        log_P = self._lr.coef_[:, :K]
-        W = self._lr.coef_[:, K:K+M]
-        R = self._lr.coef_[:, K+M:]
+        self.log_Ps = coef_[:, :K].T
+        self.Ws = coef_[:, K:K+M]
+        self.Rs = coef_[:, K+M:]
             
-        if K_used == 2:
-            # lr thought there were only two classes
-            self.log_Ps[:,used[1]] = self._lr.coef_[0, :K]
-            self.Ws[used[1]] = self._lr.coef_[0,K:K+M]
-            self.Rs[used[1]] = self._lr.coef_[0,K+M:]
-        else:
-            self.log_Ps[:, used] = log_P.T
-            self.Ws[used] = W
-            self.Rs[used] = R
-        
         
 class RecurrentOnlyTransitions(_Transitions):
     """
@@ -271,7 +242,7 @@ class RecurrentOnlyTransitions(_Transitions):
     next state.  Get rid of the transition matrix and replace it
     with a constant bias r.
     """
-    def __init__(self, K, D, M=0,  solver="lbfgs"):
+    def __init__(self, K, D, M=0, solver="lbfgs"):
         super(RecurrentOnlyTransitions, self).__init__(K, D, M)
 
         # Parameters linking past observations to state distribution
@@ -307,7 +278,6 @@ class RecurrentOnlyTransitions(_Transitions):
         log_Ps = log_Ps + self.r                                       # bias
         log_Ps = np.tile(log_Ps, (1, self.K, 1))                       # expand
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)       # normalize
-
 
     def m_step(self, expectations, datas, inputs, masks, tags, optimizer="adam", num_iters=10, **kwargs):
         """
