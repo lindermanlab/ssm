@@ -8,7 +8,7 @@ an input value and an iteration number.
 from functools import partial
 from warnings import warn
 
-from autograd import grad
+from autograd import grad, value_and_grad
 import autograd.numpy as np
 from autograd.misc import flatten
 from autograd.wrap_util import wraps
@@ -118,7 +118,7 @@ def _generic_minimize(method, loss, x0, verbose=False, num_iters=1000):
 
     # Call the optimizer.
     # HACK: Pass in -1 as the iteration.
-    result = minimize(_objective, _x0, args=(-1,), jac=grad(loss), 
+    result = minimize(_objective, _x0, args=(-1,), jac=grad(_objective), 
                       method=method, 
                       callback=callback if verbose else None, 
                       options=dict(maxiter=num_iters, disp=verbose))
