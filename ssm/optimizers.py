@@ -108,12 +108,14 @@ def _generic_minimize(method, loss, x0, verbose=False, num_iters=1000):
         itr[0] += 1
         print("Iteration {} loss: {:.3f}".format(itr[0], loss(x)))
 
+    # Flatten the loss function
     _x0, unflatten = flatten(x0)
+    _objective = lambda x_flat: loss(unflatten(x_flat))
 
     if verbose:
         print("Fitting with {}.".format(method))
 
-    result = minimize(loss, _x0, jac=grad(loss), 
+    result = minimize(_objective, _x0, jac=grad(loss), 
                       method=method, 
                       callback=callback if verbose else None, 
                       options=dict(maxiter=num_iters, disp=verbose))
