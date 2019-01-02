@@ -267,6 +267,7 @@ def fit_multiclass_logistic_regression(X, y, bias=None, K=None, W0=None, mu0=0, 
     W = np.reshape(result.x, (K, D))
     return W
 
+
 def fit_linear_regression(Xs, ys, weights=None, 
                           mu0=0, sigmasq0=1, alpha0=1, beta0=1, 
                           fit_intercept=True):

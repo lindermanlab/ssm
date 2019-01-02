@@ -6,13 +6,12 @@ import autograd.numpy.random as npr
 from autograd.scipy.misc import logsumexp
 from autograd.scipy.special import gammaln, digamma
 from autograd.scipy.stats import norm, gamma
-from autograd.misc.optimizers import sgd, adam
-from autograd import grad
 
 from ssm.util import random_rotation, ensure_args_are_lists, ensure_args_not_none, \
     logistic, logit, one_hot, generalized_newton_studentst_dof, fit_linear_regression
 from ssm.preprocessing import interpolate_data
 from ssm.cstats import robust_ar_statistics
+from ssm.optimizers import adam, bfgs, rmsprop, sgd
 
 
 class _Observations(object):
@@ -44,11 +43,11 @@ class _Observations(object):
         raise NotImplementedError
 
     def m_step(self, expectations, datas, inputs, masks, tags, 
-               optimizer="adam", **kwargs):
+               optimizer="bfgs", **kwargs):
         """
         If M-step cannot be done in closed form for the transitions, default to SGD.
         """
-        optimizer = dict(sgd=sgd, adam=adam)[optimizer]
+        optimizer = dict(adam=adam, bfgs=bfgs, rmsprop=rmsprop, sgd=sgd)[optimizer]
         
         # expected log joint
         def _expected_log_joint(expectations):
@@ -66,8 +65,7 @@ class _Observations(object):
             obj = _expected_log_joint(expectations)
             return -obj / T
 
-        self.params = \
-            optimizer(grad(_objective), self.params, **kwargs)
+        self.params = optimizer(_objective, self.params, **kwargs)
 
     def smooth(self, expectations, data, input, tag):
         raise NotImplementedError
