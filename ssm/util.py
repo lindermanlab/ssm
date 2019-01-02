@@ -291,33 +291,41 @@ def fit_linear_regression(Xs, ys, weights=None,
     mu0 = mu0 * np.zeros((P, D))
     sigmasq0 = sigmasq0 * np.eye(D)
 
-    if weights is None:
+    # Make sure the weights are the weights
+    if weights is not None:
+        weights = weights if isinstance(weights, (list, tuple)) else [weights]
+    else:
         weights = [np.ones(X.shape[0]) for X in Xs]
-
+    
     # Add weak prior on intercept
     if fit_intercept:
         mu0 = np.column_stack((mu0, np.zeros(P)))
-        sigmasq0 = block_diag(sigmasq0, np.eye(10))
+        sigmasq0 = block_diag(sigmasq0, np.eye(1))
 
     # Compute the posterior
     J = np.linalg.inv(sigmasq0)
     h = np.dot(J, mu0.T)
 
-    for X, y in zip(Xs, ys):
+    for X, y, weight in zip(Xs, ys, weights):
         X = np.column_stack((X, np.ones(X.shape[0]))) if fit_intercept else X
-        J += np.dot(X.T * weights, X)
-        h += np.dot(X.T * weights, y)
+        J += np.dot(X.T * weight, X)
+        h += np.dot(X.T * weight, y)
     
     # Solve for the MAP estimate    
     W = np.linalg.solve(J, h).T
+    if fit_intercept:
+        W, b = W[:, :-1], W[:, -1]
+    else:
+        b = 0
 
     # Compute the residual and the posterior variance
     alpha = alpha0 
     beta = beta0 * np.ones(P)
-    for X, y in zip(Xs, ys):
-        resid = y - np.dot(X, W.T)
-        alpha += 0.5 * np.sum(weights)
-        beta += 0.5 * np.sum(weights[:, None] * resid**2, axis=0)
+    for X, y, weight in zip(Xs, ys, weights):
+        yhat = np.dot(X, W.T) + b
+        resid = y - yhat
+        alpha += 0.5 * np.sum(weight)
+        beta += 0.5 * np.sum(weight[:, None] * resid**2, axis=0)
 
     # Get MAP estimate of posterior mode of precision
     sigmasq = beta / (alpha + 1e-16)
