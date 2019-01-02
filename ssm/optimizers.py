@@ -13,6 +13,7 @@ import autograd.numpy as np
 from autograd.misc import flatten
 from autograd.wrap_util import wraps
 
+from scipy.optimizer import minimize
 
 def convex_combination(curr, target, alpha):
     """
