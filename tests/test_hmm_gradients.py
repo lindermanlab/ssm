@@ -1,7 +1,7 @@
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.misc import logsumexp
-from autograd import grad
+from autograd import grad, elementwise_grad
 from autograd.test_util import check_grads
 
 from ssm.messages import forward_pass, backward_pass, grad_hmm_normalizer
@@ -53,7 +53,7 @@ def test_grad_hmm_normalizer(T=1000, K=3):
     assert np.allclose(dll, grad(hmm_normalizer_np, argnum=2)(log_pi0, log_Ps, ll))
 
 
-def test_autograd_primitive(T=1000, K=3):
+def test_hmm_normalizer_primitive(T=1000, K=3):
     # check reverse-mode to second order
     log_pi0, log_Ps, ll = make_parameters(T, K)
     check_grads(hmm_normalizer, argnum=1, modes=['rev'], order=1)(log_pi0, log_Ps, ll)

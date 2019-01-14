@@ -1,4 +1,5 @@
 # SSM: Bayesian learning and inference for state space models 
+[![Test status](https://travis-ci.org/slinderman/ssm.svg?branch=master)](https://travis-ci.org/slinderman/ssm)
 
 This package has fast and flexible code for simulating, learning, and performing inference in a variety of state space models. 
 Currently, it supports:
@@ -18,6 +19,8 @@ We support the following observation models:
 - Student's t
 - Bernoulli
 - Poisson
+- Categorical
+- Von Mises
 
 HMM inference is done with either expectation maximization (EM) or stochastic gradient descent (SGD).  For SLDS, we use stochastic variational inference (SVI). 
 

@@ -37,6 +37,10 @@ def test_hmm_likelihood(T=1000, K=5, D=2):
     assert np.allclose(true_lkhd, test_lkhd)
 
 
+def test_big_hmm_likelihood(T=50000, K=50, D=50):
+    test_hmm_likelihood(T=T, K=K, D=D)
+
+
 def test_expectations(T=1000, K=20, D=2):
     # Create a true HMM
     A = npr.rand(K, K)

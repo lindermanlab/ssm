@@ -16,6 +16,7 @@ sns.set_style("white")
 sns.set_context("talk")
 
 from ssm.models import SLDS
+from ssm.variational import SLDSMeanFieldVariationalPosterior, SLDSTriDiagVariationalPosterior
 from ssm.util import random_rotation
 
 # Global parameters
@@ -52,7 +53,10 @@ def plot_most_likely_dynamics(model,
     xy = np.column_stack((X.ravel(), Y.ravel()))
 
     # Get the probability of each state at each xy location
-    z = np.argmax(xy.dot(model.transitions.Rs.T), axis=1)
+    log_Ps = model.transitions.log_transition_matrices(
+        xy, np.zeros((nxpts * nypts, 0)), np.ones_like(xy, dtype=bool), None)
+    z = np.argmax(log_Ps[:, 0, :], axis=-1)
+    z = np.concatenate([[z[0]], z])
 
     if ax is None:
         fig = plt.figure(figsize=figsize)
@@ -127,12 +131,28 @@ rslds = SLDS(D_obs, K, D_latent,
              dynamics="gaussian",
              emissions="gaussian",
              single_subspace=True)
-elbos, (xhat, xvar) = rslds.fit(y, num_iters=1000)
+
+# Initialize the model with the observed data.  It is important 
+# to call this before constructing the variational posterior since
+# the posterior constructor initialization looks at the rSLDS parameters.
+rslds.initialize(y)
+
+# Uncomment this to fit with stochastic variational inference instead
+q_svi = SLDSTriDiagVariationalPosterior(rslds, y)
+elbos = rslds.fit(q_svi, y, method="svi", num_iters=1000, initialize=False)
+xhat = q_svi.mean[0]
 zhat = rslds.most_likely_states(xhat, y)
+
+# Fit with variational EM
+# q_vem = SLDSTriDiagVariationalPosterior(rslds, y)
+# elbos = rslds.fit(q_vem, y, method="vem", num_iters=500, initialize=False)
+# xhat = q_vem.mean[0]
+# zhat = rslds.most_likely_states(xhat, y)
 
 # Plot some results
 plt.figure()
 plt.plot(elbos)
+plt.legend()
 plt.xlabel("Iteration")
 plt.ylabel("ELBO")
 

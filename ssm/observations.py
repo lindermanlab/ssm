@@ -6,18 +6,24 @@ import autograd.numpy.random as npr
 from autograd.scipy.misc import logsumexp
 from autograd.scipy.special import gammaln, digamma
 from autograd.scipy.stats import norm, gamma
-from autograd.misc.optimizers import sgd, adam
-from autograd import grad
 
-from ssm.util import random_rotation, ensure_args_are_lists, ensure_args_not_none, \
-    logistic, logit, adam_with_convergence_check, one_hot, generalized_newton_studentst_dof
+from ssm.util import random_rotation, ensure_args_are_lists, \
+    logistic, logit, one_hot, generalized_newton_studentst_dof, fit_linear_regression
 from ssm.preprocessing import interpolate_data
 from ssm.cstats import robust_ar_statistics
+from ssm.optimizers import adam, bfgs, rmsprop, sgd
 
 
 class _Observations(object):
+
+    _dtype = float  # Override this for count-valued observation models
+
     def __init__(self, K, D, M=0):
         self.K, self.D, self.M = K, D, M
+
+    @property
+    def dtype(self):
+        return self._dtype
 
     @property
     def params(self):
@@ -44,11 +50,11 @@ class _Observations(object):
         raise NotImplementedError
 
     def m_step(self, expectations, datas, inputs, masks, tags, 
-               optimizer="adam", **kwargs):
+               optimizer="bfgs", **kwargs):
         """
         If M-step cannot be done in closed form for the transitions, default to SGD.
         """
-        optimizer = dict(sgd=sgd, adam=adam, adam_with_convergence_check=adam_with_convergence_check)[optimizer]
+        optimizer = dict(adam=adam, bfgs=bfgs, rmsprop=rmsprop, sgd=sgd)[optimizer]
         
         # expected log joint
         def _expected_log_joint(expectations):
@@ -66,8 +72,7 @@ class _Observations(object):
             obj = _expected_log_joint(expectations)
             return -obj / T
 
-        self.params = \
-            optimizer(grad(_objective), self.params, **kwargs)
+        self.params = optimizer(_objective, self.params, **kwargs)
 
     def smooth(self, expectations, data, input, tag):
         raise NotImplementedError
@@ -100,10 +105,10 @@ class GaussianObservations(_Observations):
         self.mus = km.cluster_centers_
         sigmas = np.array([np.var(data[km.labels_ == k], axis=0)
                            for k in range(self.K)])
-        self.inv_sigmas = np.log(sigmas + 1e-8)
+        self.inv_sigmas = np.log(sigmas + 1e-16)
         
     def log_likelihoods(self, data, input, mask, tag):
-        mus, sigmas = self.mus, np.exp(self.inv_sigmas)
+        mus, sigmas = self.mus, np.exp(self.inv_sigmas) + 1e-16
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return -0.5 * np.sum(
             (np.log(2 * np.pi * sigmas) + (data[:, None, :] - mus)**2 / sigmas) 
@@ -160,7 +165,7 @@ class StudentsTObservations(_Observations):
         self.mus = km.cluster_centers_
         sigmas = np.array([np.var(data[km.labels_ == k], axis=0)
                            for k in range(self.K)])
-        self.inv_sigmas = np.log(sigmas + 1e-8)
+        self.inv_sigmas = np.log(sigmas + 1e-16)
         self.inv_nus = np.log(4) * np.ones(self.K)
         
     def log_likelihoods(self, data, input, mask, tag):
@@ -221,7 +226,7 @@ class StudentsTObservations(_Observations):
         for E_tau, (Ez, _, _), y in zip(E_taus, expectations, datas):
             sqerr += np.sum(Ez[:, :, None] * E_tau * (y[:, None, :] - self.mus)**2, axis=0) 
             weight += np.sum(Ez[:, :, None], axis=0)
-        self.inv_sigmas = np.log(sqerr / weight + 1e-8)
+        self.inv_sigmas = np.log(sqerr / weight + 1e-16)
 
     def _m_step_nu(self, expectations, datas, inputs, masks, tags):
         """
@@ -258,6 +263,9 @@ class StudentsTObservations(_Observations):
 
 
 class BernoulliObservations(_Observations):
+    
+    _dtype = bool
+
     def __init__(self, K, D, M=0):
         super(BernoulliObservations, self).__init__(K, D, M)
         self.logit_ps = npr.randn(K, D)
@@ -313,6 +321,9 @@ class BernoulliObservations(_Observations):
 
 
 class PoissonObservations(_Observations):
+    
+    _dtype = int
+
     def __init__(self, K, D, M=0):
         super(PoissonObservations, self).__init__(K, D, M)
         self.log_lambdas = npr.randn(K, D)
@@ -353,7 +364,7 @@ class PoissonObservations(_Observations):
         x = np.concatenate(datas)
         weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
-            self.log_lambdas[k] = np.log(np.average(x, axis=0, weights=weights[:,k]) + 1e-8)
+            self.log_lambdas[k] = np.log(np.average(x, axis=0, weights=weights[:,k]) + 1e-16)
 
     def smooth(self, expectations, data, input, tag):
         """
@@ -364,6 +375,9 @@ class PoissonObservations(_Observations):
 
 
 class CategoricalObservations(_Observations):
+    
+    _dtype = int
+
     def __init__(self, K, D, M=0, C=2):
         """
         @param C:  number of classes in the categorical observations 
@@ -453,23 +467,20 @@ class AutoRegressiveObservations(_Observations):
 
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         # Initialize with linear regressions
-        from sklearn.linear_model import LinearRegression
-        data = np.concatenate(datas) 
-        input = np.concatenate(inputs)
-        T = data.shape[0]
-
+        Ts = [data.shape[0] for data in datas]
         for k in range(self.K):
-            ts = npr.choice(T-self.lags, replace=False, size=(T-self.lags)//self.K)
-            x = np.column_stack([data[ts + l] for l in range(self.lags)] + [input[ts]])
-            y = data[ts+self.lags]
-            lr = LinearRegression().fit(x, y)
-            self.As[k] = lr.coef_[:, :self.D * self.lags]
-            self.Vs[k] = lr.coef_[:, self.D * self.lags:]
-            self.bs[k] = lr.intercept_
-            
-            resid = y - lr.predict(x)
-            sigmas = np.var(resid, axis=0)
-            self.inv_sigmas[k] = np.log(sigmas + 1e-8)
+            ts = [npr.choice(T-self.lags, replace=False, size=(T-self.lags)//self.K) 
+                  for T in Ts]
+            Xs = [np.column_stack([data[t + l] for l in range(self.lags)] + [input[t]])
+                  for t, data, input in zip(ts, datas, inputs)]
+            ys = [data[t+self.lags] for t, data in zip(ts, datas)]
+
+            # Solve the linear regression
+            coef_, intercept_, sigmas = fit_linear_regression(Xs, ys)
+            self.As[k] = coef_[:, :self.D * self.lags]
+            self.Vs[k] = coef_[:, self.D * self.lags:]
+            self.bs[k] = intercept_
+            self.inv_sigmas[k] = np.log(sigmas + 1e-16)
         
     def _compute_mus(self, data, input, mask, tag):
         assert np.all(mask), "ARHMM cannot handle missing data"
@@ -527,18 +538,11 @@ class AutoRegressiveObservations(_Observations):
 
         # Fit a weighted linear regression for each discrete state
         for k in range(K):
-            # Check for zero weights (singular matrix)
-            # if np.sum(weights[:, k]) < D * lags + M + 1:
-            #     self.As[k] = 0
-            #     self.Vs[k] = 0
-            #     self.bs[k] = 0
-            #     self.inv_sigmas[k] = 0
-            #     continue
-
+            
             # Update each row of the AR matrix
             for d in range(D):
                 # This is a weak prior centered on zero
-                Jk = 1e-8 * np.eye(D * lags + M + 1)
+                Jk = 1e-16 * np.eye(D * lags + M + 1)
                 hk = np.zeros((D * lags + M + 1,))                
                 for x, y, Ez in zip(xs, ys, Ezs):
                     scale = Ez[:, k]
@@ -633,7 +637,7 @@ class IndependentAutoRegressiveObservations(_Observations):
                 
                 resid = y - lr.predict(x)
                 sigmas = np.var(resid, axis=0)
-                self.inv_sigmas[k, d] = np.log(sigmas + 1e-8)
+                self.inv_sigmas[k, d] = np.log(sigmas + 1e-16)
         
     def _compute_mus(self, data, input, mask, tag):
         T, D = data.shape
@@ -904,7 +908,7 @@ class _RecurrentAutoRegressiveObservationsMixin(AutoRegressiveObservations):
             
             resid = y - lr.predict(x)
             sigmas = np.var(resid, axis=0)
-            self.inv_sigmas[k] = np.log(sigmas + 1e-8)
+            self.inv_sigmas[k] = np.log(sigmas + 1e-16)
             assert np.all(np.isfinite(self.inv_sigmas))
 
 
