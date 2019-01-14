@@ -70,7 +70,7 @@ class _HMM(object):
         if prefix is None:
             pad = 1
             z = np.zeros(T+1, dtype=int)
-            data = np.zeros((T+1, D))
+            data = np.zeros((T+1, D), self.observations.dtype)
             input = np.zeros((T+1, self.M)) if input is None else input
             mask = np.ones((T+1, D), dtype=bool)
 
@@ -86,7 +86,7 @@ class _HMM(object):
             assert xhist.shape == (pad, D)
 
             z = np.concatenate((zhist, np.zeros(T, dtype=int)))
-            data = np.concatenate((xhist, np.zeros((T, D))))
+            data = np.concatenate((xhist, np.zeros((T, D))), self.observations.dtype)
             input = np.zeros((T+pad, self.M)) if input is None else input
             mask = np.ones((T+pad, D), dtype=bool)
 

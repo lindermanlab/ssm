@@ -107,6 +107,7 @@ def ensure_variational_args_are_lists(f):
 def ensure_args_not_none(f):
     def wrapper(self, data, input=None, mask=None, tag=None, **kwargs):
         assert data is not None
+        assert data.dtype == self.observations.dtype
         input = np.zeros((data.shape[0], 0)) if input is None else input
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return f(self, data, input=input, mask=mask, tag=tag, **kwargs)
@@ -207,7 +208,7 @@ def generalized_newton_studentst_dof(E_tau, E_logtau, nu0=1, max_iter=100, nu_mi
     return nu
 
 def fit_multiclass_logistic_regression(X, y, bias=None, K=None, W0=None, mu0=0, sigmasq0=1, 
-                                       solver="lbfgs", verbose=False, maxiter=1000):
+                                       verbose=False, maxiter=1000):
     """
     Fit a multiclass logistic regression 
 

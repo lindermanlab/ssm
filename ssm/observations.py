@@ -7,7 +7,7 @@ from autograd.scipy.misc import logsumexp
 from autograd.scipy.special import gammaln, digamma
 from autograd.scipy.stats import norm, gamma
 
-from ssm.util import random_rotation, ensure_args_are_lists, ensure_args_not_none, \
+from ssm.util import random_rotation, ensure_args_are_lists,, \
     logistic, logit, one_hot, generalized_newton_studentst_dof, fit_linear_regression
 from ssm.preprocessing import interpolate_data
 from ssm.cstats import robust_ar_statistics
@@ -15,8 +15,15 @@ from ssm.optimizers import adam, bfgs, rmsprop, sgd
 
 
 class _Observations(object):
+
+    _dtype = float  # Override this for count-valued observation models
+
     def __init__(self, K, D, M=0):
         self.K, self.D, self.M = K, D, M
+
+    @property
+    def dtype(self):
+        return self._dtype
 
     @property
     def params(self):
@@ -256,6 +263,9 @@ class StudentsTObservations(_Observations):
 
 
 class BernoulliObservations(_Observations):
+    
+    _dtype = bool
+
     def __init__(self, K, D, M=0):
         super(BernoulliObservations, self).__init__(K, D, M)
         self.logit_ps = npr.randn(K, D)
@@ -311,6 +321,9 @@ class BernoulliObservations(_Observations):
 
 
 class PoissonObservations(_Observations):
+    
+    _dtype = int
+
     def __init__(self, K, D, M=0):
         super(PoissonObservations, self).__init__(K, D, M)
         self.log_lambdas = npr.randn(K, D)
@@ -362,6 +375,9 @@ class PoissonObservations(_Observations):
 
 
 class CategoricalObservations(_Observations):
+    
+    _dtype = int
+
     def __init__(self, K, D, M=0, C=2):
         """
         @param C:  number of classes in the categorical observations 
@@ -451,23 +467,6 @@ class AutoRegressiveObservations(_Observations):
 
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         # Initialize with linear regressions
-        # from sklearn.linear_model import LinearRegression
-        # data = np.concatenate(datas) 
-        # input = np.concatenate(inputs)
-        # T = data.shape[0]
-
-        # for k in range(self.K):
-        #     ts = npr.choice(T-self.lags, replace=False, size=(T-self.lags)//self.K)
-        #     x = np.column_stack([data[ts + l] for l in range(self.lags)] + [input[ts]])
-        #     y = data[ts+self.lags]
-        #     lr = LinearRegression().fit(x, y)
-        #     self.As[k] = lr.coef_[:, :self.D * self.lags]
-        #     self.Vs[k] = lr.coef_[:, self.D * self.lags:]
-        #     self.bs[k] = lr.intercept_
-            
-        #     resid = y - lr.predict(x)
-        #     sigmas = np.var(resid, axis=0)
-        #     self.inv_sigmas[k] = np.log(sigmas + 1e-16)
         Ts = [data.shape[0] for data in datas]
         for k in range(self.K):
             ts = [npr.choice(T-self.lags, replace=False, size=(T-self.lags)//self.K) 
@@ -539,14 +538,7 @@ class AutoRegressiveObservations(_Observations):
 
         # Fit a weighted linear regression for each discrete state
         for k in range(K):
-            # Check for zero weights (singular matrix)
-            # if np.sum(weights[:, k]) < D * lags + M + 1:
-            #     self.As[k] = 0
-            #     self.Vs[k] = 0
-            #     self.bs[k] = 0
-            #     self.inv_sigmas[k] = 0
-            #     continue
-
+            
             # Update each row of the AR matrix
             for d in range(D):
                 # This is a weak prior centered on zero

@@ -2,7 +2,7 @@ import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.special import gammaln
 
-from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
+from ssm.util import ensure_args_are_lists, \
     ensure_slds_args_not_none, logistic, logit, softplus, inv_softplus
 from ssm.preprocessing import interpolate_data, pca_with_imputation
 
