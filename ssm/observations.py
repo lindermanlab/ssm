@@ -7,7 +7,7 @@ from autograd.scipy.misc import logsumexp
 from autograd.scipy.special import gammaln, digamma
 from autograd.scipy.stats import norm, gamma
 
-from ssm.util import random_rotation, ensure_args_are_lists,, \
+from ssm.util import random_rotation, ensure_args_are_lists, \
     logistic, logit, one_hot, generalized_newton_studentst_dof, fit_linear_regression
 from ssm.preprocessing import interpolate_data
 from ssm.cstats import robust_ar_statistics

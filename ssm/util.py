@@ -106,8 +106,10 @@ def ensure_variational_args_are_lists(f):
 
 def ensure_args_not_none(f):
     def wrapper(self, data, input=None, mask=None, tag=None, **kwargs):
+        # Check that the data is the correct type
         assert data is not None
         assert data.dtype == self.observations.dtype
+        
         input = np.zeros((data.shape[0], 0)) if input is None else input
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return f(self, data, input=input, mask=mask, tag=tag, **kwargs)
