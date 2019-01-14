@@ -19,6 +19,8 @@ We support the following observation models:
 - Student's t
 - Bernoulli
 - Poisson
+- Categorical
+- Von Mises
 
 HMM inference is done with either expectation maximization (EM) or stochastic gradient descent (SGD).  For SLDS, we use stochastic variational inference (SVI). 
 
