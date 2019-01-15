@@ -3,7 +3,7 @@ import autograd.numpy.random as npr
 
 from ssm.models import HMM
 
-def test_hmm_likelihood(T=500, K=5, D=2):
+def test_hmm_likelihood(T=1000, K=5, D=2):
     # Create a true HMM
     A = npr.rand(K, K)
     A /= A.sum(axis=1, keepdims=True)
@@ -21,11 +21,11 @@ def test_hmm_likelihood(T=500, K=5, D=2):
 
     # Compare to pyhsmm answer
     from pyhsmm.models import HMM as OldHMM
-    from pyhsmm.basic.distributions import Gaussian
-    hmm = OldHMM([Gaussian(mu=C[k], sigma=sigma * np.eye(D)) for k in range(K)],
+    from pybasicbayes.distributions import Gaussian
+    oldhmm = OldHMM([Gaussian(mu=C[k], sigma=sigma * np.eye(D)) for k in range(K)],
                   trans_matrix=A,
                   init_state_distn="uniform")
-    true_lkhd = hmm.log_likelihood(y)
+    true_lkhd = oldhmm.log_likelihood(y)
 
     # Make an HMM with these parameters
     hmm = HMM(K, D, observations="gaussian")
@@ -60,11 +60,11 @@ def test_expectations(T=1000, K=20, D=2):
     # Compare to pyhsmm answer
     from pyhsmm.models import HMM as OldHMM
     from pyhsmm.basic.distributions import Gaussian
-    hmm = OldHMM([Gaussian(mu=C[k], sigma=sigma * np.eye(D)) for k in range(K)],
+    oldhmm = OldHMM([Gaussian(mu=C[k], sigma=sigma * np.eye(D)) for k in range(K)],
                   trans_matrix=A,
                   init_state_distn="uniform")
-    hmm.add_data(y)
-    states = hmm.states_list.pop()
+    oldhmm.add_data(y)
+    states = oldhmm.states_list.pop()
     states.E_step()
     true_Ez = states.expected_states
     true_E_trans = states.expected_transcounts
@@ -103,11 +103,11 @@ def test_viterbi(T=1000, K=20, D=2):
     # Compare to pyhsmm answer
     from pyhsmm.models import HMM as OldHMM
     from pyhsmm.basic.distributions import Gaussian
-    hmm = OldHMM([Gaussian(mu=C[k], sigma=sigma * np.eye(D)) for k in range(K)],
+    oldhmm = OldHMM([Gaussian(mu=C[k], sigma=sigma * np.eye(D)) for k in range(K)],
                   trans_matrix=A,
                   init_state_distn="uniform")
-    hmm.add_data(y)
-    states = hmm.states_list.pop()
+    oldhmm.add_data(y)
+    states = oldhmm.states_list.pop()
     states.Viterbi()
     z_star = states.stateseq
 
@@ -118,6 +118,4 @@ def test_viterbi(T=1000, K=20, D=2):
     hmm.observations.inv_sigmas = np.log(sigma) * np.ones((K, D))
     z_star2 = hmm.most_likely_states(y)
 
-    print(z_star)
-    print(z_star2)
     assert np.allclose(z_star, z_star2)
