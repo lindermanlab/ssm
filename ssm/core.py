@@ -64,15 +64,19 @@ class _HMM(object):
         self.observations.permute(perm)
 
     def sample(self, T, prefix=None, input=None, tag=None, with_noise=True):
-        K, D = self.K, self.D
+        K = self.K
+        D = (self.D,) if isinstance(self.D, int) else self.D
+        M = (self.M,) if isinstance(self.M, int) else self.M
+        assert isinstance(D, tuple)
+        assert isinstance(M, tuple)
 
         # If prefix is given, pad the output with it
         if prefix is None:
             pad = 1
             z = np.zeros(T+1, dtype=int)
-            data = np.zeros((T+1, D), self.observations.dtype)
-            input = np.zeros((T+1, self.M)) if input is None else input
-            mask = np.ones((T+1, D), dtype=bool)
+            data = np.zeros((T+1,) + D, self.observations.dtype)
+            input = np.zeros((T+1,) + M) if input is None else input
+            mask = np.ones((T+1,) + D, dtype=bool)
 
             # Sample the first state from the initial distribution
             pi0 = np.exp(self.init_state_distn.log_initial_state_distn(data, input, mask, tag))
@@ -83,12 +87,11 @@ class _HMM(object):
             zhist, xhist = prefix
             pad = len(zhist)
             assert zhist.dtype == int and zhist.min() >= 0 and zhist.max() < K
-            assert xhist.shape == (pad, D)
-
+            assert xhist.shape == (pad,) + D
             z = np.concatenate((zhist, np.zeros(T, dtype=int)))
-            data = np.concatenate((xhist, np.zeros((T, D))), self.observations.dtype)
-            input = np.zeros((T+pad, self.M)) if input is None else input
-            mask = np.ones((T+pad, D), dtype=bool)
+            data = np.concatenate((xhist, np.zeros((T,) + D, self.observations.dtype)))
+            input = np.zeros((T+pad,) + M) if input is None else input
+            mask = np.ones((T+pad,) + D, dtype=bool)
 
         # Fill in the rest of the data
         for t in range(pad, pad+T):
@@ -383,16 +386,20 @@ class _SwitchingLDS(object):
                self.emissions.log_prior()
 
     def sample(self, T, input=None, tag=None, prefix=None, with_noise=True):
-        N, K, D = self.N, self.K, self.D
+        K = self.K
+        D = (self.D,) if isinstance(self.D, int) else self.D
+        M = (self.M,) if isinstance(self.M, int) else self.M
+        assert isinstance(D, tuple)
+        assert isinstance(M, tuple)
         
         # If prefix is given, pad the output with it
         if prefix is None:
             pad = 1
             z = np.zeros(T+1, dtype=int)
-            x = np.zeros((T+1, D))
-            data = np.zeros((T+1, D))
-            input = np.zeros((T+1, self.M)) if input is None else input
-            xmask = np.ones((T+1, D), dtype=bool)
+            x = np.zeros((T+1,) + D)
+            data = np.zeros((T+1,) + D)
+            input = np.zeros((T+1,) + M) if input is None else input
+            xmask = np.ones((T+1,) + D, dtype=bool)
 
             # Sample the first state from the initial distribution
             pi0 = np.exp(self.init_state_distn.log_initial_state_distn(data, input, xmask, tag))
@@ -407,9 +414,9 @@ class _SwitchingLDS(object):
             assert yhist.shape == (pad, N)
 
             z = np.concatenate((zhist, np.zeros(T, dtype=int)))
-            x = np.concatenate((xhist, np.zeros((T, D))))
-            input = np.zeros((T+pad, self.M)) if input is None else input
-            xmask = np.ones((T+pad, D), dtype=bool)
+            x = np.concatenate((xhist, np.zeros((T,) + D)))
+            input = np.zeros((T+pad,) + M) if input is None else input
+            xmask = np.ones((T+pad,) + D, dtype=bool)
         
         # Sample z and x 
         for t in range(pad, T+pad):

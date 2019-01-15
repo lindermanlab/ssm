@@ -60,8 +60,11 @@ def ensure_args_are_lists(f):
     def wrapper(self, datas, inputs=None, masks=None, tags=None, **kwargs):
         datas = [datas] if not isinstance(datas, (list, tuple)) else datas
         
+        M = (self.M,) if isinstance(self.M, int) else self.M
+        assert isinstance(M, tuple)
+
         if inputs is None:
-            inputs = [np.zeros((data.shape[0], 0)) for data in datas]
+            inputs = [np.zeros((data.shape[0],) + M) for data in datas]
         elif not isinstance(inputs, (list, tuple)):
             inputs = [inputs]
 
@@ -83,9 +86,18 @@ def ensure_args_are_lists(f):
 def ensure_variational_args_are_lists(f):
     def wrapper(self, arg0, datas, inputs=None, masks=None, tags=None, **kwargs):
         datas = [datas] if not isinstance(datas, (list, tuple)) else datas
+
+        try: 
+            M = (self.M,) if isinstance(self.M, int) else self.M
+        except:
+            # self does not have M if self is a variational posterior object
+            # in that case, arg0 is a model, which does have an M parameter
+            M = (arg0.M,) if isinstance(arg0.M, int) else arg0.M
+            
+        assert isinstance(M, tuple)
         
         if inputs is None:
-            inputs = [np.zeros((data.shape[0], 0)) for data in datas]
+            inputs = [np.zeros((data.shape[0],) + M) for data in datas]
         elif not isinstance(inputs, (list, tuple)):
             inputs = [inputs]
 
@@ -109,8 +121,11 @@ def ensure_args_not_none(f):
         # Check that the data is the correct type
         assert data is not None
         assert data.dtype == self.observations.dtype
-        
-        input = np.zeros((data.shape[0], 0)) if input is None else input
+
+        M = (self.M,) if isinstance(self.M, int) else self.M
+        assert isinstance(M, tuple)
+        input = np.zeros((data.shape[0],) + M) if input is None else input
+
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return f(self, data, input=input, mask=mask, tag=tag, **kwargs)
     return wrapper
@@ -120,7 +135,9 @@ def ensure_slds_args_not_none(f):
     def wrapper(self, variational_mean, data, input=None, mask=None, tag=None, **kwargs):
         assert variational_mean is not None
         assert data is not None
-        input = np.zeros((data.shape[0], 0)) if input is None else input
+        M = (self.M,) if isinstance(self.M, int) else self.M
+        assert isinstance(M, tuple)
+        input = np.zeros((data.shape[0],) + M) if input is None else input
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return f(self, variational_mean, data, input=input, mask=mask, tag=tag, **kwargs)
     return wrapper
