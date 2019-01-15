@@ -1,5 +1,3 @@
-# distutils: extra_compile_args = -O3 -fopenmp 
-# distutils: extra_link_args = -fopenmp
 # cython: wraparound=False
 # cython: boundscheck=False
 # cython: nonecheck=False
