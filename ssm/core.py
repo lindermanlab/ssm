@@ -64,33 +64,80 @@ class _HMM(object):
         self.observations.permute(perm)
 
     def sample(self, T, prefix=None, input=None, tag=None, with_noise=True):
+        """
+        Sample synthetic data from the model. Optionally, condition on a given
+        prefix (preceding discrete states and data).  
+
+        Parameters
+        ----------
+        T : int
+            number of time steps to sample
+
+        prefix : (zpre, xpre)
+            Optional prefix of discrete states (zpre) and continuous states (xpre)
+            zpre must be an array of integers taking values 0...num_states-1.
+            xpre must be an array of the same length that has preceding observations.
+
+        input : (T, input_dim) array_like
+            Optional inputs to specify for sampling
+
+        tag : object
+            Optional tag indicating which "type" of sampled data
+
+        with_noise : bool
+            Whether or not to sample data with noise.
+
+        Returns
+        -------
+        z_sample : array_like of type int
+            Sequence of sampled discrete states
+
+        x_sample : (T x observation_dim) array_like
+            Array of sampled data
+        """
         K = self.K
         D = (self.D,) if isinstance(self.D, int) else self.D
         M = (self.M,) if isinstance(self.M, int) else self.M
         assert isinstance(D, tuple)
         assert isinstance(M, tuple)
+        assert T > 0
 
-        # If prefix is given, pad the output with it
+        # Check the inputs
+        if input is not None:
+            assert input.shape == (T,) + M
+
+        # Get the type of the observations
+        dummy_data = self.observations.sample_x(0, np.empty(0,) + D)
+        dtype = dummy_data.dtype
+
+        # Initialize the data array
         if prefix is None:
+            # No prefix is given.  Sample the initial state as the prefix.
             pad = 1
-            z = np.zeros(T+1, dtype=int)
-            data = np.zeros((T+1,) + D, self.observations.dtype)
-            input = np.zeros((T+1,) + M) if input is None else input
-            mask = np.ones((T+1,) + D, dtype=bool)
-
+            z = np.zeros(T, dtype=int)
+            data = np.zeros((T,) + D, dtype=dtype)
+            input = np.zeros((T,) + M) if input is None else input
+            mask = np.ones((T,) + D, dtype=bool)
+            
             # Sample the first state from the initial distribution
             pi0 = np.exp(self.init_state_distn.log_initial_state_distn(data, input, mask, tag))
             z[0] = npr.choice(self.K, p=pi0)
             data[0] = self.observations.sample_x(z[0], data[:0], with_noise=with_noise)
-        
+
+            # We only need to sample T-1 datapoints now
+            T = T - 1
+            
         else:
-            zhist, xhist = prefix
-            pad = len(zhist)
-            assert zhist.dtype == int and zhist.min() >= 0 and zhist.max() < K
-            assert xhist.shape == (pad,) + D
-            z = np.concatenate((zhist, np.zeros(T, dtype=int)))
-            data = np.concatenate((xhist, np.zeros((T,) + D, self.observations.dtype)))
-            input = np.zeros((T+pad,) + M) if input is None else input
+            # Check that the prefix is of the right type
+            zpre, xpre = prefix
+            pad = len(zpre)
+            assert zpre.dtype == int and zpre.min() >= 0 and zpre.max() < K
+            assert xpre.shape == (pad,) + D
+            
+            # Construct the states, data, inputs, and mask arrays
+            z = np.concatenate((zpre, np.zeros(T, dtype=int)))
+            data = np.concatenate((xpre, np.zeros((T,) + D, dtype)))
+            input = np.zeros((T+pad,) + M) if input is None else np.concatenate((np.zeros((pad,) + M), input))
             mask = np.ones((T+pad,) + D, dtype=bool)
 
         # Fill in the rest of the data

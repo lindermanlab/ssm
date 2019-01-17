@@ -120,8 +120,7 @@ def ensure_args_not_none(f):
     def wrapper(self, data, input=None, mask=None, tag=None, **kwargs):
         # Check that the data is the correct type
         assert data is not None
-        assert data.dtype == self.observations.dtype
-
+        
         M = (self.M,) if isinstance(self.M, int) else self.M
         assert isinstance(M, tuple)
         input = np.zeros((data.shape[0],) + M) if input is None else input

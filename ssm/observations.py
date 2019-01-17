@@ -16,14 +16,8 @@ from ssm.optimizers import adam, bfgs, rmsprop, sgd
 
 class _Observations(object):
 
-    _dtype = float  # Override this for count-valued observation models
-
     def __init__(self, K, D, M=0):
         self.K, self.D, self.M = K, D, M
-
-    @property
-    def dtype(self):
-        return self._dtype
 
     @property
     def params(self):
@@ -264,8 +258,6 @@ class StudentsTObservations(_Observations):
 
 class BernoulliObservations(_Observations):
     
-    _dtype = bool
-
     def __init__(self, K, D, M=0):
         super(BernoulliObservations, self).__init__(K, D, M)
         self.logit_ps = npr.randn(K, D)
@@ -322,8 +314,6 @@ class BernoulliObservations(_Observations):
 
 class PoissonObservations(_Observations):
     
-    _dtype = int
-
     def __init__(self, K, D, M=0):
         super(PoissonObservations, self).__init__(K, D, M)
         self.log_lambdas = npr.randn(K, D)
@@ -376,8 +366,6 @@ class PoissonObservations(_Observations):
 
 class CategoricalObservations(_Observations):
     
-    _dtype = int
-
     def __init__(self, K, D, M=0, C=2):
         """
         @param C:  number of classes in the categorical observations 

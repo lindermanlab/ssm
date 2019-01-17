@@ -3,6 +3,61 @@ import autograd.numpy.random as npr
 
 from ssm.models import HMM
 
+
+def test_sample(T=10, K=4, D=3, M=2):
+    """
+    Test that we can construct and sample an HMM 
+    with or withou, prefixes, noise, and noise.
+    """
+    transition_names = [
+        "standard",
+        "sticky",
+        "inputdriven",
+        "recurrent",
+        "recurrent_only",
+        "rbf_recurrent",
+        "nn_recurrent"
+    ]
+
+    observation_names = [
+        "gaussian",
+        "t",
+        "bernoulli",
+        "categorical",
+        "poisson",
+        "vonmises",
+        "ar",
+        "robust_ar"
+    ]
+
+    # Sample basic (no prefix, inputs, etc.)
+    for transitions in transition_names:
+        for observations in observation_names:
+            hmm = HMM(K, D, M=0, transitions=transitions, observations=observations)
+            zsmpl, xsmpl = hmm.sample(T)
+
+    # Sample with prefix
+    for transitions in transition_names:
+        for observations in observation_names:
+            hmm = HMM(K, D, M=0, transitions=transitions, observations=observations)
+            zpre, xpre = hmm.sample(3)
+            zsmpl, xsmpl = hmm.sample(T, prefix=(zpre, xpre))
+
+    # Sample with inputs
+    for transitions in transition_names:
+        for observations in observation_names:
+            hmm = HMM(K, D, M=M, transitions=transitions, observations=observations)
+            zpre, xpre = hmm.sample(3, input=npr.randn(3, M))
+            zsmpl, xsmpl = hmm.sample(T, prefix=(zpre, xpre), input=npr.randn(T, M))
+
+    # Sample without noise
+    for transitions in transition_names:
+        for observations in observation_names:
+            hmm = HMM(K, D, M=M, transitions=transitions, observations=observations)
+            zpre, xpre = hmm.sample(3, input=npr.randn(3, M))
+            zsmpl, xsmpl = hmm.sample(T, prefix=(zpre, xpre), input=npr.randn(T, M), with_noise=False)
+
+
 def test_hmm_likelihood(T=1000, K=5, D=2):
     # Create a true HMM
     A = npr.rand(K, K)
