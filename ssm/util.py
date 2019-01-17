@@ -40,6 +40,33 @@ def find_permutation(z1, z2, K1=None, K2=None):
     return perm
 
 
+def rle(stateseq):
+    """
+    Compute the run length encoding of a discrete state sequence.
+
+    E.g. the state sequence [0, 0, 1, 1, 1, 2, 3, 3]
+         would be encoded as ([0, 1, 2, 3], [2, 3, 1, 2])
+
+    [Copied from pyhsmm.util.general.rle]
+
+    Parameters
+    ----------
+    stateseq : array_like
+        discrete state sequence
+
+    Returns
+    -------
+    ids : array_like
+        integer identities of the states
+
+    durations : array_like (int)
+        length of time in corresponding state
+    """
+    pos, = np.where(np.diff(stateseq) != 0)
+    pos = np.concatenate(([0],pos+1,[len(stateseq)]))
+    return stateseq[pos[:-1]], np.diff(pos)
+
+
 def random_rotation(n, theta=None):
     if theta is None:
         # Sample a random, slow rotation
@@ -118,9 +145,8 @@ def ensure_variational_args_are_lists(f):
 
 def ensure_args_not_none(f):
     def wrapper(self, data, input=None, mask=None, tag=None, **kwargs):
-        # Check that the data is the correct type
         assert data is not None
-        
+
         M = (self.M,) if isinstance(self.M, int) else self.M
         assert isinstance(M, tuple)
         input = np.zeros((data.shape[0],) + M) if input is None else input
@@ -298,7 +324,7 @@ def fit_linear_regression(Xs, ys, weights=None,
     :param fit_intercept:  if False drop b
     """
     Xs = Xs if isinstance(Xs, (list, tuple)) else [Xs]
-    ys = Xs if isinstance(ys, (list, tuple)) else [ys]
+    ys = ys if isinstance(ys, (list, tuple)) else [ys]
     assert len(Xs) == len(ys)
 
     D = Xs[0].shape[1]
@@ -350,7 +376,7 @@ def fit_linear_regression(Xs, ys, weights=None,
     sigmasq = beta / (alpha + 1e-16)
 
     if fit_intercept:
-        return W[:,:-1], W[:,-1], sigmasq
+        return W, b, sigmasq
     else:
         return W, sigmasq
         
