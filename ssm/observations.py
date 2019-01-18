@@ -5,13 +5,13 @@ import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.misc import logsumexp
 from autograd.scipy.special import gammaln, digamma
-from autograd.scipy.stats import norm, gamma
 
 from ssm.util import random_rotation, ensure_args_are_lists, \
     logistic, logit, one_hot, generalized_newton_studentst_dof, fit_linear_regression
 from ssm.preprocessing import interpolate_data
 from ssm.cstats import robust_ar_statistics
 from ssm.optimizers import adam, bfgs, rmsprop, sgd
+import ssm.stats as stats
 
 
 class _Observations(object):
@@ -76,6 +76,78 @@ class GaussianObservations(_Observations):
     def __init__(self, K, D, M=0):
         super(GaussianObservations, self).__init__(K, D, M)
         self.mus = npr.randn(K, D)
+        self._sqrt_Sigmas = npr.randn(K, D, D)
+
+    @property
+    def params(self):
+        return self.mus, self._sqrt_Sigmas
+    
+    @params.setter
+    def params(self, value):
+        self.mus, self._sqrt_Sigmas = value
+
+    def permute(self, perm):
+        self.mus = self.mus[perm]
+        self._sqrt_Sigmas = self._sqrt_Sigmas[perm]
+
+    @property
+    def Sigmas(self):
+        return np.matmul(self._sqrt_Sigmas, np.swapaxes(self._sqrt_Sigmas, -1, -2))
+        
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
+        # Initialize with KMeans
+        from sklearn.cluster import KMeans
+        data = np.concatenate(datas)
+        km = KMeans(self.K).fit(data)
+        self.mus = km.cluster_centers_
+        Sigmas = np.array([np.cov(data[km.labels_ == k].T) for k in range(self.K)])
+        self._sqrt_Sigmas = np.linalg.cholesky(Sigmas + 1e-8 * np.eye(self.D))
+        
+    def log_likelihoods(self, data, input, mask, tag):
+        mus, Sigmas = self.mus, self.Sigmas
+        if mask is not None and np.any(~mask) and not isinstance(mus, np.ndarray):
+            raise Exception("Current implementation of multivariate_normal_logpdf for masked data"
+                            "does not work with autograd because it writes to an array. "
+                            "Use DiagonalGaussian instead if you need to support missing data.")
+
+        return stats.multivariate_normal_logpdf(data[:, None, :], mus, Sigmas)
+        
+    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
+        D, mus = self.D, self.mus
+        sqrt_Sigmas = self._sqrt_Sigmas if with_noise else np.zeros((self.K, self.D, self.D))
+        return mus[z] + np.dot(sqrt_Sigmas[z], npr.randn(D))
+
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        K, D = self.K, self.D
+        J = np.zeros((K, D))
+        h = np.zeros((K, D))
+        for (Ez, _, _), y in zip(expectations, datas):
+            J += np.sum(Ez[:, :, None], axis=0)
+            h += np.sum(Ez[:, :, None] * y[:, None, :], axis=0) 
+        self.mus = h / J
+
+        # Update the variance
+        sqerr = np.zeros((K, D, D))
+        weight = np.zeros((K,))
+        for (Ez, _, _), y in zip(expectations, datas):
+            resid = y[:, None, :] - self.mus
+            sqerr += np.sum(Ez[:, :, None, None] * resid[:, :, None, :] * resid[:, :, :, None], axis=0) 
+            weight += np.sum(Ez, axis=0)
+        self._sqrt_Sigmas = np.linalg.cholesky(sqerr / weight[:, None, None] + 1e-8 * np.eye(self.D))
+
+    def smooth(self, expectations, data, input, tag):
+        """
+        Compute the mean observation under the posterior distribution
+        of latent discrete states.
+        """
+        return expectations.dot(self.mus)
+
+
+class DiagonalGaussianObservations(_Observations):
+    def __init__(self, K, D, M=0):
+        super(DiagonalGaussianObservations, self).__init__(K, D, M)
+        self.mus = npr.randn(K, D)
         self.inv_sigmas = -2 + npr.randn(K, D)
 
     @property
@@ -104,10 +176,8 @@ class GaussianObservations(_Observations):
     def log_likelihoods(self, data, input, mask, tag):
         mus, sigmas = self.mus, np.exp(self.inv_sigmas) + 1e-16
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
-        return -0.5 * np.sum(
-            (np.log(2 * np.pi * sigmas) + (data[:, None, :] - mus)**2 / sigmas) 
-            * mask[:, None, :], axis=2)
-
+        return stats.diagonal_gaussian_logpdf(data[:, None, :], mus, sigmas, mask=mask[:, None, :])
+        
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, mus = self.D, self.mus
         sigmas = np.exp(self.inv_sigmas) if with_noise else np.zeros((self.K, self.D))
@@ -164,14 +234,10 @@ class StudentsTObservations(_Observations):
         
     def log_likelihoods(self, data, input, mask, tag):
         D, mus, sigmas, nus = self.D, self.mus, np.exp(self.inv_sigmas), np.exp(self.inv_nus)
-        # mask = np.ones_like(data, dtype=bool) if mask is None else mask
-
-        resid = data[:, None, :] - mus
-        z = resid / sigmas
-        return -0.5 * (nus + D) * np.log(1.0 + (resid * z).sum(axis=2) / nus) + \
-            gammaln((nus + D) / 2.0) - gammaln(nus / 2.0) - D / 2.0 * np.log(nus) \
-            -D / 2.0 * np.log(np.pi) - 0.5 * np.sum(np.log(sigmas), axis=1)
-
+        nus = np.tile(nus[:, None], (1, self.D))
+        mask = np.ones_like(data, dtype=bool) if mask is None else mask
+        return stats.independent_studentst_logpdf(data[:, None, :], mus, sigmas, nus, mask=mask[:, None, :])
+        
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, mus, sigmas, nus = self.D, self.mus, np.exp(self.inv_sigmas), np.exp(self.inv_nus)
         tau = npr.gamma(nus[z] / 2.0, 2.0 / nus[z])
@@ -284,13 +350,8 @@ class BernoulliObservations(_Observations):
         self.logit_ps = logit(ps)
         
     def log_likelihoods(self, data, input, mask, tag):
-        assert (data.dtype == int or data.dtype == bool)
-        assert data.ndim == 2 and data.shape[1] == self.D
-        assert data.min() >= 0 and data.max() <= 1
-        ps = logistic(self.logit_ps)
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
-        lls = data[:, None, :] * np.log(ps) + (1 - data[:, None, :]) * np.log(1 - ps)
-        return np.sum(lls * mask[:, None, :], axis=2)
+        return stats.bernoulli_logpdf(data[:, None, :], self.logit_ps, mask=mask[:, None, :])
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         ps = 1 / (1 + np.exp(self.logit_ps))
@@ -339,12 +400,9 @@ class PoissonObservations(_Observations):
         self.log_lambdas = np.log(km.cluster_centers_ + 1e-3)
         
     def log_likelihoods(self, data, input, mask, tag):
-        assert data.dtype == int
         lambdas = np.exp(self.log_lambdas)
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
-        lls = -gammaln(data[:,None,:] + 1) - lambdas + data[:,None,:] * np.log(lambdas)
-        assert lls.shape == (data.shape[0], self.K, self.D)
-        return np.sum(lls * mask[:, None, :], axis=2)
+        return stats.poisson_logpdf(data[:, None, :], lambdas, mask=mask[:, None, :])
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         lambdas = np.exp(self.log_lambdas)
@@ -390,14 +448,8 @@ class CategoricalObservations(_Observations):
         pass
         
     def log_likelihoods(self, data, input, mask, tag):
-        assert (data.dtype == int or data.dtype == bool)
-        assert data.ndim == 2 and data.shape[1] == self.D
-        assert data.min() >= 0 and data.max() < self.C
-        logits = self.logits - logsumexp(self.logits, axis=2, keepdims=True)  # K x D x C
-        x = one_hot(data, self.C)                                             # T x D x C
-        lls = np.sum(x[:, None, :, :] * logits, axis=3)                       # T x K x D
-        mask = np.ones_like(data, dtype=bool) if mask is None else mask       # T x D
-        return np.sum(lls * mask[:, None, :], axis=2)                         # T x K
+        mask = np.ones_like(data, dtype=bool) if mask is None else mask
+        return stats.categorical_logpdf(data[:, None, :], self.logits, mask=mask[:, None, :])
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         ps = np.exp(self.logits - logsumexp(self.logits, axis=2, keepdims=True))
@@ -505,9 +557,7 @@ class AutoRegressiveObservations(_Observations):
     def log_likelihoods(self, data, input, mask, tag):
         mus = self._compute_mus(data, input, mask, tag)
         sigmas = self._compute_sigmas(data, input, mask, tag)
-        return -0.5 * np.sum(
-            (np.log(2 * np.pi * sigmas) + (data[:, None, :] - mus)**2 / sigmas) 
-            * mask[:, None, :], axis=2)
+        return stats.diagonal_gaussian_logpdf(data[:, None, :], mus, sigmas, mask=mask[:, None, :])
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         K, D, M, lags = self.K, self.D, self.M, self.lags
@@ -757,12 +807,8 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
         mus = self._compute_mus(data, input, mask, tag)
         sigmas = self._compute_sigmas(data, input, mask, tag)
         nus = np.exp(self.inv_nus)
-
-        resid = data[:, None, :] - mus
-        z = resid / sigmas
-        return -0.5 * (nus + D) * np.log(1.0 + (resid * z).sum(axis=2) / nus) + \
-            gammaln((nus + D) / 2.0) - gammaln(nus / 2.0) - D / 2.0 * np.log(nus) \
-            -D / 2.0 * np.log(np.pi) - 0.5 * np.sum(np.log(sigmas), axis=-1)
+        nus = np.tile(nus[:, None], (1, self.D))
+        return stats.independent_studentst_logpdf(data[:, None, :], mus, sigmas, nus, mask=mask[:, None, :])
 
     def m_step(self, expectations, datas, inputs, masks, tags, 
                num_em_iters=1, optimizer="adam", num_iters=10, **kwargs):
@@ -938,16 +984,9 @@ class VonMisesObservations(_Observations):
         pass
 
     def log_likelihoods(self, data, input, mask, tag):
-        from autograd.scipy.special import i0
-        # Compute the log likelihood of the data under each of the K classes
-        # Return a TxK array of probability of data[t] under class k
         mus, kappas = self.mus, np.exp(self.log_kappas)
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
-
-        return np.sum(
-            (kappas*(np.cos(data[:, None, :] - mus)) - np.log(2 * np.pi)
-             - np.log(i0(kappas)))
-            * mask[:, None, :], axis=2)
+        return stats.vonmises_logpdf(data[:, None, :], mus, kappas, mask=mask[:, None, :])    
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, mus, kappas = self.D, self.mus, np.exp(self.log_kappas)
@@ -983,5 +1022,3 @@ class VonMisesObservations(_Observations):
     def smooth(self, expectations, data, input, tag):
         mus = self.mus
         return expectations.dot(mus)
-
-

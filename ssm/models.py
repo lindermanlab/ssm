@@ -13,6 +13,7 @@ from ssm.transitions import \
 
 from ssm.observations import \
     GaussianObservations, \
+    DiagonalGaussianObservations, \
     BernoulliObservations, \
     PoissonObservations, \
     VonMisesObservations, \
@@ -99,6 +100,7 @@ def HMM(K, D, M=0,
     is_recurrent = (transitions.lower() in ["recurrent", "recurrent_only", "nn_recurrent"])
     observation_classes = dict(
         gaussian=GaussianObservations,
+        diagonal_gaussian=DiagonalGaussianObservations,
         studentst=StudentsTObservations,
         t=StudentsTObservations,
         bernoulli=BernoulliObservations,

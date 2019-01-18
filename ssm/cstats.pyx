@@ -8,6 +8,8 @@ cimport numpy as np
 
 from cython.parallel import prange
 
+# Cython functions for computing sufficient statistics 
+# of t-distributed AR models
 cpdef robust_ar_statistics(double[:, ::1] Ez,
                            double[:, :, ::1] tau,
                            double[:, ::1] x,
@@ -32,6 +34,7 @@ cpdef robust_ar_statistics(double[:, ::1] Ez,
                         h[k, d, m] += Ez[t, k] * tau[t, k, d] * x[t, m] * y[t, d]                
 
 
+# Cython functions to convert between banded and block tridiagonal matrices
 cpdef _blocks_to_bands_lower(double[:,:,::1] Ad, double[:, :, ::1] Aod):
     """
     Convert a block tridiagonal matrix to the banded matrix representation 

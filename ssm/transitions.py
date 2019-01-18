@@ -6,7 +6,8 @@ import autograd.numpy.random as npr
 from autograd.scipy.misc import logsumexp
 from autograd.scipy.stats import dirichlet
 
-from ssm.util import one_hot, logistic, relu, batch_mahalanobis, fit_multiclass_logistic_regression
+from ssm.util import one_hot, logistic, relu, fit_multiclass_logistic_regression
+from ssm.stats import multivariate_normal_logpdf
 from ssm.optimizers import adam, bfgs, rmsprop, sgd
 
 
@@ -309,18 +310,9 @@ class RBFRecurrentTransitions(InputDrivenTransitions):
         # Previous state effect
         log_Ps = np.tile(self.log_Ps[None, :, :], (T-1, 1, 1)) 
 
-        # RBF function, quadratic term
-        Ls = np.linalg.cholesky(self.Sigmas)                             # (K, D, D)
-        diff = data[:-1, None, :] - self.mus                             # (T-1, K, D)
-        M = batch_mahalanobis(Ls, diff)                                  # (T-1, K)
-        log_Ps = log_Ps + -0.5 * M[:, None, :]
-
-        # RBF function, Gaussian normalizer
-        # L_diag = np.reshape(Ls, Ls.shape[:-2] + (-1,))[..., ::D + 1]
-        L_diag = np.array([np.diag(L) for L in Ls])                      # (K, D)
-        half_log_det = np.sum(np.log(abs(L_diag)), axis=-1)              # (K,)
-        log_normalizer = -0.5 * D * np.log(2 * np.pi) - half_log_det     # (K,)
-        log_Ps = log_Ps + log_normalizer[None, None, :]
+        # RBF recurrent function
+        rbf = multivariate_normal_logpdf(data[:-1, None, :], self.mus, self.Sigmas)
+        log_Ps = log_Ps + rbf[:, None, :]
 
         # Input effect
         log_Ps = log_Ps + np.dot(input[1:], self.Ws.T)[:, None, :]

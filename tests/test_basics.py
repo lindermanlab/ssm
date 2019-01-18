@@ -83,7 +83,7 @@ def test_hmm_likelihood(T=1000, K=5, D=2):
     true_lkhd = oldhmm.log_likelihood(y)
 
     # Make an HMM with these parameters
-    hmm = HMM(K, D, observations="gaussian")
+    hmm = HMM(K, D, observations="diagonal_gaussian")
     hmm.transitions.log_Ps = np.log(A)
     hmm.observations.mus = C
     hmm.observations.inv_sigmas = np.log(sigma) * np.ones((K, D))
@@ -125,7 +125,7 @@ def test_expectations(T=1000, K=20, D=2):
     true_E_trans = states.expected_transcounts
 
     # Make an HMM with these parameters
-    hmm = HMM(K, D, observations="gaussian")
+    hmm = HMM(K, D, observations="diagonal_gaussian")
     hmm.transitions.log_Ps = np.log(A)
     hmm.observations.mus = C
     hmm.observations.inv_sigmas = np.log(sigma) * np.ones((K, D))
@@ -167,7 +167,7 @@ def test_viterbi(T=1000, K=20, D=2):
     z_star = states.stateseq
 
     # Make an HMM with these parameters
-    hmm = HMM(K, D, observations="gaussian")
+    hmm = HMM(K, D, observations="diagonal_gaussian")
     hmm.transitions.log_Ps = np.log(A)
     hmm.observations.mus = C
     hmm.observations.inv_sigmas = np.log(sigma) * np.ones((K, D))

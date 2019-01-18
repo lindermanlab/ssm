@@ -198,23 +198,6 @@ def one_hot(z, K):
 def relu(x):
     return np.maximum(0, x)
 
-def batch_mahalanobis(L, x):
-    """
-    Copied from PyTorch torch.distributions.multivariate_normal
-
-    Computes the squared Mahalanobis distance 
-    :math:`\mathbf{x}^T \mathbf{M}^{-1}\mathbf{x}`
-    for a factored 
-    :math:`\mathbf{M} = \mathbf{L}\mathbf{L}^T`.
-
-    Accepts batches for both L and x.
-    """
-    # Flatten the Cholesky into a (K, D, D) array
-    flat_L = np.reshape(L[None, ...], (-1,) + L.shape[-2:])
-    # Invert each of the K arrays and reshape like L
-    L_inv = np.reshape(np.array([np.linalg.inv(Li.T) for Li in flat_L]), L.shape)
-    # Reshape x into (..., D, 1); dot with L_inv^T; square and sum.
-    return np.sum(np.sum(x[..., None] * L_inv, axis=-2)**2, axis=-1)
 
 def generalized_newton_studentst_dof(E_tau, E_logtau, nu0=1, max_iter=100, nu_min=1e-3, nu_max=20, tol=1e-8, verbose=False):
     """
