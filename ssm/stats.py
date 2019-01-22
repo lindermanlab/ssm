@@ -1,5 +1,5 @@
 import autograd.numpy as np
-from autograd.scipy.special import i0, gammaln
+from autograd.scipy.special import gammaln
 from autograd.scipy.misc import logsumexp
 
 from ssm.util import one_hot
@@ -424,6 +424,13 @@ def vonmises_logpdf(data, mus, kappas, mask=None):
     lps : array_like (...,)
         Log probabilities under the von Mises distribution(s).
     """
+    try:
+        from autograd.scipy.special import i0
+    except:
+        raise Exception("von Mises relies on the function autograd.scipy.special.i0. "
+                        "This is present in the latest Github code, but not on pypi. "
+                        "Please use the Github version of autograd instead.")
+
     D = data.shape[-1]
     assert mus.shape[-1] == D
     assert kappas.shape[-1] == D
