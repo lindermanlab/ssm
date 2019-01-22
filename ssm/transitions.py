@@ -204,6 +204,9 @@ class RecurrentTransitions(InputDrivenTransitions):
         log_Ps = log_Ps + np.dot(data[:-1], self.Rs.T)[:, None, :]
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        _Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
+
         
 class RecurrentOnlyTransitions(_Transitions):
     """
@@ -242,6 +245,9 @@ class RecurrentOnlyTransitions(_Transitions):
         log_Ps = log_Ps + self.r                                       # bias
         log_Ps = np.tile(log_Ps, (1, self.K, 1))                       # expand
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)       # normalize
+
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        _Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
 
 class RBFRecurrentTransitions(InputDrivenTransitions):
@@ -321,6 +327,9 @@ class RBFRecurrentTransitions(InputDrivenTransitions):
         log_Ps = log_Ps + np.dot(input[1:], self.Ws.T)[:, None, :]
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
     
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        _Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
+
 
 # Allow general nonlinear emission models with neural networks
 class NeuralNetworkRecurrentTransitions(_Transitions):
@@ -371,8 +380,7 @@ class NeuralNetworkRecurrentTransitions(_Transitions):
 
     def m_step(self, expectations, datas, inputs, masks, tags, optimizer="adam", num_iters=100, **kwargs):
         # Default to adam instead of bfgs for the neural network model.
-        super(NeuralNetworkRecurrentTransitions, self).\
-            m_step(expectations, datas, inputs, masks, tags, 
-                   optimizer=optimizer, num_iters=num_iters, **kwargs)
+        _Transitions.m_step(self, expectations, datas, inputs, masks, tags, 
+            optimizer=optimizer, num_iters=num_iters, **kwargs)
 
 
