@@ -104,17 +104,18 @@ def _generic_minimize(method, loss, x0, verbose=False, num_iters=1000):
     """
     Minimize a given loss function with scipy.optimize.minimize.  
     """
-    itr = [0]
-    def callback(x):
-        itr[0] += 1
-        print("Iteration {} loss: {:.3f}".format(itr[0], loss(x, -1)))
-
     # Flatten the loss
     _x0, unflatten = flatten(x0)
     _objective = lambda x_flat, itr: loss(unflatten(x_flat), itr)
 
     if verbose:
         print("Fitting with {}.".format(method))
+
+    # Specify callback for fitting
+    itr = [0]
+    def callback(x_flat):
+        itr[0] += 1
+        print("Iteration {} loss: {:.3f}".format(itr[0], loss(unflatten(x_flat), -1)))
 
     # Call the optimizer.
     # HACK: Pass in -1 as the iteration.

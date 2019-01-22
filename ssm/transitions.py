@@ -164,6 +164,9 @@ class InputDrivenTransitions(StickyTransitions):
         log_Ps = log_Ps + np.dot(input[1:], self.Ws.T)[:, None, :]
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        _Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
+
 
 class RecurrentTransitions(InputDrivenTransitions):
     """

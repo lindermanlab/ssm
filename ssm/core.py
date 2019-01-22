@@ -146,7 +146,12 @@ class _HMM(object):
             z[t] = npr.choice(self.K, p=Pt[z[t-1]])
             data[t] = self.observations.sample_x(z[t], data[:t], input=input[t], tag=tag, with_noise=with_noise)
 
-        return z[pad:], data[pad:]
+        # Return the whole data if no prefix is given.
+        # Otherwise, just return the simulated part.
+        if prefix is None:
+            return z, data
+        else:
+            return z[pad:], data[pad:]
 
     @ensure_args_not_none
     def expected_states(self, data, input=None, mask=None, tag=None):
