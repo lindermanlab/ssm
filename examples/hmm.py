@@ -13,7 +13,7 @@ K = 5       # number of discrete states
 D = 2       # number of observed dimensions
 
 # Make an HMM with the true parameters
-true_hmm = HMM(K, D, observations="gaussian")
+true_hmm = HMM(K, D, observations="diagonal_gaussian")
 z, y = true_hmm.sample(T)
 z_test, y_test = true_hmm.sample(T)
 true_ll = true_hmm.log_probability(y)
@@ -22,17 +22,29 @@ true_ll = true_hmm.log_probability(y)
 N_sgd_iters = 1000
 N_em_iters = 100
 
-print("Fitting HMM with SGD")
-hmm = HMM(K, D, observations="gaussian")
+print("Fitting diagonal Gaussian HMM with SGD")
+hmm = HMM(K, D, observations="diagonal_gaussian")
 hmm_sgd_lls = hmm.fit(y, method="sgd", num_iters=N_sgd_iters)
 hmm_sgd_test_ll = hmm.log_probability(y_test)
 hmm_sgd_smooth = hmm.smooth(y)
 
-print("Fitting HMM with EM")
-hmm = HMM(K, D, observations="gaussian")
+print("Fitting diagonal Gaussian HMM with EM")
+hmm = HMM(K, D, observations="diagonal_gaussian")
 hmm_em_lls = hmm.fit(y, method="em", num_em_iters=N_em_iters)
 hmm_em_test_ll = hmm.log_probability(y_test)
 hmm_em_smooth = hmm.smooth(y)
+
+print("Fitting full Gaussian HMM with SGD")
+mvnhmm = HMM(K, D, observations="gaussian")
+mvnhmm_sgd_lls = hmm.fit(y, method="sgd", num_iters=N_sgd_iters)
+mvnhmm_sgd_test_ll = hmm.log_probability(y_test)
+mvnhmm_sgd_smooth = hmm.smooth(y)
+
+print("Fitting full Gaussian HMM with EM")
+mvnhmm = HMM(K, D, observations="gaussian")
+mvnhmm_em_lls = hmm.fit(y, method="em", num_em_iters=N_em_iters)
+mvnhmm_em_test_ll = hmm.log_probability(y_test)
+mvnhmm_em_smooth = hmm.smooth(y)
 
 print("Fitting Student's t HMM with SGD")
 thmm = HMM(K, D, observations="studentst")
@@ -97,6 +109,8 @@ for d in range(D):
 plt.figure()
 l1 = plt.plot(hmm_sgd_lls, ls='-', label="HMM (SGD)")[0]
 plt.plot(hmm_em_lls, ls=':', label="HMM (EM)", color=l1.get_color())
+l1b = plt.plot(mvnhmm_sgd_lls, ls='-', label="MVN HMM (SGD)")[0]
+plt.plot(mvnhmm_em_lls, ls=':', label="MVN HMM (EM)", color=l1b.get_color())
 l2 = plt.plot(thmm_sgd_lls, ls='-', label="tHMM (SGD)")[0]
 plt.plot(thmm_em_lls, ls=':', label="tHMM (EM)", color=l2.get_color())
 l3 = plt.plot(arhmm_sgd_lls, ls='-', label="ARHMM (SGD)")[0]
@@ -110,6 +124,8 @@ print("Test log likelihood")
 print("True: ", true_hmm.log_probability(y_test))
 print("HMM (SGD) ", hmm_sgd_test_ll)
 print("HMM (EM) ", hmm_em_test_ll)
+print("MVN HMM (SGD) ", mvnhmm_sgd_test_ll)
+print("MVN HMM (EM) ", mvnhmm_em_test_ll)
 print("tHMM (SGD) ", thmm_sgd_test_ll)
 print("tHMM (EM) ", thmm_em_test_ll)
 print("ARHMM (SGD) ", arhmm_sgd_test_ll)

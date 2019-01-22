@@ -2,8 +2,11 @@ from warnings import warn
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
+from autograd.scipy.misc import logsumexp
+from autograd.scipy.linalg import block_diag
+from autograd import grad
 
-from scipy.optimize import linear_sum_assignment
+from scipy.optimize import linear_sum_assignment, minimize
 
 
 def compute_state_overlap(z1, z2, K1=None, K2=None):
@@ -37,6 +40,33 @@ def find_permutation(z1, z2, K1=None, K2=None):
     return perm
 
 
+def rle(stateseq):
+    """
+    Compute the run length encoding of a discrete state sequence.
+
+    E.g. the state sequence [0, 0, 1, 1, 1, 2, 3, 3]
+         would be encoded as ([0, 1, 2, 3], [2, 3, 1, 2])
+
+    [Copied from pyhsmm.util.general.rle]
+
+    Parameters
+    ----------
+    stateseq : array_like
+        discrete state sequence
+
+    Returns
+    -------
+    ids : array_like
+        integer identities of the states
+
+    durations : array_like (int)
+        length of time in corresponding state
+    """
+    pos, = np.where(np.diff(stateseq) != 0)
+    pos = np.concatenate(([0],pos+1,[len(stateseq)]))
+    return stateseq[pos[:-1]], np.diff(pos)
+
+
 def random_rotation(n, theta=None):
     if theta is None:
         # Sample a random, slow rotation
@@ -57,8 +87,11 @@ def ensure_args_are_lists(f):
     def wrapper(self, datas, inputs=None, masks=None, tags=None, **kwargs):
         datas = [datas] if not isinstance(datas, (list, tuple)) else datas
         
+        M = (self.M,) if isinstance(self.M, int) else self.M
+        assert isinstance(M, tuple)
+
         if inputs is None:
-            inputs = [np.zeros((data.shape[0], 0)) for data in datas]
+            inputs = [np.zeros((data.shape[0],) + M) for data in datas]
         elif not isinstance(inputs, (list, tuple)):
             inputs = [inputs]
 
@@ -80,9 +113,18 @@ def ensure_args_are_lists(f):
 def ensure_variational_args_are_lists(f):
     def wrapper(self, arg0, datas, inputs=None, masks=None, tags=None, **kwargs):
         datas = [datas] if not isinstance(datas, (list, tuple)) else datas
+
+        try: 
+            M = (self.M,) if isinstance(self.M, int) else self.M
+        except:
+            # self does not have M if self is a variational posterior object
+            # in that case, arg0 is a model, which does have an M parameter
+            M = (arg0.M,) if isinstance(arg0.M, int) else arg0.M
+            
+        assert isinstance(M, tuple)
         
         if inputs is None:
-            inputs = [np.zeros((data.shape[0], 0)) for data in datas]
+            inputs = [np.zeros((data.shape[0],) + M) for data in datas]
         elif not isinstance(inputs, (list, tuple)):
             inputs = [inputs]
 
@@ -104,7 +146,11 @@ def ensure_variational_args_are_lists(f):
 def ensure_args_not_none(f):
     def wrapper(self, data, input=None, mask=None, tag=None, **kwargs):
         assert data is not None
-        input = np.zeros((data.shape[0], 0)) if input is None else input
+
+        M = (self.M,) if isinstance(self.M, int) else self.M
+        assert isinstance(M, tuple)
+        input = np.zeros((data.shape[0],) + M) if input is None else input
+
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return f(self, data, input=input, mask=mask, tag=tag, **kwargs)
     return wrapper
@@ -114,7 +160,9 @@ def ensure_slds_args_not_none(f):
     def wrapper(self, variational_mean, data, input=None, mask=None, tag=None, **kwargs):
         assert variational_mean is not None
         assert data is not None
-        input = np.zeros((data.shape[0], 0)) if input is None else input
+        M = (self.M,) if isinstance(self.M, int) else self.M
+        assert isinstance(M, tuple)
+        input = np.zeros((data.shape[0],) + M) if input is None else input
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return f(self, variational_mean, data, input=input, mask=mask, tag=tag, **kwargs)
     return wrapper
@@ -150,23 +198,6 @@ def one_hot(z, K):
 def relu(x):
     return np.maximum(0, x)
 
-def batch_mahalanobis(L, x):
-    """
-    Copied from PyTorch torch.distributions.multivariate_normal
-
-    Computes the squared Mahalanobis distance 
-    :math:`\mathbf{x}^T \mathbf{M}^{-1}\mathbf{x}`
-    for a factored 
-    :math:`\mathbf{M} = \mathbf{L}\mathbf{L}^T`.
-
-    Accepts batches for both L and x.
-    """
-    # Flatten the Cholesky into a (K, D, D) array
-    flat_L = np.reshape(L[None, ...], (-1,) + L.shape[-2:])
-    # Invert each of the K arrays and reshape like L
-    L_inv = np.reshape(np.array([np.linalg.inv(Li.T) for Li in flat_L]), L.shape)
-    # Reshape x into (..., D, 1); dot with L_inv^T; square and sum.
-    return np.sum(np.sum(x[..., None] * L_inv, axis=-2)**2, axis=-1)
 
 def generalized_newton_studentst_dof(E_tau, E_logtau, nu0=1, max_iter=100, nu_min=1e-3, nu_max=20, tol=1e-8, verbose=False):
     """
@@ -202,3 +233,137 @@ def generalized_newton_studentst_dof(E_tau, E_logtau, nu0=1, max_iter=100, nu_mi
              "at tolerance {} in {} iterations.".format(tol, itr))
 
     return nu
+
+def fit_multiclass_logistic_regression(X, y, bias=None, K=None, W0=None, mu0=0, sigmasq0=1, 
+                                       verbose=False, maxiter=1000):
+    """
+    Fit a multiclass logistic regression 
+
+        y_i ~ Cat(softmax(W x_i))
+
+    y is a one hot vector in {0, 1}^K  
+    x_i is a vector in R^D
+    W is a matrix R^{K x D}
+
+    The log likelihood is,
+
+        L(W) = sum_i sum_k y_ik * w_k^T x_i - logsumexp(W x_i)
+    
+    The prior is w_k ~ Norm(mu0, diag(sigmasq0)).
+    """
+    N, D = X.shape
+    assert y.shape[0] == N
+
+    # Make sure y is one hot
+    if y.ndim == 1 or y.shape[1] == 1:
+        assert y.dtype == int and y.min() >= 0
+        K = y.max() + 1 if K is None else K
+        y_oh = np.zeros((N, K), dtype=int)
+        y_oh[np.arange(N), y] = 1
+
+    else:
+        K = y.shape[1]
+        assert y.min() == 0 and y.max() == 1 and np.allclose(y.sum(1), 1)
+        y_oh = y
+
+    # Check that bias is correct shape
+    if bias is not None:
+        assert bias.shape == (K,) or bias.shape == (N, K)
+    else:
+        bias = np.zeros((K,))
+
+    def loss(W_flat):
+        W = np.reshape(W_flat, (K, D))
+        scores = np.dot(X, W.T) + bias
+        lp = np.sum(y_oh * scores) - np.sum(logsumexp(scores, axis=1))
+        prior = np.sum(-0.5 * (W - mu0)**2 / sigmasq0)
+        return -(lp + prior) / N
+
+    W0 = W0 if W0 is not None else np.zeros((K, D))
+    assert W0.shape == (K, D)
+
+    itr = [0]
+    def callback(W_flat):
+        itr[0] += 1
+        print("Iteration {} loss: {:.3f}".format(itr[0], loss(W_flat)))
+
+    result = minimize(loss, np.ravel(W0), jac=grad(loss), 
+                      method="BFGS", 
+                      callback=callback if verbose else None, 
+                      options=dict(maxiter=maxiter, disp=verbose))
+
+    W = np.reshape(result.x, (K, D))
+    return W
+
+
+def fit_linear_regression(Xs, ys, weights=None, 
+                          mu0=0, sigmasq0=1, alpha0=1, beta0=1, 
+                          fit_intercept=True):
+    """
+    Fit a linear regression y_i ~ N(Wx_i + b, diag(S)) for W, b, S.
+    
+    :param Xs: array or list of arrays
+    :param ys: array or list of arrays
+    :param fit_intercept:  if False drop b
+    """
+    Xs = Xs if isinstance(Xs, (list, tuple)) else [Xs]
+    ys = ys if isinstance(ys, (list, tuple)) else [ys]
+    assert len(Xs) == len(ys)
+
+    D = Xs[0].shape[1]
+    P = ys[0].shape[1]
+    assert all([X.shape[1] == D for X in Xs])
+    assert all([y.shape[1] == P for y in ys])
+    assert all([X.shape[0] == y.shape[0] for X, y in zip(Xs, ys)])
+    
+    mu0 = mu0 * np.zeros((P, D))
+    sigmasq0 = sigmasq0 * np.eye(D)
+
+    # Make sure the weights are the weights
+    if weights is not None:
+        weights = weights if isinstance(weights, (list, tuple)) else [weights]
+    else:
+        weights = [np.ones(X.shape[0]) for X in Xs]
+    
+    # Add weak prior on intercept
+    if fit_intercept:
+        mu0 = np.column_stack((mu0, np.zeros(P)))
+        sigmasq0 = block_diag(sigmasq0, np.eye(1))
+
+    # Compute the posterior
+    J = np.linalg.inv(sigmasq0)
+    h = np.dot(J, mu0.T)
+
+    for X, y, weight in zip(Xs, ys, weights):
+        X = np.column_stack((X, np.ones(X.shape[0]))) if fit_intercept else X
+        J += np.dot(X.T * weight, X)
+        h += np.dot(X.T * weight, y)
+    
+    # Solve for the MAP estimate    
+    W = np.linalg.solve(J, h).T
+    if fit_intercept:
+        W, b = W[:, :-1], W[:, -1]
+    else:
+        b = 0
+
+    # Compute the residual and the posterior variance
+    alpha = alpha0 
+    beta = beta0 * np.ones(P)
+    for X, y, weight in zip(Xs, ys, weights):
+        yhat = np.dot(X, W.T) + b
+        resid = y - yhat
+        alpha += 0.5 * np.sum(weight)
+        beta += 0.5 * np.sum(weight[:, None] * resid**2, axis=0)
+
+    # Get MAP estimate of posterior mode of precision
+    sigmasq = beta / (alpha + 1e-16)
+
+    if fit_intercept:
+        return W, b, sigmasq
+    else:
+        return W, sigmasq
+        
+
+
+
+

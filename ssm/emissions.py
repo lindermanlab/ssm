@@ -2,7 +2,7 @@ import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.special import gammaln
 
-from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
+from ssm.util import ensure_args_are_lists, \
     ensure_slds_args_not_none, logistic, logit, softplus, inv_softplus
 from ssm.preprocessing import interpolate_data, pca_with_imputation
 
@@ -173,7 +173,7 @@ class _LinearEmissions(_Emissions):
         resids = [data - np.dot(input, self.Fs[0].T) for data, input in zip(datas, inputs)]
 
         # Run PCA to get a linear embedding of the data
-        pca, xs = pca_with_imputation(self.D, resids, masks, num_iters=num_iters)
+        pca, xs, ll = pca_with_imputation(self.D, resids, masks, num_iters=num_iters)
         
         self.Cs = np.tile(pca.components_.T[None, :, :], (Keff, 1, 1))
         self.ds = np.tile(pca.mean_[None, :], (Keff, 1))

@@ -1,7 +1,7 @@
 # distutils: extra_compile_args = -O3
-# cython: wraparound=True
-# cython: boundscheck=True
-# cython: nonecheck=True
+# cython: wraparound=False
+# cython: boundscheck=False
+# cython: nonecheck=False
 # cython: cdivision=True
 
 import numpy as np
