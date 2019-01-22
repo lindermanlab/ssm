@@ -1,5 +1,7 @@
 from itertools import product
 
+from nose.tools import nottest
+
 import autograd.numpy as np
 import autograd.numpy.random as npr
 
@@ -223,6 +225,7 @@ def test_poisson_logpdf(T=100, K=4, D=10):
     assert np.allclose(ll1, ll2)
 
 
+@nottest
 def test_vonmises_logpdf(T=100, K=4, D=10):
     # Test single datapoint log pdf
     x = npr.vonmises(0, 1, size=(T, D))
