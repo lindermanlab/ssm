@@ -963,8 +963,7 @@ class VonMisesObservations(_Observations):
     def __init__(self, K, D, M=0):
         super(VonMisesObservations, self).__init__(K, D, M)
         self.mus = npr.randn(K, D)
-        max_k = 9
-        self.log_kappas = np.log(-1*npr.uniform(low=-1*max_k, high=0, size=(K, D)))
+        self.log_kappas = np.log(-1*npr.uniform(low=-1, high=0, size=(K, D)))
 
     @property
     def params(self):
@@ -985,6 +984,7 @@ class VonMisesObservations(_Observations):
 
     def log_likelihoods(self, data, input, mask, tag):
         mus, kappas = self.mus, np.exp(self.log_kappas)
+
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return stats.vonmises_logpdf(data[:, None, :], mus, kappas, mask=mask[:, None, :])    
 
@@ -993,31 +993,32 @@ class VonMisesObservations(_Observations):
         return npr.vonmises(self.mus[z], kappas[z], D)
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        from autograd.scipy.special import i0, i1
-        x = np.concatenate(datas)
 
-        weights = np.concatenate([Ez for Ez, _, _ in expectations])
+        x = np.concatenate(datas)
+        weights = np.concatenate([Ez for Ez, _, _ in expectations])  # T x D
+        assert x.shape[0] == weights.shape[0]
 
         # convert angles to 2D representation and employ closed form solutions
-        x_k = np.stack((np.sin(x), np.cos(x)), axis=1)
+        x_k = np.stack((np.sin(x), np.cos(x)), axis=1)  # T x 2 x D
 
-        r_k = np.tensordot(weights.T, x_k, (-1, 0))
+        r_k = np.tensordot(weights.T, x_k, axes=1)  # K x 2 x D
+        r_norm = np.sqrt(np.sum(np.power(r_k, 2), axis=1))  # K x D
 
-        r_norm = np.sqrt(np.sum(r_k ** 2, 1))
-        mus_k = r_k / r_norm[:, None]
-        r_bar = r_norm / weights.sum(0)[:, None]
+        mus_k = np.divide(r_k, r_norm[:, None])  # K x 2 x D
+        r_bar = np.divide(r_norm, np.sum(weights, 0)[:, None])  # K x D
 
-        # truncated newton approximation with 2 iterations
-        kappa_0 = r_bar * (2 - r_bar ** 2) / (1 - r_bar ** 2)
+        mask = (r_norm.sum(1) == 0)
+        mus_k[mask] = 0
+        r_bar[mask] = 0
 
-        kappa_1 = kappa_0 - ((i1(kappa_0)/i0(kappa_0)) - r_bar) / \
-                  (1 - (i1(kappa_0)/i0(kappa_0)) ** 2 - (i1(kappa_0)/i0(kappa_0)) / kappa_0)
-        kappa_2 = kappa_1 - ((i1(kappa_1)/i0(kappa_1)) - r_bar) / \
-                  (1 - (i1(kappa_1)/i0(kappa_1)) ** 2 - (i1(kappa_1)/i0(kappa_1)) / kappa_1)
+        # Approximation
+        kappa0 = r_bar * (self.D + 1 - np.power(r_bar, 2)) / (1 - np.power(r_bar, 2))  # K,D
+
+        kappa0[kappa0 == 0] += 1e-6
 
         for k in range(self.K):
-            self.mus[k] = np.arctan2(*mus_k[k])
-            self.log_kappas[k] = np.log(kappa_2[k])
+            self.mus[k] = np.arctan2(*mus_k[k])  #
+            self.log_kappas[k] = np.log(kappa0[k])  # K, D
 
     def smooth(self, expectations, data, input, tag):
         mus = self.mus
