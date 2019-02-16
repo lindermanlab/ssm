@@ -602,12 +602,12 @@ class AutoRegressiveObservations(_Observations):
                 self.inv_sigmas[k, d] = np.log(sqerr / weight + 1e-16)
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
-        D, As, bs, sigmas = self.D, self.As, self.bs, np.exp(self.inv_sigmas)
+        D, As, bs, Vs, sigmas = self.D, self.As, self.bs, self.Vs, np.exp(self.inv_sigmas)
         if xhist.shape[0] < self.lags:
             sigma_init = np.exp(self.inv_sigma_init) if with_noise else 0
             return self.mu_init + np.sqrt(sigma_init) * npr.randn(D)
         else:
-            mu = bs[z].copy()
+            mu = Vs[z].dot(input) + bs[z]
             for l in range(self.lags):
                 mu += As[z][:,l*D:(l+1)*D].dot(xhist[-l-1])
 
