@@ -11,9 +11,10 @@ from autograd.misc import flatten
 from autograd import value_and_grad
 
 from ssm.optimizers import adam_step, rmsprop_step, sgd_step, convex_combination
-from ssm.primitives import hmm_normalizer, hmm_expected_states, hmm_filter, viterbi
+from ssm.primitives import hmm_normalizer, hmm_expected_states, hmm_filter, hmm_sample, viterbi
 from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
-    ensure_slds_args_not_none, ensure_variational_args_are_lists
+    ensure_slds_args_not_none, ensure_variational_args_are_lists, \
+    replicate, collapse
 
 class _HMM(object):
     """
@@ -356,6 +357,242 @@ class _HMM(object):
                  stochastic_em=partial(self._fit_stochastic_em, "adam"),
                  stochastic_em_sgd=partial(self._fit_stochastic_em, "sgd"),
                  )
+
+        if method not in _fitting_methods:
+            raise Exception("Invalid method: {}. Options are {}".\
+                            format(method, self._fitting_methods.keys()))
+
+        if initialize:
+            self.initialize(datas, inputs=inputs, masks=masks, tags=tags)
+
+        return _fitting_methods[method](datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
+
+
+class _HSMM(_HMM):
+    """
+    Hidden semi-Markov model with non-geometric duration distributions.
+    The trick is to expand the state space with "super states" and "sub states"
+    that effectively count duration. We rely on the transition model to 
+    specify a "state map," which maps the super states (1, .., K) to 
+    super+sub states ((1,1), ..., (1,r_1), ..., (K,1), ..., (K,r_K)).  
+    Here, r_k denotes the number of sub-states of state k. 
+    """
+    @property
+    def state_map(self):
+        return self.transitions.state_map
+
+    def sample(self, T, prefix=None, input=None, tag=None, with_noise=True):
+        """
+        Sample synthetic data from the model. Optionally, condition on a given
+        prefix (preceding discrete states and data).  
+
+        Parameters
+        ----------
+        T : int
+            number of time steps to sample
+
+        prefix : (zpre, xpre)
+            Optional prefix of discrete states (zpre) and continuous states (xpre)
+            zpre must be an array of integers taking values 0...num_states-1.
+            xpre must be an array of the same length that has preceding observations.
+
+        input : (T, input_dim) array_like
+            Optional inputs to specify for sampling
+
+        tag : object
+            Optional tag indicating which "type" of sampled data
+
+        with_noise : bool
+            Whether or not to sample data with noise.
+
+        Returns
+        -------
+        z_sample : array_like of type int
+            Sequence of sampled discrete states
+
+        x_sample : (T x observation_dim) array_like
+            Array of sampled data
+        """
+        K = self.K
+        D = (self.D,) if isinstance(self.D, int) else self.D
+        M = (self.M,) if isinstance(self.M, int) else self.M
+        assert isinstance(D, tuple)
+        assert isinstance(M, tuple)
+        assert T > 0
+
+        # Check the inputs
+        if input is not None:
+            assert input.shape == (T,) + M
+
+        # Get the type of the observations
+        dummy_data = self.observations.sample_x(0, np.empty(0,) + D)
+        dtype = dummy_data.dtype
+
+        # Initialize the data array
+        if prefix is None:
+            # No prefix is given.  Sample the initial state as the prefix.
+            pad = 1
+            z = np.zeros(T, dtype=int)
+            data = np.zeros((T,) + D, dtype=dtype)
+            input = np.zeros((T,) + M) if input is None else input
+            mask = np.ones((T,) + D, dtype=bool)
+            
+            # Sample the first state from the initial distribution
+            pi0 = np.exp(self.init_state_distn.log_initial_state_distn(data, input, mask, tag))
+            z[0] = npr.choice(self.K, p=pi0)
+            data[0] = self.observations.sample_x(z[0], data[:0], input=input[0], with_noise=with_noise)
+
+            # We only need to sample T-1 datapoints now
+            T = T - 1
+            
+        else:
+            # Check that the prefix is of the right type
+            zpre, xpre = prefix
+            pad = len(zpre)
+            assert zpre.dtype == int and zpre.min() >= 0 and zpre.max() < K
+            assert xpre.shape == (pad,) + D
+            
+            # Construct the states, data, inputs, and mask arrays
+            z = np.concatenate((zpre, np.zeros(T, dtype=int)))
+            data = np.concatenate((xpre, np.zeros((T,) + D, dtype)))
+            input = np.zeros((T+pad,) + M) if input is None else np.concatenate((np.zeros((pad,) + M), input))
+            mask = np.ones((T+pad,) + D, dtype=bool)
+
+        # Convert the discrete states to the range (1, ..., K_total)
+        m = self.state_map
+        K_total = len(m)
+        _, starts = np.unique(m, return_index=True)
+        z = starts[z]
+
+        # Fill in the rest of the data
+        for t in range(pad, pad+T):
+            Pt = np.exp(self.transitions.log_transition_matrices(data[t-1:t+1], input[t-1:t+1], mask=mask[t-1:t+1], tag=tag))[0]
+            z[t] = npr.choice(K_total, p=Pt[z[t-1]])
+            data[t] = self.observations.sample_x(m[z[t]], data[:t], input=input[t], tag=tag, with_noise=with_noise)
+
+        # Collapse the states
+        z = m[z]
+
+        # Return the whole data if no prefix is given.
+        # Otherwise, just return the simulated part.
+        if prefix is None:
+            return z, data
+        else:
+            return z[pad:], data[pad:]
+
+    @ensure_args_not_none
+    def expected_states(self, data, input=None, mask=None, tag=None):
+        m = self.state_map
+        log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
+        log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+        log_likes = self.observations.log_likelihoods(data, input, mask, tag)
+        Ez, Ezzp1, normalizer = hmm_expected_states(replicate(log_pi0, m), log_Ps, replicate(log_likes, m))
+
+        # Collapse the expected states
+        Ez = collapse(Ez, m)
+        Ezzp1 = collapse(collapse(Ezzp1, m, axis=2), m, axis=1)
+        return Ez, Ezzp1, normalizer
+
+    @ensure_args_not_none
+    def most_likely_states(self, data, input=None, mask=None, tag=None):
+        m = self.state_map
+        log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
+        log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+        log_likes = self.observations.log_likelihoods(data, input, mask, tag)
+        z_star = viterbi(replicate(log_pi0, m), log_Ps, replicate(log_likes, m))
+        return self.state_map[z_star]
+
+    @ensure_args_not_none
+    def filter(self, data, input=None, mask=None, tag=None):
+        m = self.state_map
+        log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
+        log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+        log_likes = self.observations.log_likelihoods(data, input, mask, tag)
+        pzp1 = hmm_filter(replicate(log_pi0, m), log_Ps, replicate(log_likes, m))
+        return collapse(pzp1, m)
+
+    @ensure_args_not_none
+    def posterior_sample(self, data, input=None, mask=None, tag=None):
+        m = self.state_map
+        log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
+        log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+        log_likes = self.observations.log_likelihoods(data, input, mask, tag)
+        z_smpl = hmm_sample(replicate(log_pi0, m), log_Ps, replicate(log_likes, m))
+        return self.state_map[z_smpl]
+
+    @ensure_args_not_none
+    def smooth(self, data, input=None, mask=None, tag=None):
+        """
+        Compute the mean observation under the posterior distribution
+        of latent discrete states.
+        """
+        m = self.state_map
+        Ez, _, _ = self.expected_states(data, input, mask)
+        return self.observations.smooth(Ez, data, input, tag)
+
+    @ensure_args_are_lists
+    def log_likelihood(self, datas, inputs=None, masks=None, tags=None):
+        """
+        Compute the log probability of the data under the current
+        model parameters.
+
+        :param datas: single array or list of arrays of data.
+        :return total log probability of the data.
+        """
+        m = self.state_map
+        ll = 0
+        for data, input, mask, tag in zip(datas, inputs, masks, tags):
+            log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
+            log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+            log_likes = self.observations.log_likelihoods(data, input, mask, tag)
+            ll += hmm_normalizer(replicate(log_pi0, m), log_Ps, replicate(log_likes, m))
+            assert np.isfinite(ll)
+        return ll
+
+    def expected_log_probability(self, expectations, datas, inputs=None, masks=None, tags=None):
+        """
+        Compute the log probability of the data under the current 
+        model parameters.
+        
+        :param datas: single array or list of arrays of data.
+        :return total log probability of the data.
+        """
+        raise NotImplementedError("Need to get raw expectations for the expected transition probability.")
+
+    def _fit_em(self, datas, inputs, masks, tags, num_em_iters=100, **kwargs):
+        """
+        Fit the parameters with expectation maximization.
+
+        E step: compute E[z_t] and E[z_t, z_{t+1}] with message passing;
+        M-step: analytical maximization of E_{p(z | x)} [log p(x, z; theta)].
+        """
+        lls = [self.log_probability(datas, inputs, masks, tags)]
+
+        pbar = trange(num_em_iters)
+        pbar.set_description("LP: {:.1f}".format(lls[-1]))
+        for itr in pbar:
+            # E step: compute expected latent states with current parameters
+            expectations = [self.expected_states(data, input, mask, tag) 
+                            for data, input, mask, tag in zip(datas, inputs, masks, tags)]
+
+            # E step: also sample the posterior for stochastic M step of transition model
+            samples = [self.posterior_sample(data, input, mask, tag)
+                       for data, input, mask, tag in zip(datas, inputs, masks, tags)]
+
+            # M step: maximize expected log joint wrt parameters
+            self.init_state_distn.m_step(expectations, datas, inputs, masks, tags, **kwargs)
+            self.transitions.m_step(expectations, datas, inputs, masks, tags, samples, **kwargs)
+            self.observations.m_step(expectations, datas, inputs, masks, tags, **kwargs)
+
+            # Store progress
+            lls.append(self.log_prior() + sum([ll for (_, _, ll) in expectations]))
+            pbar.set_description("LP: {:.1f}".format(lls[-1]))
+
+        return lls
+
+    @ensure_args_are_lists
+    def fit(self, datas, inputs=None, masks=None, tags=None, method="em", initialize=True, **kwargs):
+        _fitting_methods = dict(em=self._fit_em)
 
         if method not in _fitting_methods:
             raise Exception("Invalid method: {}. Options are {}".\

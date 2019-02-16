@@ -7,6 +7,7 @@ from autograd.scipy.linalg import block_diag
 from autograd import grad
 
 from scipy.optimize import linear_sum_assignment, minimize
+from scipy.special import gammaln, digamma, polygamma
 
 
 def compute_state_overlap(z1, z2, K1=None, K2=None):
@@ -199,13 +200,50 @@ def relu(x):
     return np.maximum(0, x)
 
 
+def replicate(x, state_map, axis=-1):
+    """
+    Replicate an array of shape (..., K) according to the given state map
+    to get an array of shape (..., R) where R is the total number of states.
+
+    Parameters
+    ----------
+    x : array_like, shape (..., K)
+        The array to be replicated.
+
+    state_map : array_like, shape (R,), int
+        The mapping from [0, K) -> [0, R)
+    """
+    assert state_map.ndim == 1
+    assert np.all(state_map >= 0) and np.all(state_map < x.shape[-1])
+    return np.take(x, state_map, axis=axis)
+
+def collapse(x, state_map, axis=-1):
+    """
+    Collapse an array of shape (..., R) to shape (..., K) by summing
+    columns that map to the same state in [0, K).
+
+    Parameters
+    ----------
+    x : array_like, shape (..., R)
+        The array to be collapsed.
+
+    state_map : array_like, shape (R,), int
+        The mapping from [0, K) -> [0, R)
+    """
+    R = x.shape[axis]
+    assert state_map.ndim == 1 and state_map.shape[0] == R
+    K = state_map.max() + 1
+    return np.concatenate([np.sum(np.take(x, np.where(state_map == k)[0], axis=axis), 
+                                  axis=axis, keepdims=True) 
+                           for k in range(K)], axis=axis)
+
+
 def generalized_newton_studentst_dof(E_tau, E_logtau, nu0=1, max_iter=100, nu_min=1e-3, nu_max=20, tol=1e-8, verbose=False):
     """
     Generalized Newton's method for the degrees of freedom parameter, nu, 
     of a Student's t distribution.  See the notebook in the doc/students_t
     folder for a complete derivation. 
     """
-    from scipy.special import digamma, polygamma
     delbo = lambda nu: 1/2 * (1 + np.log(nu/2)) - 1/2 * digamma(nu/2) + 1/2 * E_logtau - 1/2 * E_tau
     ddelbo = lambda nu: 1/(2 * nu) - 1/4 * polygamma(1, nu/2)
 
@@ -362,8 +400,33 @@ def fit_linear_regression(Xs, ys, weights=None,
         return W, b, sigmasq
     else:
         return W, sigmasq
-        
 
 
+def fit_negative_binomial_integer_r(xs, r_min=1, r_max=20):
+    """
+    Fit a negative binomial distribution NB(r, p) to data xs, 
+    under the constraint that the shape r is an integer.
 
+    The durations are 1 + a negative binomial random variable.
+    """
+    assert isinstance(xs, np.ndarray) and xs.ndim == 1 and xs.min() >= 1
+    xs -= 1
+    N = len(xs)
+    x_sum = np.sum(xs)
+    
+    p_star = lambda r: np.clip(x_sum / (N * r + x_sum), 1e-8, 1-1e-8)
+
+    def nb_marginal_likelihood(r):
+        # Compute the log likelihood of data with shape r and 
+        # MLE estimate p = sum(xs) / (N*r + sum(xs))
+        ll = np.sum(gammaln(xs + r)) - np.sum(gammaln(xs + 1)) - N * gammaln(r) 
+        ll += np.sum(xs * np.log(p_star(r))) + N * r * np.log(1 - p_star(r))
+        return ll
+
+    # Search for the optimal r. If variance of xs exceeds the mean, the MLE exists.
+    rs = np.arange(r_min, r_max+1)
+    mlls = [nb_marginal_likelihood(r) for r in rs]
+    r_star = rs[np.argmax(mlls)]
+    
+    return r_star, p_star(r_star)
 

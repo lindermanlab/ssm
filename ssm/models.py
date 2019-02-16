@@ -1,4 +1,4 @@
-from ssm.core import _HMM, _LDS, _SwitchingLDS
+from ssm.core import _HMM, _HSMM, _LDS, _SwitchingLDS
 
 from ssm.init_state_distns import InitialStateDistribution
 
@@ -9,7 +9,8 @@ from ssm.transitions import \
     RecurrentTransitions, \
     RecurrentOnlyTransitions, \
     RBFRecurrentTransitions, \
-    NeuralNetworkRecurrentTransitions
+    NeuralNetworkRecurrentTransitions, \
+    NegativeBinomialSemiMarkovTransitions
 
 from ssm.observations import \
     GaussianObservations, \
@@ -129,6 +130,69 @@ def HMM(K, D, M=0,
 
     # Make the HMM
     return _HMM(K, D, M, init_state_distn, transition_distn, observation_distn)
+
+
+
+def HSMM(K, D, M=0,
+        transitions="nb",
+        transition_kwargs=None,
+        observations="gaussian",
+        observation_kwargs=None,
+        **kwargs):
+    """
+    Construct an hidden semi-Markov model (HSMM) object with the appropriate observations 
+    and dynamics. 
+
+    :param K: number of discrete latent states
+    :param D: observation dimension
+    :param M: input dimension
+    :param observations: conditional distribution of the data 
+    :param recurrent: whether or not past observations influence transitions probabilities.
+    :param recurrent_only: if true, _only_ the past observations influence transitions. 
+    """
+
+    # Make the initial state distribution
+    init_state_distn = InitialStateDistribution(K, D, M=M)
+
+    # Make the transition model
+    transition_classes = dict(
+        nb=NegativeBinomialSemiMarkovTransitions,
+        )
+    if transitions not in transition_classes:
+        raise Exception("Invalid transition model: {}. Must be one of {}".
+            format(transitions, list(transition_classes.keys())))
+    
+    transition_kwargs = transition_kwargs or {}
+    transition_distn = transition_classes[transitions](K, D, M=M, **transition_kwargs)
+
+    # This is the master list of observation classes.  
+    # When you create a new observation class, add it here.
+    observation_classes = dict(
+        gaussian=GaussianObservations,
+        diagonal_gaussian=DiagonalGaussianObservations,
+        studentst=StudentsTObservations,
+        t=StudentsTObservations,
+        bernoulli=BernoulliObservations,
+        categorical=CategoricalObservations,
+        poisson=PoissonObservations,
+        vonmises=VonMisesObservations,
+        ar=AutoRegressiveObservations,
+        autoregressive=AutoRegressiveObservations,
+        independent_ar=IndependentAutoRegressiveObservations,
+        robust_ar=RobustAutoRegressiveObservations,
+        robust_autoregressive=RobustAutoRegressiveObservations,
+        )
+
+    observations = observations.lower()
+    if observations not in observation_classes:
+        raise Exception("Invalid observation model: {}. Must be one of {}".
+            format(observations, list(observation_classes.keys())))
+
+    observation_kwargs = observation_kwargs or {}
+    observation_distn = observation_classes[observations](K, D, M=M, **observation_kwargs)
+
+    # Make the HMM
+    return _HSMM(K, D, M, init_state_distn, transition_distn, observation_distn)
 
 
 def SLDS(N, K, D, M=0,
