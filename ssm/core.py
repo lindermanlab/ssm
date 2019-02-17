@@ -16,7 +16,7 @@ from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
     ensure_slds_args_not_none, ensure_variational_args_are_lists, \
     replicate, collapse
 
-class _HMM(object):
+class BaseHMM(object):
     """
     Base class for hidden Markov models.
 
@@ -368,7 +368,7 @@ class _HMM(object):
         return _fitting_methods[method](datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
 
 
-class _HSMM(_HMM):
+class BaseHSMM(BaseHMM):
     """
     Hidden semi-Markov model with non-geometric duration distributions.
     The trick is to expand the state space with "super states" and "sub states"
@@ -604,7 +604,7 @@ class _HSMM(_HMM):
         return _fitting_methods[method](datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
 
 
-class _SwitchingLDS(object):
+class BaseSwitchingLDS(object):
     """
     Switching linear dynamical system fit with 
     stochastic variational inference on the marginal model,
@@ -643,7 +643,7 @@ class _SwitchingLDS(object):
 
         # Now run a few iterations of EM on a ARHMM with the variational mean
         print("Initializing with an ARHMM using {} steps of EM.".format(num_em_iters))
-        arhmm = _HMM(self.K, self.D, self.M, 
+        arhmm = BaseHMM(self.K, self.D, self.M, 
                      copy.deepcopy(self.init_state_distn),
                      copy.deepcopy(self.transitions),
                      copy.deepcopy(self.dynamics))
@@ -995,7 +995,7 @@ class _SwitchingLDS(object):
             learning=False, **kwargs)
 
 
-class _LDS(_SwitchingLDS):
+class BaseLDS(BaseSwitchingLDS):
     """
     Switching linear dynamical system fit with 
     stochastic variational inference on the marginal model,

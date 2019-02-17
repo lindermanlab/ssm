@@ -1,4 +1,4 @@
-from ssm.core import _HMM, _HSMM, _LDS, _SwitchingLDS
+from ssm.core import BaseHMM, BaseHSMM, BaseLDS, BaseSwitchingLDS
 
 from ssm.init_state_distns import InitialStateDistribution
 
@@ -129,7 +129,7 @@ def HMM(K, D, M=0,
         else observation_classes[observations](K, D, M=M, **observation_kwargs)
 
     # Make the HMM
-    return _HMM(K, D, M, init_state_distn, transition_distn, observation_distn)
+    return BaseHMM(K, D, M, init_state_distn, transition_distn, observation_distn)
 
 
 
@@ -192,7 +192,7 @@ def HSMM(K, D, M=0,
     observation_distn = observation_classes[observations](K, D, M=M, **observation_kwargs)
 
     # Make the HMM
-    return _HSMM(K, D, M, init_state_distn, transition_distn, observation_distn)
+    return BaseHSMM(K, D, M, init_state_distn, transition_distn, observation_distn)
 
 
 def SLDS(N, K, D, M=0,
@@ -311,7 +311,7 @@ def SLDS(N, K, D, M=0,
         else emission_classes[emissions](N, K, D, M=M, single_subspace=single_subspace, **emission_kwargs)
 
     # Make the HMM
-    return _SwitchingLDS(N, K, D, M, init_state_distn, transition_distn, dynamics_distn, emission_distn)
+    return BaseSwitchingLDS(N, K, D, M, init_state_distn, transition_distn, dynamics_distn, emission_distn)
 
 
 def LDS(N, D, M=0,
@@ -392,6 +392,6 @@ def LDS(N, D, M=0,
 
 
     # Make the HMM
-    return _LDS(N, D, M, dynamics_distn, emission_distn)
+    return BaseLDS(N, D, M, dynamics_distn, emission_distn)
 
 
