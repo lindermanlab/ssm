@@ -26,9 +26,9 @@ def hmm_normalizer(log_pi0, log_Ps, ll):
     log_Ps = to_c(log_Ps)
     ll = to_c(ll)
 
-    forward_pass(log_pi0, log_Ps, ll, alphas)    
+    forward_pass(log_pi0, log_Ps, ll, alphas)
     return logsumexp(alphas[-1])
-    
+
 def _make_grad_hmm_normalizer(argnum, ans, log_pi0, log_Ps, ll):
     # Make sure everything is C contiguous and unboxed
     log_pi0 = to_c(log_pi0)
@@ -39,12 +39,12 @@ def _make_grad_hmm_normalizer(argnum, ans, log_pi0, log_Ps, ll):
     dlog_Ps= np.zeros_like(log_Ps)
     dll = np.zeros_like(ll)
     T, K = ll.shape
-    
+
     # Forward pass to get alphas
     alphas = np.zeros((T, K))
     forward_pass(log_pi0, log_Ps, ll, alphas)
     grad_hmm_normalizer(log_Ps, alphas, dlog_pi0, dlog_Ps, dll)
-    
+
     if argnum == 0:
         return lambda g: g * dlog_pi0
     if argnum == 1:
@@ -52,7 +52,7 @@ def _make_grad_hmm_normalizer(argnum, ans, log_pi0, log_Ps, ll):
     if argnum == 2:
         return lambda g: g * dll
 
-defvjp(hmm_normalizer, 
+defvjp(hmm_normalizer,
        partial(_make_grad_hmm_normalizer, 0),
        partial(_make_grad_hmm_normalizer, 1),
        partial(_make_grad_hmm_normalizer, 2))
@@ -71,17 +71,17 @@ def hmm_expected_states(log_pi0, log_Ps, ll):
     normalizer = logsumexp(alphas[-1])
 
     betas = np.zeros((T, K))
-    backward_pass(log_Ps, ll, betas)    
+    backward_pass(log_Ps, ll, betas)
 
     expected_states = alphas + betas
     expected_states -= logsumexp(expected_states, axis=1, keepdims=True)
     expected_states = np.exp(expected_states)
-    
+
     expected_joints = alphas[:-1,:,None] + betas[1:,None,:] + ll[1:,None,:] + log_Ps
     expected_joints -= expected_joints.max((1,2))[:,None, None]
     expected_joints = np.exp(expected_joints)
     expected_joints /= expected_joints.sum((1,2))[:,None,None]
-    
+
     return expected_states, expected_joints, normalizer
 
 
@@ -137,7 +137,7 @@ def viterbi(log_pi0, log_Ps, ll):
     by Matthew Johnson.
     """
     T, K = ll.shape
-    
+
     # Pass max-sum messages backward
     scores = np.zeros_like(ll)
     args = np.zeros_like(ll, dtype=int)
@@ -155,7 +155,7 @@ def viterbi(log_pi0, log_Ps, ll):
     return z
 
 
-""" 
+"""
 Block tridiagonal system operations:
 
 The following functions work on matrices of the form:
@@ -171,7 +171,7 @@ This is a banded Hermitian matrix, and scipy.linalg has fast
 solvers for such systems. The result is itself a banded matrix.
 
 The precision matrix of a linear dynamical system has exactly
-this form.  
+this form.
 """
 def bands_to_blocks(A_banded, lower=True):
     """
@@ -187,12 +187,12 @@ def bands_to_blocks(A_banded, lower=True):
 @primitive
 def blocks_to_bands(Ad, Aod, lower=True):
     """
-    Convert a block tridiagonal matrix to the banded matrix representation 
-    required for scipy banded solvers. 
+    Convert a block tridiagonal matrix to the banded matrix representation
+    required for scipy banded solvers.
 
     C.f. https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.solveh_banded.html
     """
-    assert Ad.ndim == 3  
+    assert Ad.ndim == 3
     assert Ad.shape[2] == Ad.shape[1]
     assert Aod.ndim == 3
     assert Aod.shape[0] == Ad.shape[0]-1
@@ -208,7 +208,7 @@ def _make_grad_blocks_to_bands(argnum, bands, Ad, Aod, lower=True):
     return lambda g: bands_to_blocks(g, lower=lower)[argnum]
 
 
-defvjp(blocks_to_bands, 
+defvjp(blocks_to_bands,
        partial(_make_grad_blocks_to_bands, 0),
        partial(_make_grad_blocks_to_bands, 1))
 
@@ -273,10 +273,10 @@ def vjp_solve_banded_A(C, l_and_u, A_banded, b, **kwargs):
         b_bar = solve_banded((u, l), transpose_banded((l, u), A_banded), C_bar)
         A_bar = np.zeros_like(A_banded)
         K = b.shape[1] if b.ndim == 2 else 1
-        _vjp_solve_banded_A(A_bar, 
-                            b_bar.reshape(-1, K), 
-                            C_bar.reshape(-1, K), 
-                            C.reshape(-1, K), 
+        _vjp_solve_banded_A(A_bar,
+                            b_bar.reshape(-1, K),
+                            C_bar.reshape(-1, K),
+                            C.reshape(-1, K),
                             u, A_banded)
         return A_bar
     return vjp
@@ -297,16 +297,16 @@ def vjp_solveh_banded_A(C, A_banded, b, lower=True, **kwargs):
     C = to_c(C)
     A_banded = to_c(A_banded)
     b = to_c(b)
-    
+
     def vjp(C_bar):
         b_bar = solveh_banded(A_banded, C_bar, lower=lower, **kwargs)
         A_bar = np.zeros_like(A_banded)
         K = b.shape[1] if b.ndim == 2 else 1
-        _vjp_solveh_banded_A(A_bar, 
-                             b_bar.reshape(-1, K), 
-                             C_bar.reshape(-1, K), 
-                             C.reshape(-1, K), 
-                             lower, 
+        _vjp_solveh_banded_A(A_bar,
+                             b_bar.reshape(-1, K),
+                             C_bar.reshape(-1, K),
+                             C.reshape(-1, K),
+                             lower,
                              A_banded)
 
         return A_bar
@@ -315,15 +315,15 @@ def vjp_solveh_banded_A(C, A_banded, b, lower=True, **kwargs):
 defvjp(solveh_banded, vjp_solveh_banded_A, vjp_solveh_banded_b)
 
 
-# LDS operations 
+# LDS operations
 def convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts):
     """
     Parameterize the LDS in terms of pairwise linear Gaussian dynamics
     and per-timestep Gaussian observations.
 
-        p(x_{1:T}; theta) 
-            = [prod_{t=1}^{T-1} N(x_{t+1} | A_t x_t + b_t, Q_t)] 
-                * [prod_{t=1}^T N(x_t | m_t, R_t)]  
+        p(x_{1:T}; theta)
+            = [prod_{t=1}^{T-1} N(x_{t+1} | A_t x_t + b_t, Q_t)]
+                * [prod_{t=1}^T N(x_t | m_t, R_t)]
 
     We can rewrite this as a Gaussian with a block tridiagonal precision
     matrix J.  The blocks of this matrix are:
@@ -334,9 +334,9 @@ def convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts):
 
     The linear term is h_t
 
-    h_t = -A_t.T Q_t^{-1} b_t + Q_{t-1}^{-1} b_{t-1} + R_t^{-1} m_t 
+    h_t = -A_t.T Q_t^{-1} b_t + Q_{t-1}^{-1} b_{t-1} + R_t^{-1} m_t
 
-    We parameterize the model in terms of 
+    We parameterize the model in terms of
 
     theta = {A_t, b_t, Q_t^{-1/2}}_{t=1}^{T-1},  {m_t, R_t^{-1/2}}_{t=1}^T
     """
@@ -466,4 +466,4 @@ def lds_mean(As, bs, Qi_sqrts, ms, Ri_sqrts):
     J_banded = blocks_to_bands(J_diag, J_lower_diag, lower=True)
 
     return solveh_banded(J_banded, h.ravel(), lower=True).reshape((T, D))
-    
+

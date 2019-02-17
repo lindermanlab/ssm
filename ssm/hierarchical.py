@@ -12,8 +12,8 @@ from ssm.util import ensure_args_are_lists
 
 class _Hierarchical(object):
     """
-    Base class for hierarchical models.  Maintains a parent class and a 
-    bunch of children with their own perturbed parameters. 
+    Base class for hierarchical models.  Maintains a parent class and a
+    bunch of children with their own perturbed parameters.
     """
     def __init__(self, base_class, *args, tags=(None,), lmbda=0.01, **kwargs):
         # Variance of child params around parent params
@@ -69,7 +69,7 @@ class _Hierarchical(object):
 
         # Optimize parent and child parameters at the same time with SGD
         optimizer = dict(sgd=sgd, adam=adam)[optimizer]
-        
+
         # expected log joint
         def _expected_log_joint(expectations):
             elbo = self.log_prior()
@@ -79,7 +79,7 @@ class _Hierarchical(object):
                 if hasattr(self.children[tag], 'log_initial_state_distn'):
                     log_pi0 = self.children[tag].log_initial_state_distn(data, input, mask, tag)
                     elbo += np.sum(expected_states[0] * log_pi0)
-                
+
                 if hasattr(self.children[tag], 'log_transition_matrices'):
                     log_Ps = self.children[tag].log_transition_matrices(data, input, mask, tag)
                     elbo += np.sum(expected_joints * log_Ps)
@@ -117,7 +117,7 @@ class HierarchicalObservations(_Hierarchical):
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         return self.children[tag].sample_x(z, xhist, input=input, tag=tag, with_noise=with_noise)
-    
+
     def smooth(self, expectations, data, input, tag):
         return self.children[tag].smooth(expectations, data, input, tag)
 

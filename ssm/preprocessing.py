@@ -13,7 +13,7 @@ def pca_with_imputation(D, datas, masks, num_iters=20):
     # Flatten the data and masks
     data = np.concatenate(datas)
     mask = np.concatenate(masks)
-    
+
     if np.any(~mask):
         # Fill in missing data with mean to start
         fulldata = data.copy()
@@ -24,7 +24,7 @@ def pca_with_imputation(D, datas, masks, num_iters=20):
             # Run PCA on imputed data
             pca = PCA(D)
             x = pca.fit_transform(fulldata)
-            
+
             # Fill in missing data with PCA predictions
             pred = pca.inverse_transform(x)
             fulldata[~mask] = pred[~mask]
@@ -86,7 +86,7 @@ def factor_analysis_with_imputation(D, datas, masks=None, num_iters=50):
         yhat = xhat.dot((C * S).T) + fa.mean
         assert np.allclose(y, yhat)
 
-    # Strip out the data from the factor analysis model, 
+    # Strip out the data from the factor analysis model,
     # update the emission matrix
     fa.regression.A = C * S
     fa.data_list = []
@@ -134,12 +134,12 @@ def trend_filter(data, npoly=1, nexp=0):
     for k in range(nexp):
         tau = T / (k+1)
         features[:, npoly+k] = np.exp(-t / tau)
-        
+
     lr.fit(features, data)
     trend = lr.predict(features)
     return data - trend
 
-def standardize(data, mask): 
+def standardize(data, mask):
     data2 = data.copy()
     data2[~mask] = np.nan
     m = np.nanmean(data2, axis=0)

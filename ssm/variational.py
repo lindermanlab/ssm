@@ -10,10 +10,10 @@ from ssm.util import ensure_variational_args_are_lists
 class VariationalPosterior(object):
     """
     Base class for a variational posterior distribution.
-    
+
         q(z; phi) \approx p(z | x, theta)
 
-    where z is a latent variable and x is the observed data. 
+    where z is a latent variable and x is the observed data.
 
     ## Reparameterization Gradients
     We assume that the variational posterior is "reparameterizable"
@@ -22,14 +22,14 @@ class VariationalPosterior(object):
     z ~ q(z; phi)  =d  eps ~ r(eps); z = f(eps; phi).
 
     where =d denotes equal in distirbution.  If this is the case,
-    we can rewrite 
+    we can rewrite
 
-    L(phi) = E_q(z; phi) [g(z)] = E_r(eps) [g(f(eps; phi))] 
+    L(phi) = E_q(z; phi) [g(z)] = E_r(eps) [g(f(eps; phi))]
 
-    and 
+    and
 
-    dL/dphi = E_r(eps) [d/dphi g(f(eps; phi))] 
-            approx 1/S sum_s [d/dphi g(f(eps_s; phi))]  
+    dL/dphi = E_r(eps) [d/dphi g(f(eps; phi))]
+            approx 1/S sum_s [d/dphi g(f(eps_s; phi))]
 
     where eps_s ~iid r(eps).  In practice, this Monte Carlo estimate
     of dL/dphi is lower variance than alternative approaches like
@@ -37,14 +37,14 @@ class VariationalPosterior(object):
 
     ## Amortization
     We also allow for "amortized variational inference," in which the
-    variational posterior parameters are a function of the data.  We 
-    write the posterior as 
+    variational posterior parameters are a function of the data.  We
+    write the posterior as
 
         q(z; x, phi) approx p(z | x, theta).
-    
-    
+
+
     ## Requirements
-    A variational posterior must support sampling and point-wise 
+    A variational posterior must support sampling and point-wise
     evaluation in order to be used for the reparameterization trick.
     """
     @ensure_variational_args_are_lists
@@ -78,11 +78,11 @@ class VariationalPosterior(object):
 
 class SLDSMeanFieldVariationalPosterior(VariationalPosterior):
     """
-    Mean field variational posterior for the continuous latent 
-    states of an SLDS.  
+    Mean field variational posterior for the continuous latent
+    states of an SLDS.
     """
     @ensure_variational_args_are_lists
-    def __init__(self, model, datas, 
+    def __init__(self, model, datas,
                  inputs=None, masks=None, tags=None,
                  initial_variance=0.01):
 
@@ -117,12 +117,12 @@ class SLDSMeanFieldVariationalPosterior(VariationalPosterior):
 
     def _initialize_variational_params(self, data, input, mask, tag):
         T = data.shape[0]
-        q_mu = self.model.emissions.invert(data, input=input, mask=mask, tag=tag)    
+        q_mu = self.model.emissions.invert(data, input=input, mask=mask, tag=tag)
         q_sigma_inv = np.log(self.initial_variance) * np.ones((T, self.D))
         return q_mu, q_sigma_inv
 
     def sample(self):
-        return [q_mu + np.sqrt(np.exp(q_sigma_inv)) * npr.randn(*q_mu.shape) 
+        return [q_mu + np.sqrt(np.exp(q_sigma_inv)) * npr.randn(*q_mu.shape)
                 for (q_mu, q_sigma_inv) in self.params]
 
     def log_density(self, sample):
@@ -140,13 +140,13 @@ class SLDSMeanFieldVariationalPosterior(VariationalPosterior):
 
 class SLDSTriDiagVariationalPosterior(VariationalPosterior):
     """
-    Gaussian variational posterior for the continuous latent 
-    states of an SLDS.  The Gaussian is constrained to have 
-    a block tri-diagonal inverse covariance matrix, as in a 
+    Gaussian variational posterior for the continuous latent
+    states of an SLDS.  The Gaussian is constrained to have
+    a block tri-diagonal inverse covariance matrix, as in a
     linear dynamical system.
     """
     @ensure_variational_args_are_lists
-    def __init__(self, model, datas, 
+    def __init__(self, model, datas,
                  inputs=None, masks=None, tags=None,
                  initial_variance=0.01):
 
@@ -184,14 +184,14 @@ class SLDSTriDiagVariationalPosterior(VariationalPosterior):
     @property
     def mean(self):
         return [lds_mean(*prms) for prms in self.params]
-    
+
     def _initialize_variational_params(self, data, input, mask, tag):
         T = data.shape[0]
         D = self.D
 
         # Initialize the mean with the linear model, if applicable
         ms = self.model.emissions.invert(data, input=input, mask=mask, tag=tag)
-        
+
         # Initialize with no covariance between adjacent time steps
         # NOTE: it's important to initialize A and Q to be nonzero,
         # otherwise the gradients wrt them are zero and they never

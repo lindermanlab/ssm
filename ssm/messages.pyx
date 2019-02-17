@@ -128,7 +128,7 @@ cpdef backward_sample(double[:,:,::1] log_Ps,
             lpz[k] = lpzp1[k] + alphas[t, k]
         Z = logsumexp(lpz)
 
-        # sample 
+        # sample
         acc = 0
         zs[t] = K-1
         for k in range(K):
