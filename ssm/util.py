@@ -7,13 +7,14 @@ from autograd.scipy.linalg import block_diag
 from autograd import grad
 
 from scipy.optimize import linear_sum_assignment, minimize
+from scipy.special import gammaln, digamma, polygamma
 
 
 def compute_state_overlap(z1, z2, K1=None, K2=None):
     assert z1.dtype == int and z2.dtype == int
     assert z1.shape == z2.shape
     assert z1.min() >= 0 and z2.min() >= 0
-    
+
     K1 = z1.max() + 1 if K1 is None else K1
     K2 = z2.max() + 1 if K2 is None else K2
 
@@ -28,10 +29,10 @@ def find_permutation(z1, z2, K1=None, K2=None):
     overlap = compute_state_overlap(z1, z2, K1=K1, K2=K2)
     K1, K2 = overlap.shape
     assert K1 <= K2, "Can only find permutation from more states to fewer"
-    
+
     tmp, perm = linear_sum_assignment(-overlap)
     assert np.all(tmp == np.arange(K1)), "All indices should have been matched!"
-    
+
     # Pad permutation if K1 < K2
     if K1 < K2:
         unused = np.array(list(set(np.arange(K2)) - set(perm)))
@@ -86,7 +87,7 @@ def random_rotation(n, theta=None):
 def ensure_args_are_lists(f):
     def wrapper(self, datas, inputs=None, masks=None, tags=None, **kwargs):
         datas = [datas] if not isinstance(datas, (list, tuple)) else datas
-        
+
         M = (self.M,) if isinstance(self.M, int) else self.M
         assert isinstance(M, tuple)
 
@@ -114,15 +115,15 @@ def ensure_variational_args_are_lists(f):
     def wrapper(self, arg0, datas, inputs=None, masks=None, tags=None, **kwargs):
         datas = [datas] if not isinstance(datas, (list, tuple)) else datas
 
-        try: 
+        try:
             M = (self.M,) if isinstance(self.M, int) else self.M
         except:
             # self does not have M if self is a variational posterior object
             # in that case, arg0 is a model, which does have an M parameter
             M = (arg0.M,) if isinstance(arg0.M, int) else arg0.M
-            
+
         assert isinstance(M, tuple)
-        
+
         if inputs is None:
             inputs = [np.zeros((data.shape[0],) + M) for data in datas]
         elif not isinstance(inputs, (list, tuple)):
@@ -199,13 +200,50 @@ def relu(x):
     return np.maximum(0, x)
 
 
+def replicate(x, state_map, axis=-1):
+    """
+    Replicate an array of shape (..., K) according to the given state map
+    to get an array of shape (..., R) where R is the total number of states.
+
+    Parameters
+    ----------
+    x : array_like, shape (..., K)
+        The array to be replicated.
+
+    state_map : array_like, shape (R,), int
+        The mapping from [0, K) -> [0, R)
+    """
+    assert state_map.ndim == 1
+    assert np.all(state_map >= 0) and np.all(state_map < x.shape[-1])
+    return np.take(x, state_map, axis=axis)
+
+def collapse(x, state_map, axis=-1):
+    """
+    Collapse an array of shape (..., R) to shape (..., K) by summing
+    columns that map to the same state in [0, K).
+
+    Parameters
+    ----------
+    x : array_like, shape (..., R)
+        The array to be collapsed.
+
+    state_map : array_like, shape (R,), int
+        The mapping from [0, K) -> [0, R)
+    """
+    R = x.shape[axis]
+    assert state_map.ndim == 1 and state_map.shape[0] == R
+    K = state_map.max() + 1
+    return np.concatenate([np.sum(np.take(x, np.where(state_map == k)[0], axis=axis),
+                                  axis=axis, keepdims=True)
+                           for k in range(K)], axis=axis)
+
+
 def generalized_newton_studentst_dof(E_tau, E_logtau, nu0=1, max_iter=100, nu_min=1e-3, nu_max=20, tol=1e-8, verbose=False):
     """
-    Generalized Newton's method for the degrees of freedom parameter, nu, 
+    Generalized Newton's method for the degrees of freedom parameter, nu,
     of a Student's t distribution.  See the notebook in the doc/students_t
-    folder for a complete derivation. 
+    folder for a complete derivation.
     """
-    from scipy.special import digamma, polygamma
     delbo = lambda nu: 1/2 * (1 + np.log(nu/2)) - 1/2 * digamma(nu/2) + 1/2 * E_logtau - 1/2 * E_tau
     ddelbo = lambda nu: 1/(2 * nu) - 1/4 * polygamma(1, nu/2)
 
@@ -214,13 +252,13 @@ def generalized_newton_studentst_dof(E_tau, E_logtau, nu0=1, max_iter=100, nu_mi
     for itr in range(max_iter):
         if abs(dnu) < tol:
             break
-            
+
         if nu < nu_min or nu > nu_max:
             warn("generalized_newton_studentst_dof fixed point grew beyond "
                  "bounds [{},{}].".format(nu_min, nu_max))
             nu = np.clip(nu, nu_min, nu_max)
             break
-        
+
         # Perform the generalized Newton update
         a = -nu**2 * ddelbo(nu)
         b = delbo(nu) - a / nu
@@ -229,26 +267,26 @@ def generalized_newton_studentst_dof(E_tau, E_logtau, nu0=1, max_iter=100, nu_mi
         nu = nu + dnu
 
     if itr == max_iter - 1:
-        warn("generalized_newton_studentst_dof failed to converge" 
+        warn("generalized_newton_studentst_dof failed to converge"
              "at tolerance {} in {} iterations.".format(tol, itr))
 
     return nu
 
-def fit_multiclass_logistic_regression(X, y, bias=None, K=None, W0=None, mu0=0, sigmasq0=1, 
+def fit_multiclass_logistic_regression(X, y, bias=None, K=None, W0=None, mu0=0, sigmasq0=1,
                                        verbose=False, maxiter=1000):
     """
-    Fit a multiclass logistic regression 
+    Fit a multiclass logistic regression
 
         y_i ~ Cat(softmax(W x_i))
 
-    y is a one hot vector in {0, 1}^K  
+    y is a one hot vector in {0, 1}^K
     x_i is a vector in R^D
     W is a matrix R^{K x D}
 
     The log likelihood is,
 
         L(W) = sum_i sum_k y_ik * w_k^T x_i - logsumexp(W x_i)
-    
+
     The prior is w_k ~ Norm(mu0, diag(sigmasq0)).
     """
     N, D = X.shape
@@ -287,21 +325,21 @@ def fit_multiclass_logistic_regression(X, y, bias=None, K=None, W0=None, mu0=0, 
         itr[0] += 1
         print("Iteration {} loss: {:.3f}".format(itr[0], loss(W_flat)))
 
-    result = minimize(loss, np.ravel(W0), jac=grad(loss), 
-                      method="BFGS", 
-                      callback=callback if verbose else None, 
+    result = minimize(loss, np.ravel(W0), jac=grad(loss),
+                      method="BFGS",
+                      callback=callback if verbose else None,
                       options=dict(maxiter=maxiter, disp=verbose))
 
     W = np.reshape(result.x, (K, D))
     return W
 
 
-def fit_linear_regression(Xs, ys, weights=None, 
-                          mu0=0, sigmasq0=1, alpha0=1, beta0=1, 
+def fit_linear_regression(Xs, ys, weights=None,
+                          mu0=0, sigmasq0=1, alpha0=1, beta0=1,
                           fit_intercept=True):
     """
     Fit a linear regression y_i ~ N(Wx_i + b, diag(S)) for W, b, S.
-    
+
     :param Xs: array or list of arrays
     :param ys: array or list of arrays
     :param fit_intercept:  if False drop b
@@ -315,7 +353,7 @@ def fit_linear_regression(Xs, ys, weights=None,
     assert all([X.shape[1] == D for X in Xs])
     assert all([y.shape[1] == P for y in ys])
     assert all([X.shape[0] == y.shape[0] for X, y in zip(Xs, ys)])
-    
+
     mu0 = mu0 * np.zeros((P, D))
     sigmasq0 = sigmasq0 * np.eye(D)
 
@@ -324,7 +362,7 @@ def fit_linear_regression(Xs, ys, weights=None,
         weights = weights if isinstance(weights, (list, tuple)) else [weights]
     else:
         weights = [np.ones(X.shape[0]) for X in Xs]
-    
+
     # Add weak prior on intercept
     if fit_intercept:
         mu0 = np.column_stack((mu0, np.zeros(P)))
@@ -338,8 +376,8 @@ def fit_linear_regression(Xs, ys, weights=None,
         X = np.column_stack((X, np.ones(X.shape[0]))) if fit_intercept else X
         J += np.dot(X.T * weight, X)
         h += np.dot(X.T * weight, y)
-    
-    # Solve for the MAP estimate    
+
+    # Solve for the MAP estimate
     W = np.linalg.solve(J, h).T
     if fit_intercept:
         W, b = W[:, :-1], W[:, -1]
@@ -347,7 +385,7 @@ def fit_linear_regression(Xs, ys, weights=None,
         b = 0
 
     # Compute the residual and the posterior variance
-    alpha = alpha0 
+    alpha = alpha0
     beta = beta0 * np.ones(P)
     for X, y, weight in zip(Xs, ys, weights):
         yhat = np.dot(X, W.T) + b
@@ -362,8 +400,33 @@ def fit_linear_regression(Xs, ys, weights=None,
         return W, b, sigmasq
     else:
         return W, sigmasq
-        
 
 
+def fit_negative_binomial_integer_r(xs, r_min=1, r_max=20):
+    """
+    Fit a negative binomial distribution NB(r, p) to data xs,
+    under the constraint that the shape r is an integer.
 
+    The durations are 1 + a negative binomial random variable.
+    """
+    assert isinstance(xs, np.ndarray) and xs.ndim == 1 and xs.min() >= 1
+    xs -= 1
+    N = len(xs)
+    x_sum = np.sum(xs)
+
+    p_star = lambda r: np.clip(x_sum / (N * r + x_sum), 1e-8, 1-1e-8)
+
+    def nb_marginal_likelihood(r):
+        # Compute the log likelihood of data with shape r and
+        # MLE estimate p = sum(xs) / (N*r + sum(xs))
+        ll = np.sum(gammaln(xs + r)) - np.sum(gammaln(xs + 1)) - N * gammaln(r)
+        ll += np.sum(xs * np.log(p_star(r))) + N * r * np.log(1 - p_star(r))
+        return ll
+
+    # Search for the optimal r. If variance of xs exceeds the mean, the MLE exists.
+    rs = np.arange(r_min, r_max+1)
+    mlls = [nb_marginal_likelihood(r) for r in rs]
+    r_star = rs[np.argmax(mlls)]
+
+    return r_star, p_star(r_star)
 

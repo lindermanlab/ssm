@@ -60,7 +60,7 @@ def test_multivariate_normal_logpdf_unique_params(D=10):
     shp = npr.randint(1, 10, size=leading_ndim)
     x = npr.randn(*shp, D)
     mu = npr.randn(*shp, D)
-    L = npr.randn(*shp, D, D)
+    L = npr.randn(*shp, D, D) + 1e-8 * np.eye(D)
     Sigma = np.matmul(L, np.swapaxes(L, -1, -2))
 
     ll1 = multivariate_normal_logpdf(x, mu, Sigma)

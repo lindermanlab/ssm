@@ -1,4 +1,4 @@
-from ssm.core import _HMM, _LDS, _SwitchingLDS
+from ssm.core import BaseHMM, BaseHSMM, BaseLDS, BaseSwitchingLDS
 
 from ssm.init_state_distns import InitialStateDistribution
 
@@ -9,7 +9,8 @@ from ssm.transitions import \
     RecurrentTransitions, \
     RecurrentOnlyTransitions, \
     RBFRecurrentTransitions, \
-    NeuralNetworkRecurrentTransitions
+    NeuralNetworkRecurrentTransitions, \
+    NegativeBinomialSemiMarkovTransitions
 
 from ssm.observations import \
     GaussianObservations, \
@@ -24,7 +25,7 @@ from ssm.observations import \
     RobustAutoRegressiveObservations, \
     RecurrentAutoRegressiveObservations, \
     RecurrentRobustAutoRegressiveObservations
-    
+
 from ssm.hierarchical import \
     HierarchicalInitialStateDistribution, \
     HierarchicalTransitions, \
@@ -58,15 +59,15 @@ def HMM(K, D, M=0,
         hierarchical_observation_tags=None,
         **kwargs):
     """
-    Construct an HMM object with the appropriate observations 
-    and dynamics. 
+    Construct an HMM object with the appropriate observations
+    and dynamics.
 
     :param K: number of discrete latent states
     :param D: observation dimension
     :param M: input dimension
-    :param observations: conditional distribution of the data 
+    :param observations: conditional distribution of the data
     :param recurrent: whether or not past observations influence transitions probabilities.
-    :param recurrent_only: if true, _only_ the past observations influence transitions. 
+    :param recurrent_only: if true, _only_ the past observations influence transitions.
     """
 
     # Make the initial state distribution
@@ -86,16 +87,16 @@ def HMM(K, D, M=0,
     if transitions not in transition_classes:
         raise Exception("Invalid transition model: {}. Must be one of {}".
             format(transitions, list(transition_classes.keys())))
-    
+
     transition_kwargs = transition_kwargs or {}
     transition_distn = \
-        HierarchicalTransitions(transition_classes[transitions], K, D, M=M, 
-                                tags=hierarchical_transition_tags, 
+        HierarchicalTransitions(transition_classes[transitions], K, D, M=M,
+                                tags=hierarchical_transition_tags,
                                 **transition_kwargs) \
         if hierarchical_transition_tags is not None \
         else transition_classes[transitions](K, D, M=M, **transition_kwargs)
 
-    # This is the master list of observation classes.  
+    # This is the master list of observation classes.
     # When you create a new observation class, add it here.
     is_recurrent = (transitions.lower() in ["recurrent", "recurrent_only", "nn_recurrent"])
     observation_classes = dict(
@@ -121,14 +122,77 @@ def HMM(K, D, M=0,
 
     observation_kwargs = observation_kwargs or {}
     observation_distn = \
-        HierarchicalObservations(observation_classes[observations], K, D, M=M, 
+        HierarchicalObservations(observation_classes[observations], K, D, M=M,
                                  tags=hierarchical_observation_tags,
                                  **observation_kwargs) \
         if hierarchical_observation_tags is not None \
         else observation_classes[observations](K, D, M=M, **observation_kwargs)
 
     # Make the HMM
-    return _HMM(K, D, M, init_state_distn, transition_distn, observation_distn)
+    return BaseHMM(K, D, M, init_state_distn, transition_distn, observation_distn)
+
+
+
+def HSMM(K, D, M=0,
+        transitions="nb",
+        transition_kwargs=None,
+        observations="gaussian",
+        observation_kwargs=None,
+        **kwargs):
+    """
+    Construct an hidden semi-Markov model (HSMM) object with the appropriate observations
+    and dynamics.
+
+    :param K: number of discrete latent states
+    :param D: observation dimension
+    :param M: input dimension
+    :param observations: conditional distribution of the data
+    :param recurrent: whether or not past observations influence transitions probabilities.
+    :param recurrent_only: if true, _only_ the past observations influence transitions.
+    """
+
+    # Make the initial state distribution
+    init_state_distn = InitialStateDistribution(K, D, M=M)
+
+    # Make the transition model
+    transition_classes = dict(
+        nb=NegativeBinomialSemiMarkovTransitions,
+        )
+    if transitions not in transition_classes:
+        raise Exception("Invalid transition model: {}. Must be one of {}".
+            format(transitions, list(transition_classes.keys())))
+
+    transition_kwargs = transition_kwargs or {}
+    transition_distn = transition_classes[transitions](K, D, M=M, **transition_kwargs)
+
+    # This is the master list of observation classes.
+    # When you create a new observation class, add it here.
+    observation_classes = dict(
+        gaussian=GaussianObservations,
+        diagonal_gaussian=DiagonalGaussianObservations,
+        studentst=StudentsTObservations,
+        t=StudentsTObservations,
+        bernoulli=BernoulliObservations,
+        categorical=CategoricalObservations,
+        poisson=PoissonObservations,
+        vonmises=VonMisesObservations,
+        ar=AutoRegressiveObservations,
+        autoregressive=AutoRegressiveObservations,
+        independent_ar=IndependentAutoRegressiveObservations,
+        robust_ar=RobustAutoRegressiveObservations,
+        robust_autoregressive=RobustAutoRegressiveObservations,
+        )
+
+    observations = observations.lower()
+    if observations not in observation_classes:
+        raise Exception("Invalid observation model: {}. Must be one of {}".
+            format(observations, list(observation_classes.keys())))
+
+    observation_kwargs = observation_kwargs or {}
+    observation_distn = observation_classes[observations](K, D, M=M, **observation_kwargs)
+
+    # Make the HMM
+    return BaseHSMM(K, D, M, init_state_distn, transition_distn, observation_distn)
 
 
 def SLDS(N, K, D, M=0,
@@ -144,17 +208,17 @@ def SLDS(N, K, D, M=0,
          single_subspace=True,
          **kwargs):
     """
-    Construct an SLDS object with the appropriate observations, latent states, and dynamics. 
+    Construct an SLDS object with the appropriate observations, latent states, and dynamics.
 
     :param N: observation dimension
     :param K: number of discrete latent states
     :param D: latent dimension
     :param M: input dimension
-    :param observations: conditional distribution of the data 
+    :param observations: conditional distribution of the data
     :param robust_dynamics: if true, continuous latent states have Student's t noise.
     :param recurrent: whether or not past observations influence transitions probabilities.
-    :param recurrent_only: if true, _only_ the past observations influence transitions. 
-    :param single_subspace: if true, all discrete states share the same mapping from 
+    :param recurrent_only: if true, _only_ the past observations influence transitions.
+    :param single_subspace: if true, all discrete states share the same mapping from
         continuous latent states to observations.
     """
     # Make the initial state distribution
@@ -176,10 +240,10 @@ def SLDS(N, K, D, M=0,
     if transitions not in transition_classes:
         raise Exception("Invalid transition model: {}. Must be one of {}".
             format(transitions, list(transition_classes.keys())))
-    
+
     transition_kwargs = transition_kwargs or {}
     transition_distn = \
-        HierarchicalTransitions(transition_classes[transitions], K, D, M, 
+        HierarchicalTransitions(transition_classes[transitions], K, D, M,
                                 tags=hierarchical_transition_tags,
                                 **transition_kwargs) \
         if hierarchical_transition_tags is not None\
@@ -201,16 +265,16 @@ def SLDS(N, K, D, M=0,
 
     dynamics_kwargs = dynamics_kwargs or {}
     dynamics_distn = \
-        HierarchicalObservations(dynamics_classes[dynamics], K, D, M, 
+        HierarchicalObservations(dynamics_classes[dynamics], K, D, M,
                                  tags=hierarchical_dynamics_tags,
                                  **dynamics_kwargs) \
         if hierarchical_dynamics_tags is not None \
         else dynamics_classes[dynamics](K, D, M=M, **dynamics_kwargs)
 
-    # Make the emission distn    
+    # Make the emission distn
     emission_classes = dict(
         gaussian=GaussianEmissions,
-        gaussian_id=GaussianIdentityEmissions, 
+        gaussian_id=GaussianIdentityEmissions,
         gaussian_nn=GaussianNeuralNetworkEmissions,
         studentst=StudentsTEmissions,
         studentst_id=StudentsTIdentityEmissions,
@@ -239,15 +303,15 @@ def SLDS(N, K, D, M=0,
 
     emission_kwargs = emission_kwargs or {}
     emission_distn = \
-        HierarchicalEmissions(emission_classes[emissions], N, K, D, M, 
-                              tags=hierarchical_emission_tags, 
+        HierarchicalEmissions(emission_classes[emissions], N, K, D, M,
+                              tags=hierarchical_emission_tags,
                               single_subspace=single_subspace,
                               **emission_kwargs) \
         if hierarchical_emission_tags is not None \
         else emission_classes[emissions](N, K, D, M=M, single_subspace=single_subspace, **emission_kwargs)
 
     # Make the HMM
-    return _SwitchingLDS(N, K, D, M, init_state_distn, transition_distn, dynamics_distn, emission_distn)
+    return BaseSwitchingLDS(N, K, D, M, init_state_distn, transition_distn, dynamics_distn, emission_distn)
 
 
 def LDS(N, D, M=0,
@@ -259,13 +323,13 @@ def LDS(N, D, M=0,
         hierarchical_emission_tags=None,
         **kwargs):
     """
-    Construct an LDS object with the appropriate observations, latent states, and dynamics. 
+    Construct an LDS object with the appropriate observations, latent states, and dynamics.
     Currently, this uses a lot of the same code path as the SLDS.
 
     :param N: observation dimension
     :param D: latent dimension
     :param M: input dimension
-    :param observations: conditional distribution of the data 
+    :param observations: conditional distribution of the data
     :param robust_dynamics: if true, continuous latent states have Student's t noise.
     """
     # Make the dynamics distn
@@ -282,16 +346,16 @@ def LDS(N, D, M=0,
 
     dynamics_kwargs = dynamics_kwargs or {}
     dynamics_distn = \
-        HierarchicalDynamics(dynamics_classes[dynamics], 1, D, M, 
+        HierarchicalDynamics(dynamics_classes[dynamics], 1, D, M,
                              tags=hierarchical_dynamics_tags,
                              **dynamics_kwargs) \
         if hierarchical_dynamics_tags is not None \
         else dynamics_classes[dynamics](1, D, M=M, **dynamics_kwargs)
 
-    # Make the emission distn    
+    # Make the emission distn
     emission_classes = dict(
         gaussian=GaussianEmissions,
-        gaussian_id=GaussianIdentityEmissions, 
+        gaussian_id=GaussianIdentityEmissions,
         gaussian_nn=GaussianNeuralNetworkEmissions,
         studentst=StudentsTEmissions,
         studentst_id=StudentsTIdentityEmissions,
@@ -320,7 +384,7 @@ def LDS(N, D, M=0,
 
     emission_kwargs = emission_kwargs or {}
     emission_distn = \
-        HierarchicalEmissions(emission_classes[emissions], N, 1, D, M, 
+        HierarchicalEmissions(emission_classes[emissions], N, 1, D, M,
                               tags=hierarchical_emission_tags,
                               **emission_kwargs) \
         if hierarchical_emission_tags is not None \
@@ -328,6 +392,6 @@ def LDS(N, D, M=0,
 
 
     # Make the HMM
-    return _LDS(N, D, M, dynamics_distn, emission_distn)
+    return BaseLDS(N, D, M, dynamics_distn, emission_distn)
 
 

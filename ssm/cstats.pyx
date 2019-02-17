@@ -8,7 +8,7 @@ cimport numpy as np
 
 from cython.parallel import prange
 
-# Cython functions for computing sufficient statistics 
+# Cython functions for computing sufficient statistics
 # of t-distributed AR models
 cpdef robust_ar_statistics(double[:, ::1] Ez,
                            double[:, :, ::1] tau,
@@ -16,8 +16,8 @@ cpdef robust_ar_statistics(double[:, ::1] Ez,
                            double[:, ::1] y,
                            double[:, :, :, ::1] J,
                            double[:, :, ::1] h):
-    
-    cdef int t, T, k, K, d, D, m, n, N 
+
+    cdef int t, T, k, K, d, D, m, n, N
     T = Ez.shape[0]
     K = Ez.shape[1]
     D = tau.shape[2]
@@ -31,13 +31,13 @@ cpdef robust_ar_statistics(double[:, ::1] Ez,
                         for n in range(N):
                             J[k, d, m, n] += Ez[t, k] * tau[t, k, d] * x[t, m] * x[t, n]
 
-                        h[k, d, m] += Ez[t, k] * tau[t, k, d] * x[t, m] * y[t, d]                
+                        h[k, d, m] += Ez[t, k] * tau[t, k, d] * x[t, m] * y[t, d]
 
 
 # Cython functions to convert between banded and block tridiagonal matrices
 cpdef _blocks_to_bands_lower(double[:,:,::1] Ad, double[:, :, ::1] Aod):
     """
-    Convert a block tridiagonal matrix to the banded matrix representation 
+    Convert a block tridiagonal matrix to the banded matrix representation
     required for scipy banded solvers. We are using the "lower form."
 
     C.f. https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.solveh_banded.html
@@ -60,8 +60,8 @@ cpdef _blocks_to_bands_lower(double[:,:,::1] Ad, double[:, :, ::1] Aod):
                 drow = i % D
 
                 if trow >= T:
-                  continue 
-                
+                  continue
+
                 if t == trow:
                     L[u, j] = Ad[t, drow, d]
                 elif t == trow - 1:
@@ -73,7 +73,7 @@ cpdef _blocks_to_bands_lower(double[:,:,::1] Ad, double[:, :, ::1] Aod):
 
 cpdef _blocks_to_bands_upper(double[:,:,::1] Ad, double[:, :, ::1] Aod):
     """
-    Convert a block tridiagonal matrix to the banded matrix representation 
+    Convert a block tridiagonal matrix to the banded matrix representation
     required for scipy banded solvers. We are using the "upper form."
 
     C.f. https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.solveh_banded.html
@@ -97,7 +97,7 @@ cpdef _blocks_to_bands_upper(double[:,:,::1] Ad, double[:, :, ::1] Aod):
                 # Convert i into trow, drow indices
                 trow = i // D
                 drow = i % D
-                
+
                 if trow >= T:
                     continue
 
@@ -139,8 +139,8 @@ cpdef _bands_to_blocks_lower(double[:, ::1] A_banded):
                 drow = i % D
 
                 if trow >= T:
-                  continue 
-                
+                  continue
+
                 if t == trow:
                     Ad[t, drow, d] = A_banded[u, j]
                 elif t == trow - 1:
@@ -184,7 +184,7 @@ cpdef _bands_to_blocks_upper(double[:,::1] A_banded):
                 # Convert i into trow, drow indices
                 trow = i // D
                 drow = i % D
-                
+
                 if trow >= T:
                     continue
 
@@ -212,7 +212,7 @@ cpdef _transpose_banded(int l, int u, double[:, ::1] A_banded):
 
     for d in range(D):
         for j in range(N):
-            # Writing entry from 
+            # Writing entry from
             # A.T[i, j] = A[j, i] = A_banded[u + j - i, i] = A_banded[u + l - D] = A_banded[D - 1 - d]
             i = d + j - l
             if i < 0 or i >= N:
@@ -223,8 +223,8 @@ cpdef _transpose_banded(int l, int u, double[:, ::1] A_banded):
     return np.asarray(A_banded_T)
 
 
-cpdef vjp_cholesky_banded_lower(double[:, ::1] L_bar, 
-                                double[:, ::1] L_banded, 
+cpdef vjp_cholesky_banded_lower(double[:, ::1] L_bar,
+                                double[:, ::1] L_banded,
                                 double[:, ::1] A_banded,
                                 double[:, ::1] A_bar):
     """
@@ -232,7 +232,7 @@ cpdef vjp_cholesky_banded_lower(double[:, ::1] L_bar,
 
     NOTE: L_bar is updated in place!
     """
-    
+
     cdef int D, N, i, j, k
     D = A_banded.shape[0]
     N = A_banded.shape[1]
@@ -257,8 +257,8 @@ cpdef vjp_cholesky_banded_lower(double[:, ::1] L_bar,
 cpdef _vjp_solve_banded_A(double[:, ::1] A_bar,
                           double[:, ::1] b_bar,
                           double[:, ::1] C_bar,
-                          double[:, ::1] C, 
-                          int u, 
+                          double[:, ::1] C,
+                          int u,
                           double[:, ::1] A_banded):
 
     cdef int D, N, K, d, j, i, k
@@ -279,8 +279,8 @@ cpdef _vjp_solve_banded_A(double[:, ::1] A_bar,
 cpdef _vjp_solveh_banded_A(double[:, ::1] A_bar,
                            double[:, ::1] b_bar,
                            double[:, ::1] C_bar,
-                           double[:, ::1] C, 
-                           bint lower, 
+                           double[:, ::1] C,
+                           bint lower,
                            double[:, ::1] A_banded):
 
     cdef int D, N, K, d, j, i, k
@@ -292,7 +292,7 @@ cpdef _vjp_solveh_banded_A(double[:, ::1] A_bar,
     # Fill in the gradients of the banded matrix
     for j in range(N):
         for d in range(D):
-            i = d + j if lower else d + j - D + 1 
+            i = d + j if lower else d + j - D + 1
             if i < 0 or i >= N:
                 continue
 

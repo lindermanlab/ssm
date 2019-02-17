@@ -9,7 +9,7 @@ def flatten_to_dim(X, d):
     """
     Flatten an array of dimension k + d into an array of dimension 1 + d.
 
-    Example: 
+    Example:
         X = npr.rand(10, 5, 2, 2)
         flatten_to_dim(X, 4).shape # (10, 5, 2, 2)
         flatten_to_dim(X, 3).shape # (10, 5, 2, 2)
@@ -27,17 +27,17 @@ def flatten_to_dim(X, d):
     Returns
     -------
     flat_X : array_like
-        The input X flattened into an array dimension d (if X.ndim == d) 
+        The input X flattened into an array dimension d (if X.ndim == d)
         or d+1 (if X.ndim > d)
     """
     assert X.ndim >= d
     assert d > 0
     return np.reshape(X[None, ...], (-1,) + X.shape[-d:])
-    
+
 
 def batch_mahalanobis(L, x):
     """
-    Compute the squared Mahalanobis distance. 
+    Compute the squared Mahalanobis distance.
     :math:`x^T M^{-1} x` for a factored :math:`M = LL^T`.
 
     Copied from PyTorch torch.distributions.multivariate_normal.
@@ -66,12 +66,12 @@ def batch_mahalanobis(L, x):
 def _multivariate_normal_logpdf(data, mus, Sigmas, Ls=None):
     """
     Compute the log probability density of a multivariate Gaussian distribution.
-    This will broadcast as long as data, mus, Sigmas have the same (or at 
-    least be broadcast compatible along the) leading dimensions. 
+    This will broadcast as long as data, mus, Sigmas have the same (or at
+    least be broadcast compatible along the) leading dimensions.
 
     Parameters
     ----------
-    data : array_like (..., D) 
+    data : array_like (..., D)
         The points at which to evaluate the log density
 
     mus : array_like (..., D)
@@ -103,19 +103,19 @@ def _multivariate_normal_logpdf(data, mus, Sigmas, Ls=None):
     L_diag = np.reshape(Ls, Ls.shape[:-2] + (-1,))[..., ::D + 1]     # (..., D)
     half_log_det = np.sum(np.log(abs(L_diag)), axis=-1)              # (...,)
     lp = lp - 0.5 * D * np.log(2 * np.pi) - half_log_det             # (...,)
-    
+
     return lp
 
 
 def multivariate_normal_logpdf(data, mus, Sigmas, mask=None):
     """
     Compute the log probability density of a multivariate Gaussian distribution.
-    This will broadcast as long as data, mus, Sigmas have the same (or at 
-    least compatible) leading dimensions. 
+    This will broadcast as long as data, mus, Sigmas have the same (or at
+    least compatible) leading dimensions.
 
     Parameters
     ----------
-    data : array_like (..., D) 
+    data : array_like (..., D)
         The points at which to evaluate the log density
 
     mus : array_like (..., D)
@@ -142,14 +142,14 @@ def multivariate_normal_logpdf(data, mus, Sigmas, mask=None):
         return _multivariate_normal_logpdf(data, mus, Sigmas)
 
     # Otherwise we need to separate the data into sets with the same mask,
-    # since each one will entail a different covariance matrix. 
-    # 
-    # First, determine the output shape. Allow mus and Sigmas to 
-    # have different shapes; e.g. many Gaussians with the same 
+    # since each one will entail a different covariance matrix.
+    #
+    # First, determine the output shape. Allow mus and Sigmas to
+    # have different shapes; e.g. many Gaussians with the same
     # covariance but different means.
     shp1 = np.broadcast(data, mus).shape[:-1]
     shp2 = np.broadcast(data[..., None], Sigmas).shape[:-2]
-    assert len(shp1) == len(shp2) 
+    assert len(shp1) == len(shp2)
     shp = tuple(max(s1, s2) for s1, s2 in zip(shp1, shp2))
 
     # Broadcast the data into the full shape
@@ -198,12 +198,12 @@ def multivariate_normal_logpdf(data, mus, Sigmas, mask=None):
 def diagonal_gaussian_logpdf(data, mus, sigmasqs, mask=None):
     """
     Compute the log probability density of a Gaussian distribution with
-    a diagonal covariance.  This will broadcast as long as data, mus, 
-    sigmas have the same (or at least compatible) leading dimensions. 
+    a diagonal covariance.  This will broadcast as long as data, mus,
+    sigmas have the same (or at least compatible) leading dimensions.
 
     Parameters
     ----------
-    data : array_like (..., D) 
+    data : array_like (..., D)
         The points at which to evaluate the log density
 
     mus : array_like (..., D)
@@ -236,12 +236,12 @@ def diagonal_gaussian_logpdf(data, mus, sigmasqs, mask=None):
 def independent_studentst_logpdf(data, mus, sigmasqs, nus, mask=None):
     """
     Compute the log probability density of a Gaussian distribution with
-    a diagonal covariance.  This will broadcast as long as data, mus, 
-    sigmas have the same (or at least compatible) leading dimensions. 
+    a diagonal covariance.  This will broadcast as long as data, mus,
+    sigmas have the same (or at least compatible) leading dimensions.
 
     Parameters
     ----------
-    data : array_like (..., D) 
+    data : array_like (..., D)
         The points at which to evaluate the log density
 
     mus : array_like (..., D)
@@ -279,12 +279,12 @@ def independent_studentst_logpdf(data, mus, sigmasqs, nus, mask=None):
 def bernoulli_logpdf(data, logit_ps, mask=None):
     """
     Compute the log probability density of a Bernoulli distribution.
-    This will broadcast as long as data and logit_ps have the same 
-    (or at least compatible) leading dimensions. 
+    This will broadcast as long as data and logit_ps have the same
+    (or at least compatible) leading dimensions.
 
     Parameters
     ----------
-    data : array_like (..., D) 
+    data : array_like (..., D)
         The points at which to evaluate the log density
 
     logit_ps : array_like (..., D)
@@ -306,7 +306,7 @@ def bernoulli_logpdf(data, logit_ps, mask=None):
     # Check mask
     mask = mask if mask is not None else np.ones_like(data, dtype=bool)
     assert mask.shape == data.shape
-    
+
     # Evaluate log probability
     # log Pr(x | p) = x * log(p) + (1-x) * log(1-p)
     #               = x * log(p / (1-p)) + log(1-p)
@@ -324,17 +324,17 @@ def bernoulli_logpdf(data, logit_ps, mask=None):
     m = np.maximum(0, logit_ps)
     lls = data * logit_ps - m - np.log(np.exp(-m) + np.exp(logit_ps - m))
     return np.sum(lls * mask, axis=-1)
-    
+
 
 def poisson_logpdf(data, lambdas, mask=None):
     """
-    Compute the log probability density of a Poisson distribution.  
-    This will broadcast as long as data and lambdas have the same 
-    (or at least compatible) leading dimensions. 
+    Compute the log probability density of a Poisson distribution.
+    This will broadcast as long as data and lambdas have the same
+    (or at least compatible) leading dimensions.
 
     Parameters
     ----------
-    data : array_like (..., D) 
+    data : array_like (..., D)
         The points at which to evaluate the log density
 
     lambdas : array_like (..., D)
@@ -363,9 +363,9 @@ def poisson_logpdf(data, lambdas, mask=None):
 
 def categorical_logpdf(data, logits, mask=None):
     """
-    Compute the log probability density of a categorical distribution.  
-    This will broadcast as long as data and logits have the same 
-    (or at least compatible) leading dimensions. 
+    Compute the log probability density of a categorical distribution.
+    This will broadcast as long as data and logits have the same
+    (or at least compatible) leading dimensions.
 
     Parameters
     ----------
@@ -401,9 +401,9 @@ def categorical_logpdf(data, logits, mask=None):
 
 def vonmises_logpdf(data, mus, kappas, mask=None):
     """
-    Compute the log probability density of a von Mises distribution.  
-    This will broadcast as long as data, mus, and kappas have the same 
-    (or at least compatible) leading dimensions. 
+    Compute the log probability density of a von Mises distribution.
+    This will broadcast as long as data, mus, and kappas have the same
+    (or at least compatible) leading dimensions.
 
     Parameters
     ----------
@@ -438,6 +438,6 @@ def vonmises_logpdf(data, mus, kappas, mask=None):
     # Check mask
     mask = mask if mask is not None else np.ones_like(data, dtype=bool)
     assert mask.shape == data.shape
-    
+
     ll = kappas * np.cos(data - mus) - np.log(2 * np.pi) - np.log(i0(kappas))
     return np.sum(ll * mask, axis=-1)

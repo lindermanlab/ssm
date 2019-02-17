@@ -1,9 +1,9 @@
 """
-Single step of a variety of optimization routines. 
+Single step of a variety of optimization routines.
 Modified from autograd.misc.optimizers.
 
 The function being optimized must take two arguments,
-an input value and an iteration number.  
+an input value and an iteration number.
 """
 from functools import partial
 from warnings import warn
@@ -31,7 +31,7 @@ def convex_combination(curr, target, alpha):
 def unflatten_optimizer_step(step):
     """
     Wrap an optimizer step function that operates on flat 1D arrays
-    with a version that handles trees of nested containers, 
+    with a version that handles trees of nested containers,
     i.e. (lists/tuples/dicts), with arrays/scalars at the leaves.
     """
     @wraps(step)
@@ -86,7 +86,7 @@ def _generic_sgd(method, loss, x0, callback=None, num_iters=200, step_size=0.1, 
     Generic stochastic gradient descent step.
     """
     step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[method]
-    
+
     # Initialize outputs
     x, losses, grads, state = x0, [], [], None
     for itr in range(num_iters):
@@ -102,7 +102,7 @@ def _generic_sgd(method, loss, x0, callback=None, num_iters=200, step_size=0.1, 
 
 def _generic_minimize(method, loss, x0, verbose=False, num_iters=1000):
     """
-    Minimize a given loss function with scipy.optimize.minimize.  
+    Minimize a given loss function with scipy.optimize.minimize.
     """
     # Flatten the loss
     _x0, unflatten = flatten(x0)
@@ -119,9 +119,9 @@ def _generic_minimize(method, loss, x0, verbose=False, num_iters=1000):
 
     # Call the optimizer.
     # HACK: Pass in -1 as the iteration.
-    result = minimize(_objective, _x0, args=(-1,), jac=grad(_objective), 
-                      method=method, 
-                      callback=callback if verbose else None, 
+    result = minimize(_objective, _x0, args=(-1,), jac=grad(_objective),
+                      method=method,
+                      callback=callback if verbose else None,
                       options=dict(maxiter=num_iters, disp=verbose))
     if verbose:
         print("{} completed with message: \n{}".format(method, result.message))
