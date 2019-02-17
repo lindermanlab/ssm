@@ -7,6 +7,7 @@ Currently, it supports:
 - Hidden Markov Models (HMM)
 - Auto-regressive HMMs (ARHMM)
 - Input-output HMMs (IOHMM)
+- Hidden Semi-Markov Models (HSMM)
 - Linear Dynamical Systems (LDS)
 - Switching Linear Dynamical Systems (SLDS)
 - Recurrent SLDS (rSLDS)
