@@ -926,7 +926,7 @@ class IndependentAutoRegressiveObservations(_AutoRegressiveObservationsBase):
     @property
     def As(self):
         return np.array([
-                np.column_stack([np.diag(Ak[:,l] for l in range(self.lags))])
+                np.column_stack([np.diag(Ak[:,l]) for l in range(self.lags)])
             for Ak in self._As
         ])
 
@@ -1035,7 +1035,7 @@ class IndependentAutoRegressiveObservations(_AutoRegressiveObservationsBase):
                     self.As[k, d] = 1.0
                     self.Vs[k, d] = 0
                     self.bs[k, d] = 0
-                    self.log_sigmasq[k, d] = 0
+                    self._log_sigmasq[k, d] = 0
                     continue
 
                 # Solve for the most likely A,V,b (no prior)
@@ -1055,22 +1055,44 @@ class IndependentAutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, As, bs, sigmas = self.D, self.As, self.bs, self.sigmasq
+
+        # Sample the initial condition
         if xhist.shape[0] < self.lags:
             sigma_init = self.sigmasq_init[z] if with_noise else 0
             return self.mu_init[z] + np.sqrt(sigma_init) * npr.randn(D)
-        else:
-            mu = bs[z].copy()
-            for l in range(self.lags):
-                mu += As[z,:,l] * xhist[-l-1]
 
-            sigma = sigmas[z] if with_noise else 0
-            return mu + np.sqrt(sigma) * npr.randn(D)
+        # Otherwise sample the AR model
+        muz = bs[z].copy()
+        for lag in range(self.lags):
+            muz += As[z, :, lag] * xhist[-lag - 1]
+
+        sigma = sigmas[z] if with_noise else 0
+        return muz + np.sqrt(sigma) * npr.randn(D)
 
 
 # Robust autoregressive models with diagonal Student's t noise
-class RobustAutoRegressiveObservations(AutoRegressiveObservations):
+class _RobustAutoRegressiveObservationsMixin(object):
+    """
+    Mixin for AR models where the noise is distributed according to a
+    multivariate t distribution,
+
+        epsilon ~ t(0, Sigma, nu)
+
+    which is equivalent to,
+
+        tau ~ Gamma(nu/2, nu/2)
+        epsilon | tau ~ N(0, Sigma / tau)
+
+    We use this equivalence to perform the M step (update of Sigma and tau)
+    via an inner expectation maximization algorithm.
+
+    This mixin mus be used in conjunction with either AutoRegressiveObservations or
+    AutoRegressiveDiagonalNoiseObservations, which provides the parameterization for
+    Sigma.  The mixin does not capitalize on structure in Sigma, so it will pay
+    a small complexity penalty when used in conjunction with the diagonal noise model.
+    """
     def __init__(self, K, D, M=0, lags=1):
-        super(RobustAutoRegressiveObservations, self).__init__(K, D, M=M, lags=lags)
+        super(_RobustAutoRegressiveObservationsMixin, self).__init__(K, D, M=M, lags=lags)
         self._log_nus = np.log(4) * np.ones(K)
 
     @property
@@ -1079,15 +1101,15 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
 
     @property
     def params(self):
-        return super(RobustAutoRegressiveObservations, self).params + (self._log_nus,)
+        return super(_RobustAutoRegressiveObservationsMixin, self).params + (self._log_nus,)
 
     @params.setter
     def params(self, value):
         self._log_nus = value[-1]
-        super(RobustAutoRegressiveObservations, self.__class__).params.fset(self, value[:-1])
+        super(_RobustAutoRegressiveObservationsMixin, self.__class__).params.fset(self, value[:-1])
 
     def permute(self, perm):
-        super(RobustAutoRegressiveObservations, self).permute(perm)
+        super(_RobustAutoRegressiveObservationsMixin, self).permute(perm)
         self._log_nus = self._log_nus[perm]
 
     def log_likelihoods(self, data, input, mask, tag):
@@ -1130,41 +1152,46 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
             # E Step: compute expected precision for each data point given current parameters
             taus = []
             for x, y in zip(xs, ys):
-                # mus = self._compute_mus(data, input, mask, tag)
-                # sigmas = self._compute_sigmas(data, input, mask, tag)
                 Afull = np.concatenate((self.As, self.Vs, self.bs[:, :, None]), axis=2)
                 mus = np.matmul(Afull[None, :, :, :], x[:, None, :, None])[:, :, :, 0]
 
                 # nu: (K,)  mus: (T, K, D)  sigmas: (K, D, D)  y: (T, D)  -> tau: (T, K)
                 alpha = self.nus / 2 + D/2
-                beta = self.nus / 2 + 1/2 * stats.batch_mahalanobis(self._sqrt_Sigmas, y[:, None, :] - mus)
+                sqrt_Sigmas = np.linalg.cholesky(self.Sigmas)
+                beta = self.nus / 2 + 1/2 * stats.batch_mahalanobis(sqrt_Sigmas, y[:, None, :] - mus)
                 taus.append(alpha / beta)
 
             # M step: Fit the weighted linear regressions for each K and D
-            J = np.tile(np.eye(D * lags + M + 1)[None, None, :, :], (K, D, 1, 1))
-            h = np.zeros((K, D,  D * lags + M + 1, ))
+            # This is exactly the same as the M-step for the AutoRegressiveObservations,
+            # but it has an extra scaling factor of tau applied to the weight.
+            J = np.tile(1e-8 * np.eye(D * lags + M + 1)[None, :, :], (K, 1, 1))
+            h = np.zeros((K, D * lags + M + 1, D))
             for x, y, Ez, tau in zip(xs, ys, Ezs, taus):
-                # replicate tau since it is shared across output dimensions
-                tau = np.ascontiguousarray(np.tile(tau[:, :, None], (1, 1, D)))
-                robust_ar_statistics(Ez, tau, x, y, J, h)
+                weight = Ez * tau
+                J += np.einsum('tk, ti, tj -> kij', weight, x, x)
+                h += np.einsum('tk, ti, td -> kid', weight, x, y)
 
             mus = np.linalg.solve(J, h)
-            self.As = mus[:, :, :D*lags]
-            self.Vs = mus[:, :, D*lags:D*lags+M]
-            self.bs = mus[:, :, -1]
+            self.As = np.swapaxes(mus[:, :D*lags, :], 1, 2)
+            self.Vs = np.swapaxes(mus[:, D*lags:D*lags+M, :], 1, 2)
+            self.bs = mus[:, -1, :]
 
             # Update the covariance
             sqerr = np.zeros((K, D, D))
             weight = np.zeros(K)
             for x, y, Ez, tau in zip(xs, ys, Ezs, taus):
-                yhat = np.matmul(x[None, :, :], np.swapaxes(mus, -1, -2))
+                yhat = np.matmul(x[None, :, :], mus)
                 resid = y[None, :, :] - yhat
-                sqerr += np.einsum('tk,tk,kti,ktj->kij', Ez, tau, resid, resid)
+                sqerr += np.einsum('tk,kti,ktj->kij', Ez * tau, resid, resid)
                 weight += np.sum(Ez, axis=0)
 
-            self._sqrt_Sigmas = np.linalg.cholesky(sqerr / weight[:, None, None] + 1e-8 * np.eye(D))
+            self.Sigmas = sqerr / weight[:, None, None] + 1e-8 * np.eye(D)
 
     def _m_step_nu(self, expectations, datas, inputs, masks, tags, optimizer, num_iters, **kwargs):
+        """
+        Update the degrees of freedom parameter of the multivariate t distribution
+        using a generalized Newton update. See notes in the ssm repo.
+        """
         K, D, L = self.K, self.D, self.lags
         E_taus = np.zeros(K)
         E_logtaus = np.zeros(K)
@@ -1173,7 +1200,8 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
             # nu: (K,)  mus: (K, D)  Sigmas: (K, D, D)  y: (T, D)  -> tau: (T, K)
             mus = self._compute_mus(data, input, mask, tag)
             alpha = self.nus/2 + D/2
-            beta = self.nus/2 + 1/2 * stats.batch_mahalanobis(self._sqrt_Sigmas, data[L:, None, :] - mus[L:])
+            sqrt_Sigma = np.linalg.cholesky(self.Sigmas)
+            beta = self.nus/2 + 1/2 * stats.batch_mahalanobis(sqrt_Sigma, data[L:, None, :] - mus[L:])
 
             E_taus += np.sum(Ez[L:, :] * alpha / beta, axis=0)
             E_logtaus += np.sum(Ez[L:, :] * (digamma(alpha) - np.log(beta)), axis=0)
@@ -1188,7 +1216,7 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, As, bs, Sigmas, nus = self.D, self.As, self.bs, self.Sigmas, self.nus
         if xhist.shape[0] < self.lags:
-            S = self._sqrt_Sigmas_init[z] if with_noise else 0
+            S = np.linalg.cholesky(self.Sigmas_init[z]) if with_noise else 0
             return self.mu_init[z] + np.dot(S, npr.randn(D))
         else:
             mu = bs[z].copy()
@@ -1196,14 +1224,60 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
                 mu += As[z][:,l*D:(l+1)*D].dot(xhist[-l-1])
 
             tau = npr.gamma(nus[z] / 2.0, 2.0 / nus[z])
-            S = np.linalg.cholesky(self.Sigmas[z] / tau) if with_noise else 0
+            S = np.linalg.cholesky(Sigmas[z] / tau) if with_noise else 0
             return mu + np.dot(S, npr.randn(D))
 
 
+class RobustAutoRegressiveObservations(_RobustAutoRegressiveObservationsMixin, AutoRegressiveObservations):
+    """
+    AR model where the noise is distributed according to a multivariate t distribution,
+
+        epsilon ~ t(0, Sigma, nu)
+
+    which is equivalent to,
+
+        tau ~ Gamma(nu/2, nu/2)
+        epsilon | tau ~ N(0, Sigma / tau)
+
+    Here, Sigma is a general covariance matrix.
+    """
+    pass
+
+
+class RobustAutoRegressiveDiagonalNoiseObservations(
+    _RobustAutoRegressiveObservationsMixin, AutoRegressiveDiagonalNoiseObservations):
+    """
+    AR model where the noise is distributed according to a multivariate t distribution,
+
+        epsilon ~ t(0, Sigma, nu)
+
+    which is equivalent to,
+
+        tau ~ Gamma(nu/2, nu/2)
+        epsilon | tau ~ N(0, Sigma / tau)
+
+    Here, Sigma is a diagonal covariance matrix.
+    """
+    pass
+
 # Robust autoregressive models with diagonal Student's t noise
-class RobustAutoRegressiveDiagonalNoiseObservations(AutoRegressiveDiagonalNoiseObservations):
+class AltRobustAutoRegressiveDiagonalNoiseObservations(AutoRegressiveDiagonalNoiseObservations):
+    """
+    An alternative formulation of the robust AR model where the noise is
+    distributed according to a independent scalar t distribution,
+
+    For each output dimension d,
+
+        epsilon_d ~ t(0, sigma_d^2, nu_d)
+
+    which is equivalent to,
+
+        tau_d ~ Gamma(nu_d/2, nu_d/2)
+        epsilon_d | tau_d ~ N(0, sigma_d^2 / tau_d)
+
+    """
     def __init__(self, K, D, M=0, lags=1):
-        super(RobustAutoRegressiveDiagonalNoiseObservations, self).__init__(K, D, M=M, lags=lags)
+        super(AltRobustAutoRegressiveDiagonalNoiseObservations, self).__init__(K, D, M=M, lags=lags)
         self._log_nus = np.log(4) * np.ones((K, D))
 
     @property
@@ -1219,7 +1293,7 @@ class RobustAutoRegressiveDiagonalNoiseObservations(AutoRegressiveDiagonalNoiseO
         self.As, self.bs, self.Vs, self._log_sigmasq, self._log_nus = value
 
     def permute(self, perm):
-        super(RobustAutoRegressiveDiagonalNoiseObservations, self).permute(perm)
+        super(AltRobustAutoRegressiveDiagonalNoiseObservations, self).permute(perm)
         self.inv_nus = self.inv_nus[perm]
 
     def log_likelihoods(self, data, input, mask, tag):

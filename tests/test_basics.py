@@ -21,13 +21,18 @@ def test_sample(T=10, K=4, D=3, M=2):
 
     observation_names = [
         "gaussian",
+        "diagonal_gaussian",
         "t",
+        "diagonal_t",
         "bernoulli",
         "categorical",
         "poisson",
         "vonmises",
         "ar",
-        "robust_ar"
+        "diagonal_ar",
+        "independent_ar",
+        "robust_ar",
+        "diagonal_robust_ar"
     ]
 
     # Sample basic (no prefix, inputs, etc.)
