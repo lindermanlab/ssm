@@ -70,6 +70,12 @@ arhmm_em_lls = arhmm.fit(y, method="em", num_em_iters=N_em_iters)
 arhmm_em_test_ll = arhmm.log_probability(y_test)
 arhmm_em_smooth = arhmm.smooth(y)
 
+print("Fitting Diagonal ARHMM with EM")
+arhmm = HMM(K, D, observations="diagonal_ar")
+arhmm_em_lls = arhmm.fit(y, method="sgd", num_iters=N_sgd_iters)
+arhmm_em_test_ll = arhmm.log_probability(y_test)
+arhmm_em_smooth = arhmm.smooth(y)
+
 print("Fitting tARHMM with SGD")
 tarhmm = HMM(K, D, observations="robust_ar")
 tarhmm_sgd_lls = tarhmm.fit(y, method="sgd", num_iters=N_sgd_iters)
@@ -85,25 +91,25 @@ tarhmm_em_smooth = tarhmm.smooth(y)
 # Plot smoothed observations
 plt.figure()
 for d in range(D):
-	plt.subplot(D, 1, d+1)
-	plt.plot(y, '-k', lw=2, label="true")
-	l1 = plt.plot(hmm_sgd_smooth, '-', lw=1,
+    plt.subplot(D, 1, d+1)
+    plt.plot(y, '-k', lw=2, label="true")
+    l1 = plt.plot(hmm_sgd_smooth, '-', lw=1,
                       label="HMM (SGD)")[0]
-	plt.plot(hmm_em_smooth, ':', lw=1, color=l1.get_color(),
+    plt.plot(hmm_em_smooth, ':', lw=1, color=l1.get_color(),
                  label="HMM (EM)")
-	l2 = plt.plot(thmm_sgd_smooth, '-', lw=1,
+    l2 = plt.plot(thmm_sgd_smooth, '-', lw=1,
                       label="tHMM (SGD)")[0]
-	plt.plot(thmm_em_smooth, ':', lw=1, color=l2.get_color(),
+    plt.plot(thmm_em_smooth, ':', lw=1, color=l2.get_color(),
                  label="tHMM (EM)")
-	l3 = plt.plot(arhmm_sgd_smooth, '-', lw=1,
+    l3 = plt.plot(arhmm_sgd_smooth, '-', lw=1,
                       label="ARHMM (SGD)")[0]
-	plt.plot(arhmm_em_smooth, ':', lw=1, color=l3.get_color(),
+    plt.plot(arhmm_em_smooth, ':', lw=1, color=l3.get_color(),
                  label="ARHMM (EM)")
-	l4 = plt.plot(tarhmm_sgd_smooth, '-', lw=1,
+    l4 = plt.plot(tarhmm_sgd_smooth, '-', lw=1,
                       label="tARHMM (SGD)")[0]
-	plt.plot(arhmm_em_smooth, ':', lw=1, color=l4.get_color(),
+    plt.plot(arhmm_em_smooth, ':', lw=1, color=l4.get_color(),
                  label="tARHMM (EM)")
-	plt.legend(loc="upper right")
+    plt.legend(loc="upper right")
 
 # Plot log likelihoods
 plt.figure()

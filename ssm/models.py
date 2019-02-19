@@ -19,12 +19,13 @@ from ssm.observations import \
     PoissonObservations, \
     VonMisesObservations, \
     CategoricalObservations, \
+    MultivariateStudentsTObservations, \
     StudentsTObservations, \
     AutoRegressiveObservations, \
+    AutoRegressiveDiagonalNoiseObservations, \
     IndependentAutoRegressiveObservations, \
     RobustAutoRegressiveObservations, \
-    RecurrentAutoRegressiveObservations, \
-    RecurrentRobustAutoRegressiveObservations
+    RobustAutoRegressiveDiagonalNoiseObservations
 
 from ssm.hierarchical import \
     HierarchicalInitialStateDistribution, \
@@ -34,18 +35,23 @@ from ssm.hierarchical import \
 
 from ssm.emissions import \
     GaussianEmissions, \
+    GaussianOrthogonalEmissions, \
     GaussianIdentityEmissions, \
     GaussianNeuralNetworkEmissions, \
     StudentsTEmissions, \
+    StudentsTOrthogonalEmissions, \
     StudentsTIdentityEmissions, \
     StudentsTNeuralNetworkEmissions, \
     BernoulliEmissions, \
+    BernoulliOrthogonalEmissions, \
     BernoulliIdentityEmissions, \
     BernoulliNeuralNetworkEmissions, \
     PoissonEmissions, \
+    PoissonOrthogonalEmissions, \
     PoissonIdentityEmissions, \
     PoissonNeuralNetworkEmissions, \
     AutoRegressiveEmissions, \
+    AutoRegressiveOrthogonalEmissions, \
     AutoRegressiveIdentityEmissions, \
     AutoRegressiveNeuralNetworkEmissions
 
@@ -102,17 +108,21 @@ def HMM(K, D, M=0,
     observation_classes = dict(
         gaussian=GaussianObservations,
         diagonal_gaussian=DiagonalGaussianObservations,
-        studentst=StudentsTObservations,
-        t=StudentsTObservations,
+        studentst=MultivariateStudentsTObservations,
+        t=MultivariateStudentsTObservations,
         bernoulli=BernoulliObservations,
         categorical=CategoricalObservations,
         poisson=PoissonObservations,
         vonmises=VonMisesObservations,
-        ar=RecurrentAutoRegressiveObservations if is_recurrent else AutoRegressiveObservations,
-        autoregressive=RecurrentAutoRegressiveObservations if is_recurrent else AutoRegressiveObservations,
+        ar=AutoRegressiveObservations,
+        autoregressive=AutoRegressiveObservations,
+        diagonal_ar=AutoRegressiveDiagonalNoiseObservations,
+        diagonal_autoregressive=AutoRegressiveDiagonalNoiseObservations,
         independent_ar=IndependentAutoRegressiveObservations,
-        robust_ar=RecurrentRobustAutoRegressiveObservations if is_recurrent else RobustAutoRegressiveObservations,
-        robust_autoregressive=RecurrentRobustAutoRegressiveObservations if is_recurrent else RobustAutoRegressiveObservations,
+        robust_ar=RobustAutoRegressiveObservations,
+        robust_autoregressive=RobustAutoRegressiveObservations,
+        diagonal_robust_ar=RobustAutoRegressiveDiagonalNoiseObservations,
+        diagonal_robust_autoregressive=RobustAutoRegressiveDiagonalNoiseObservations,
         )
 
     observations = observations.lower()
@@ -274,24 +284,31 @@ def SLDS(N, K, D, M=0,
     # Make the emission distn
     emission_classes = dict(
         gaussian=GaussianEmissions,
+        gaussian_orthog=GaussianOrthogonalEmissions,
         gaussian_id=GaussianIdentityEmissions,
         gaussian_nn=GaussianNeuralNetworkEmissions,
         studentst=StudentsTEmissions,
+        studentst_orthog=StudentsTOrthogonalEmissions,
         studentst_id=StudentsTIdentityEmissions,
         studentst_nn=StudentsTNeuralNetworkEmissions,
         t=StudentsTEmissions,
+        t_orthog=StudentsTOrthogonalEmissions,
         t_id=StudentsTIdentityEmissions,
         t_nn=StudentsTNeuralNetworkEmissions,
         poisson=PoissonEmissions,
+        poisson_orthog=PoissonOrthogonalEmissions,
         poisson_id=PoissonIdentityEmissions,
         poisson_nn=PoissonNeuralNetworkEmissions,
         bernoulli=BernoulliEmissions,
+        bernoulli_orthog=BernoulliOrthogonalEmissions,
         bernoulli_id=BernoulliIdentityEmissions,
         bernoulli_nn=BernoulliNeuralNetworkEmissions,
         ar=AutoRegressiveEmissions,
+        ar_orthog=AutoRegressiveOrthogonalEmissions,
         ar_id=AutoRegressiveIdentityEmissions,
         ar_nn=AutoRegressiveNeuralNetworkEmissions,
         autoregressive=AutoRegressiveEmissions,
+        autoregressive_orthog=AutoRegressiveOrthogonalEmissions,
         autoregressive_id=AutoRegressiveIdentityEmissions,
         autoregressive_nn=AutoRegressiveNeuralNetworkEmissions
         )
@@ -355,24 +372,31 @@ def LDS(N, D, M=0,
     # Make the emission distn
     emission_classes = dict(
         gaussian=GaussianEmissions,
+        gaussian_orthog=GaussianOrthogonalEmissions,
         gaussian_id=GaussianIdentityEmissions,
         gaussian_nn=GaussianNeuralNetworkEmissions,
         studentst=StudentsTEmissions,
+        studentst_orthog=StudentsTOrthogonalEmissions,
         studentst_id=StudentsTIdentityEmissions,
         studentst_nn=StudentsTNeuralNetworkEmissions,
         t=StudentsTEmissions,
+        t_orthog=StudentsTOrthogonalEmissions,
         t_id=StudentsTIdentityEmissions,
         t_nn=StudentsTNeuralNetworkEmissions,
         poisson=PoissonEmissions,
+        poisson_orthog=PoissonOrthogonalEmissions,
         poisson_id=PoissonIdentityEmissions,
         poisson_nn=PoissonNeuralNetworkEmissions,
         bernoulli=BernoulliEmissions,
+        bernoulli_orthog=BernoulliOrthogonalEmissions,
         bernoulli_id=BernoulliIdentityEmissions,
         bernoulli_nn=BernoulliNeuralNetworkEmissions,
         ar=AutoRegressiveEmissions,
+        ar_orthog=AutoRegressiveOrthogonalEmissions,
         ar_id=AutoRegressiveIdentityEmissions,
         ar_nn=AutoRegressiveNeuralNetworkEmissions,
         autoregressive=AutoRegressiveEmissions,
+        autoregressive_orthog=AutoRegressiveOrthogonalEmissions,
         autoregressive_id=AutoRegressiveIdentityEmissions,
         autoregressive_nn=AutoRegressiveNeuralNetworkEmissions
         )
@@ -393,5 +417,3 @@ def LDS(N, D, M=0,
 
     # Make the HMM
     return BaseLDS(N, D, M, dynamics_distn, emission_distn)
-
-

@@ -233,6 +233,57 @@ def diagonal_gaussian_logpdf(data, mus, sigmasqs, mask=None):
     return np.sum((normalizer - 0.5 * (data - mus)**2 / sigmasqs) * mask, axis=-1)
 
 
+def multivariate_studentst_logpdf(data, mus, Sigmas, nus, Ls=None):
+    """
+    Compute the log probability density of a multivariate Student's t distribution.
+    This will broadcast as long as data, mus, Sigmas, nus have the same (or at
+    least be broadcast compatible along the) leading dimensions.
+
+    Parameters
+    ----------
+    data : array_like (..., D)
+        The points at which to evaluate the log density
+
+    mus : array_like (..., D)
+        The mean(s) of the t distribution(s)
+
+    Sigmas : array_like (..., D, D)
+        The covariances(s) of the t distribution(s)
+
+    nus : array_like (...,)
+        The degrees of freedom of the t distribution(s)
+
+    Ls : array_like (..., D, D)
+        Optionally pass in the Cholesky decomposition of Sigmas
+
+    Returns
+    -------
+    lps : array_like (...,)
+        Log probabilities under the multivariate Gaussian distribution(s).
+    """
+    # Check inputs
+    D = data.shape[-1]
+    assert mus.shape[-1] == D
+    assert Sigmas.shape[-2] == Sigmas.shape[-1] == D
+    if Ls is not None:
+        assert Ls.shape[-2] == Ls.shape[-1] == D
+    else:
+        Ls = np.linalg.cholesky(Sigmas)                              # (..., D, D)
+
+    # Quadratic term
+    q = batch_mahalanobis(Ls, data - mus) / nus                      # (...,)
+    lp = - 0.5 * (nus + D) * np.log1p(q)                             # (...,)
+
+    # Normalizer
+    lp = lp + gammaln(0.5 * (nus + D)) - gammaln(0.5 * nus)          # (...,)
+    lp = lp - 0.5 * D * np.log(np.pi) - 0.5 * D * np.log(nus)        # (...,)
+    L_diag = np.reshape(Ls, Ls.shape[:-2] + (-1,))[..., ::D + 1]     # (..., D)
+    half_log_det = np.sum(np.log(abs(L_diag)), axis=-1)              # (...,)
+    lp = lp - half_log_det
+
+    return lp
+
+
 def independent_studentst_logpdf(data, mus, sigmasqs, nus, mask=None):
     """
     Compute the log probability density of a Gaussian distribution with

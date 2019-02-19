@@ -135,7 +135,7 @@ def test_multivariate_normal_logpdf_batches_and_states_masked(D=10):
             else:
                 for k in range(K):
                     ll2[b, n, k] = mvn.logpdf(x[b, n][m], mu[k][m], Sigma[k][np.ix_(m, m)])
-                    
+
     assert np.allclose(ll1, ll2)
 
 
@@ -162,7 +162,7 @@ def test_multivariate_normal_logpdf_batches_and_states_shared_cov_masked(D=10):
             else:
                 for k in range(K):
                     ll2[b, n, k] = mvn.logpdf(x[b, n][m], mu[k][m], Sigma[np.ix_(m, m)])
-                    
+
     assert np.allclose(ll1, ll2)
 
 
@@ -227,6 +227,10 @@ def test_poisson_logpdf(T=100, K=4, D=10):
 
 @nottest
 def test_vonmises_logpdf(T=100, K=4, D=10):
+    """
+    NOTE: Skipping this test until the scipy special functions
+    make it into the release version of autograd.
+    """
     # Test single datapoint log pdf
     x = npr.vonmises(0, 1, size=(T, D))
     mus = npr.randn(K, D)

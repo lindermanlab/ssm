@@ -3,7 +3,7 @@ import autograd.numpy.random as npr
 from autograd.scipy.special import gammaln
 
 from ssm.util import ensure_args_are_lists, \
-    ensure_slds_args_not_none, logistic, logit, softplus, inv_softplus
+    logistic, logit, softplus, inv_softplus
 from ssm.preprocessing import interpolate_data, pca_with_imputation
 
 
@@ -56,11 +56,113 @@ class _Emissions(object):
 
 # Many emissions models start with a linear layer
 class _LinearEmissions(_Emissions):
+    """
+    A simple linear mapping from continuous states x to data y.
+
+        E[y | x] = Cx + d + Fu
+
+    where C is an emission matrix, d is a bias, F an input matrix,
+    and u is an input.
+    """
     def __init__(self, N, K, D, M=0, single_subspace=True):
         super(_LinearEmissions, self).__init__(N, K, D, M=M, single_subspace=single_subspace)
 
+        # Initialize linear layer.  Set _Cs to be private so that it can be
+        # changed in subclasses.
+        self._Cs = npr.randn(1, N, D) if single_subspace else npr.randn(K, N, D)
+        self.Fs = npr.randn(1, N, M) if single_subspace else npr.randn(K, N, M)
+        self.ds = npr.randn(1, N) if single_subspace else npr.randn(K, N)
+
+    @property
+    def Cs(self):
+        return self._Cs
+
+    @Cs.setter
+    def Cs(self, value):
+        assert value.shape == (1, N, D) if self.single_subspace else (K, N, D)
+        self._Cs = value
+
+    @property
+    def params(self):
+        return self.Cs, self.Fs, self.ds
+
+    @params.setter
+    def params(self, value):
+        self.Cs, self.Fs, self.ds = value
+
+    def permute(self, perm):
+        if not self.single_subspace:
+            self.Cs = self.Cs[perm]
+            self.Fs = self.Fs[perm]
+            self.ds = self.ds[perm]
+
+    def _invert(self, data, input=None, mask=None, tag=None):
+        """
+        Approximate invert the linear emission model with the pseudoinverse
+
+        y = Cx + d + noise; C orthogonal.
+        xhat = (C^T C)^{-1} C^T (y-d)
+        """
+        assert self.single_subspace, "Can only invert with a single emission model"
+
+        T = data.shape[0]
+        C, F, d = self.Cs[0], self.Fs[0], self.ds[0]
+        C_pseudoinv = np.linalg.solve(C.T.dot(C), C.T).T
+
+        # Account for the bias
+        bias = input.dot(F.T) + d
+
+        if not np.all(mask):
+            data = interpolate_data(data, mask)
+            # We would like to find the PCA coordinates in the face of missing data
+            # To do so, alternate between running PCA and imputing the missing entries
+            for itr in range(25):
+                mu = (data - bias).dot(C_pseudoinv)
+                data[:, ~mask[0]] = (mu.dot(C.T) + bias)[:, ~mask[0]]
+
+        # Project data to get the mean
+        return (data - bias).dot(C_pseudoinv)
+
+    def forward(self, x, input, tag):
+        return np.matmul(self.Cs[None, ...], x[:, None, :, None])[:, :, :, 0] \
+             + np.matmul(self.Fs[None, ...], input[:, None, :, None])[:, :, :, 0] \
+             + self.ds
+
+    @ensure_args_are_lists
+    def _initialize_with_pca(self, datas, inputs=None, masks=None, tags=None, num_iters=20):
+        Keff = 1 if self.single_subspace else self.K
+
+        # First solve a linear regression for data given input
+        if self.M > 0:
+            from sklearn.linear_model import LinearRegression
+            lr = LinearRegression(fit_intercept=False)
+            lr.fit(np.vstack(inputs), np.vstack(datas))
+            self.Fs = np.tile(lr.coef_[None, :, :], (Keff, 1, 1))
+
+        # Compute residual after accounting for input
+        resids = [data - np.dot(input, self.Fs[0].T) for data, input in zip(datas, inputs)]
+
+        # Run PCA to get a linear embedding of the data
+        pca, xs, ll = pca_with_imputation(self.D, resids, masks, num_iters=num_iters)
+
+        self.Cs = np.tile(pca.components_.T[None, :, :], (Keff, 1, 1))
+        self.ds = np.tile(pca.mean_[None, :], (Keff, 1))
+
+        return pca
+
+
+class _OrthogonalLinearEmissions(_LinearEmissions):
+    """
+    A linear emissions matrix constrained such that the emissions matrix
+    is orthogonal. Use the rational Cayley transform to parameterize
+    the set of orthogonal emission matrices. See
+    https://pubs.acs.org/doi/pdf/10.1021/acs.jpca.5b02015
+    for a derivation of the rational Cayley transform.
+    """
+    def __init__(self, N, K, D, M=0, single_subspace=True):
+        super(_OrthogonalLinearEmissions, self).__init__(N, K, D, M=M, single_subspace=single_subspace)
+
         # Initialize linear layer
-        # Use the rational Cayley transform to parameterize an orthogonal emission matrix
         assert N > D
         self._Ms = npr.randn(1, D, D) if single_subspace else npr.randn(K, D, D)
         self._As = npr.randn(1, N-D, D) if single_subspace else npr.randn(K, N-D, D)
@@ -75,8 +177,6 @@ class _LinearEmissions(_Emissions):
 
     @property
     def Cs(self):
-        # See https://pubs.acs.org/doi/pdf/10.1021/acs.jpca.5b02015
-        # for a derivation of the rational Cayley transform.
         D = self.D
         T = lambda X: np.swapaxes(X, -1, -2)
 
@@ -125,60 +225,6 @@ class _LinearEmissions(_Emissions):
             self._Ms = self._Bs[perm]
             self.Fs = self.Fs[perm]
             self.ds = self.ds[perm]
-
-    def _invert(self, data, input=None, mask=None, tag=None):
-        """
-        Approximate invert the linear emission model with the pseudoinverse
-
-        y = Cx + d + noise; C orthogonal.
-        xhat = (C^T C)^{-1} C^T (y-d)
-        """
-        assert self.single_subspace, "Can only invert with a single emission model"
-
-        T = data.shape[0]
-        C, F, d = self.Cs[0], self.Fs[0], self.ds[0]
-        C_pseudoinv = np.linalg.solve(C.T.dot(C), C.T).T
-
-        # Account for the bias
-        bias = input.dot(F.T) + d
-
-        if not np.all(mask):
-            data = interpolate_data(data, mask)
-            # We would like to find the PCA coordinates in the face of missing data
-            # To do so, alternate between running PCA and imputing the missing entries
-            for itr in range(25):
-                q_mu = (data - bias).dot(C_pseudoinv)
-                data[:, ~mask[0]] = (q_mu.dot(C.T) + bias)[:, ~mask[0]]
-
-        # Project data to get the mean
-        return (data - bias).dot(C_pseudoinv)
-
-    def forward(self, x, input, tag):
-        return np.matmul(self.Cs[None, ...], x[:, None, :, None])[:, :, :, 0] \
-             + np.matmul(self.Fs[None, ...], input[:, None, :, None])[:, :, :, 0] \
-             + self.ds
-
-    @ensure_args_are_lists
-    def _initialize_with_pca(self, datas, inputs=None, masks=None, tags=None, num_iters=20):
-        Keff = 1 if self.single_subspace else self.K
-
-        # First solve a linear regression for data given input
-        if self.M > 0:
-            from sklearn.linear_model import LinearRegression
-            lr = LinearRegression(fit_intercept=False)
-            lr.fit(np.vstack(inputs), np.vstack(datas))
-            self.Fs = np.tile(lr.coef_[None, :, :], (Keff, 1, 1))
-
-        # Compute residual after accounting for input
-        resids = [data - np.dot(input, self.Fs[0].T) for data, input in zip(datas, inputs)]
-
-        # Run PCA to get a linear embedding of the data
-        pca, xs, ll = pca_with_imputation(self.D, resids, masks, num_iters=num_iters)
-
-        self.Cs = np.tile(pca.components_.T[None, :, :], (Keff, 1, 1))
-        self.ds = np.tile(pca.mean_[None, :], (Keff, 1))
-
-        return pca
 
 
 # Sometimes we just want a bit of additive noise on the observations
@@ -284,6 +330,15 @@ class GaussianEmissions(_GaussianEmissionsMixin, _LinearEmissions):
         self.inv_etas[:,...] = np.log(pca.noise_variance_)
 
 
+class GaussianOrthogonalEmissions(_GaussianEmissionsMixin, _OrthogonalLinearEmissions):
+
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
+        datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
+        pca = self._initialize_with_pca(datas, inputs=inputs, masks=masks, tags=tags)
+        self.inv_etas[:,...] = np.log(pca.noise_variance_)
+
+
 class GaussianIdentityEmissions(_GaussianEmissionsMixin, _IdentityEmissions):
     pass
 
@@ -342,7 +397,16 @@ class StudentsTEmissions(_StudentsTEmissionsMixin, _LinearEmissions):
 
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
-        # datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
+        datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
+        pca = self._initialize_with_pca(datas, inputs=inputs, masks=masks, tags=tags)
+        self.inv_etas[:,...] = np.log(pca.noise_variance_)
+
+
+class StudentsTOrthogonalEmissions(_StudentsTEmissionsMixin, _OrthogonalLinearEmissions):
+
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
+        datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
         pca = self._initialize_with_pca(datas, inputs=inputs, masks=masks, tags=tags)
         self.inv_etas[:,...] = np.log(pca.noise_variance_)
 
@@ -399,6 +463,14 @@ class BernoulliEmissions(_BernoulliEmissionsMixin, _LinearEmissions):
         self._initialize_with_pca(logits, inputs=inputs, masks=masks, tags=tags)
 
 
+class BernoulliOrthogonalEmissions(_BernoulliEmissionsMixin, _OrthogonalLinearEmissions):
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
+        datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
+        yhats = [self.link(np.clip(d, .1, .9)) for d in datas]
+        self._initialize_with_pca(logits, inputs=inputs, masks=masks, tags=tags)
+
+
 class BernoulliIdentityEmissions(_BernoulliEmissionsMixin, _IdentityEmissions):
     pass
 
@@ -445,7 +517,16 @@ class _PoissonEmissionsMixin(object):
         lambdas = self.mean(self.forward(variational_mean, input, tag))
         return lambdas[:,0,:] if self.single_subspace else np.sum(lambdas * expected_states[:,:,None], axis=1)
 
+
 class PoissonEmissions(_PoissonEmissionsMixin, _LinearEmissions):
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
+        datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
+        yhats = [self.link(np.clip(d, .1, np.inf)) for d in datas]
+        self._initialize_with_pca(yhats, inputs=inputs, masks=masks, tags=tags)
+
+
+class PoissonOrthogonalEmissions(_PoissonEmissionsMixin, _OrthogonalLinearEmissions):
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
@@ -543,6 +624,10 @@ class AutoRegressiveEmissions(_AutoRegressiveEmissionsMixin, _LinearEmissions):
         # Run PCA on the residuals to initialize C and d
         pca = self._initialize_with_pca(residuals, inputs=inputs, masks=masks, tags=tags)
         self.inv_etas[:,...] = np.log(pca.noise_variance_)
+
+
+class AutoRegressiveOrthogonalEmissions(_AutoRegressiveEmissionsMixin, _OrthogonalLinearEmissions):
+    pass
 
 
 class AutoRegressiveIdentityEmissions(_AutoRegressiveEmissionsMixin, _IdentityEmissions):
