@@ -79,6 +79,7 @@ class _LinearEmissions(_Emissions):
 
     @Cs.setter
     def Cs(self, value):
+        K, N, D = self.K, self.N, self.D
         assert value.shape == (1, N, D) if self.single_subspace else (K, N, D)
         self._Cs = value
 
@@ -325,9 +326,10 @@ class GaussianEmissions(_GaussianEmissionsMixin, _LinearEmissions):
 
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
-        datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
-        pca = self._initialize_with_pca(datas, inputs=inputs, masks=masks, tags=tags)
-        self.inv_etas[:,...] = np.log(pca.noise_variance_)
+        # datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
+        # pca = self._initialize_with_pca(datas, inputs=inputs, masks=masks, tags=tags)
+        # self.inv_etas[:,...] = np.log(pca.noise_variance_)
+        pass
 
 
 class GaussianOrthogonalEmissions(_GaussianEmissionsMixin, _OrthogonalLinearEmissions):

@@ -3,6 +3,7 @@ from ssm.core import BaseHMM, BaseHSMM, BaseLDS, BaseSwitchingLDS
 from ssm.init_state_distns import InitialStateDistribution
 
 from ssm.transitions import \
+    _Transitions, \
     StationaryTransitions, \
     StickyTransitions, \
     InputDrivenTransitions, \
@@ -13,6 +14,7 @@ from ssm.transitions import \
     NegativeBinomialSemiMarkovTransitions
 
 from ssm.observations import \
+    _Observations, \
     GaussianObservations, \
     DiagonalGaussianObservations, \
     BernoulliObservations, \
@@ -90,17 +92,22 @@ def HMM(K, D, M=0,
         rbf_recurrent=RBFRecurrentTransitions,
         nn_recurrent=NeuralNetworkRecurrentTransitions
         )
-    if transitions not in transition_classes:
-        raise Exception("Invalid transition model: {}. Must be one of {}".
-            format(transitions, list(transition_classes.keys())))
 
-    transition_kwargs = transition_kwargs or {}
-    transition_distn = \
-        HierarchicalTransitions(transition_classes[transitions], K, D, M=M,
-                                tags=hierarchical_transition_tags,
-                                **transition_kwargs) \
-        if hierarchical_transition_tags is not None \
-        else transition_classes[transitions](K, D, M=M, **transition_kwargs)
+    if isinstance(transitions, str):
+        if transitions not in transition_classes:
+            raise Exception("Invalid transition model: {}. Must be one of {}".
+                format(transitions, list(transition_classes.keys())))
+
+        transition_kwargs = transition_kwargs or {}
+        transition_distn = \
+            HierarchicalTransitions(transition_classes[transitions], K, D, M=M,
+                                    tags=hierarchical_transition_tags,
+                                    **transition_kwargs) \
+            if hierarchical_transition_tags is not None \
+            else transition_classes[transitions](K, D, M=M, **transition_kwargs)
+    else:
+        assert isinstance(transitions, _Transitions)
+        transition_distn = transitions
 
     # This is the master list of observation classes.
     # When you create a new observation class, add it here.
@@ -127,18 +134,22 @@ def HMM(K, D, M=0,
         diagonal_robust_autoregressive=RobustAutoRegressiveDiagonalNoiseObservations,
         )
 
-    observations = observations.lower()
-    if observations not in observation_classes:
-        raise Exception("Invalid observation model: {}. Must be one of {}".
-            format(observations, list(observation_classes.keys())))
+    if isinstance(observations, str):
+        observations = observations.lower()
+        if observations not in observation_classes:
+            raise Exception("Invalid observation model: {}. Must be one of {}".
+                format(observations, list(observation_classes.keys())))
 
-    observation_kwargs = observation_kwargs or {}
-    observation_distn = \
-        HierarchicalObservations(observation_classes[observations], K, D, M=M,
-                                 tags=hierarchical_observation_tags,
-                                 **observation_kwargs) \
-        if hierarchical_observation_tags is not None \
-        else observation_classes[observations](K, D, M=M, **observation_kwargs)
+        observation_kwargs = observation_kwargs or {}
+        observation_distn = \
+            HierarchicalObservations(observation_classes[observations], K, D, M=M,
+                                     tags=hierarchical_observation_tags,
+                                     **observation_kwargs) \
+            if hierarchical_observation_tags is not None \
+            else observation_classes[observations](K, D, M=M, **observation_kwargs)
+    else:
+        assert isinstance(observations, _Observations)
+        observation_distn = observations
 
     # Make the HMM
     return BaseHMM(K, D, M, init_state_distn, transition_distn, observation_distn)
@@ -170,12 +181,16 @@ def HSMM(K, D, M=0,
     transition_classes = dict(
         nb=NegativeBinomialSemiMarkovTransitions,
         )
-    if transitions not in transition_classes:
-        raise Exception("Invalid transition model: {}. Must be one of {}".
-            format(transitions, list(transition_classes.keys())))
+    if isinstance(transitions, str):
+        if transitions not in transition_classes:
+            raise Exception("Invalid transition model: {}. Must be one of {}".
+                format(transitions, list(transition_classes.keys())))
 
-    transition_kwargs = transition_kwargs or {}
-    transition_distn = transition_classes[transitions](K, D, M=M, **transition_kwargs)
+        transition_kwargs = transition_kwargs or {}
+        transition_distn = transition_classes[transitions](K, D, M=M, **transition_kwargs)
+    else:
+        assert isinstance(transitions, _Transitions)
+        transition_distn = transitions
 
     # This is the master list of observation classes.
     # When you create a new observation class, add it here.
@@ -195,13 +210,17 @@ def HSMM(K, D, M=0,
         robust_autoregressive=RobustAutoRegressiveObservations,
         )
 
-    observations = observations.lower()
-    if observations not in observation_classes:
-        raise Exception("Invalid observation model: {}. Must be one of {}".
-            format(observations, list(observation_classes.keys())))
+    if isinstance(observations, str):
+        observations = observations.lower()
+        if observations not in observation_classes:
+            raise Exception("Invalid observation model: {}. Must be one of {}".
+                format(observations, list(observation_classes.keys())))
 
-    observation_kwargs = observation_kwargs or {}
-    observation_distn = observation_classes[observations](K, D, M=M, **observation_kwargs)
+        observation_kwargs = observation_kwargs or {}
+        observation_distn = observation_classes[observations](K, D, M=M, **observation_kwargs)
+    else:
+        assert isinstance(observations, _Observations)
+        observation_distn = observations
 
     # Make the HMM
     return BaseHSMM(K, D, M, init_state_distn, transition_distn, observation_distn)

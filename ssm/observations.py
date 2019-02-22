@@ -906,6 +906,16 @@ class AutoRegressiveDiagonalNoiseObservations(AutoRegressiveObservations):
         self._log_sigmasq_init = self._log_sigmasq_init[perm]
         self._log_sigmasq = self._log_sigmasq[perm]
 
+    def log_likelihoods(self, data, input, mask, tag):
+        assert np.all(mask), "Cannot compute likelihood of autoregressive obsevations with missing data."
+        mus = self._compute_mus(data, input, mask, tag)
+
+        # Compute the likelihood of the initial data and remainder separately
+        L = self.lags
+        ll_init = stats.diagonal_gaussian_logpdf(data[:L, None, :], mus[:L], self.sigmasq_init)
+        ll_ar = stats.diagonal_gaussian_logpdf(data[L:, None, :], mus[L:], self.sigmasq)
+        return np.row_stack((ll_init, ll_ar))
+
 
 class IndependentAutoRegressiveObservations(_AutoRegressiveObservationsBase):
     def __init__(self, K, D, M=0, lags=1):

@@ -913,7 +913,7 @@ class BaseSwitchingLDS(object):
         Let gamma denote the emission parameters and theta denote the transition
         and initial discrete state parameters. This is a mix of EM and SVI:
             1. Sample x ~ q(x; phi)
-            2. Compute L(x, theta') E_p(z | x, theta)[log p(x, z; theta')]
+            2. Compute L(x, theta') = E_p(z | x, theta)[log p(x, z; theta')]
             3. Set theta = (1 - alpha) theta + alpha * argmax L(x, theta')
             4. Set gamma = gamma + eps * nabla log p(y | x; gamma)
             5. Set phi = phi + eps * dx/dphi * d/dx [L(x, theta) + log p(y | x; gamma) - log q(x; phi)]
@@ -972,7 +972,7 @@ class BaseSwitchingLDS(object):
 
         if method not in _fitting_methods:
             raise Exception("Invalid method: {}. Options are {}".\
-                            format(method, self._fitting_methods.keys()))
+                            format(method, _fitting_methods.keys()))
 
         if initialize:
             self.initialize(datas, inputs, masks, tags)
