@@ -85,7 +85,7 @@ def random_rotation(n, theta=None):
 
 
 def ensure_args_are_lists(f):
-    def wrapper(self, datas, inputs=None, masks=None, tags=None, **kwargs):
+    def wrapper(self, datas, inputs=None, masks=None, tags=None, covariances=None, **kwargs):
         datas = [datas] if not isinstance(datas, (list, tuple)) else datas
 
         M = (self.M,) if isinstance(self.M, int) else self.M
@@ -106,7 +106,12 @@ def ensure_args_are_lists(f):
         elif not isinstance(tags, (list, tuple)):
             tags = [tags]
 
-        return f(self, datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
+        if covariances is None:
+            covariances = [None] * len(datas)
+        elif not isinstance(covariances, (list, tuple)):
+            covariances = [covariances]
+
+        return f(self, datas, inputs=inputs, masks=masks, tags=tags, covariances=covariances, **kwargs)
 
     return wrapper
 
@@ -145,7 +150,7 @@ def ensure_variational_args_are_lists(f):
 
 
 def ensure_args_not_none(f):
-    def wrapper(self, data, input=None, mask=None, tag=None, **kwargs):
+    def wrapper(self, data, input=None, mask=None, tag=None, covariance=None, **kwargs):
         assert data is not None
 
         M = (self.M,) if isinstance(self.M, int) else self.M
@@ -153,7 +158,7 @@ def ensure_args_not_none(f):
         input = np.zeros((data.shape[0],) + M) if input is None else input
 
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
-        return f(self, data, input=input, mask=mask, tag=tag, **kwargs)
+        return f(self, data, input=input, mask=mask, tag=tag, covariance=covariance, **kwargs)
     return wrapper
 
 

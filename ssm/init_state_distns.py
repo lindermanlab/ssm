@@ -19,7 +19,7 @@ class InitialStateDistribution(object):
     def params(self, value):
         self.log_pi0 = value[0]
 
-    def initialize(self, datas, inputs, masks, tags):
+    def initialize(self, datas, inputs, masks, tags, covariances):
         pass
 
     def permute(self, perm):
@@ -35,10 +35,9 @@ class InitialStateDistribution(object):
     def log_prior(self):
         return 0
 
-    def log_initial_state_distn(self, data, input, mask, tag):
+    def log_initial_state_distn(self, data, input, mask, tag, covariance):
         return self.log_pi0 - logsumexp(self.log_pi0)
 
-    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
         pi0 = sum([Ez[0] for Ez, _, _ in expectations]) + 1e-8
         self.log_pi0 = np.log(pi0 / pi0.sum())
-
