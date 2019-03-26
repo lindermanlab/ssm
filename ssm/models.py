@@ -111,7 +111,6 @@ def HMM(K, D, M=0,
 
     # This is the master list of observation classes.
     # When you create a new observation class, add it here.
-    is_recurrent = (transitions.lower() in ["recurrent", "recurrent_only", "nn_recurrent"])
     observation_classes = dict(
         gaussian=GaussianObservations,
         diagonal_gaussian=DiagonalGaussianObservations,

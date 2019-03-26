@@ -859,25 +859,26 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             return np.row_stack((ll_init, ll_ar))
 
         # Otherwise, use the second order moments to evaluate expected log likelihood
-        # import pdb; pdb.set_trace()
         E_xxT =  covariance + data[:, :, None] * data[:, None, :]
         E_mu_muT = self._compute_second_moment_mus(data, input, mask, tag, covariance)
 
         # Compute the likelihood of the initial data and remainder separately
+        S0 = self.Sigmas_init
         ll_init = stats.expected_multivariate_normal_logpdf(
             data[:L, None, :], E_xxT[:L, None, :, :],
-            mus[:L], E_mu_muT[:L], self.Sigmas_init)
+            mus[:L], E_mu_muT[:L], S0)
 
+        S = self.Sigmas
         ll_ar = stats.expected_multivariate_normal_logpdf(
             data[L:, None, :], E_xxT[L:, None, :, :],
-            mus[L:], E_mu_muT[L:], self.Sigmas)
+            mus[L:], E_mu_muT[L:], S)
 
         return np.row_stack((ll_init, ll_ar))
 
-
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
-        # TODO: Use the covariances if specified
-
+    def old_m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
+        """
+        M step that ignores data covariances.
+        """
         K, D, M, lags = self.K, self.D, self.M, self.lags
         # Collect data for this dimension
         xs, ys, Ezs = [], [], []
@@ -913,16 +914,22 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             sqerr += np.einsum('tk,kti,ktj->kij', Ez, resid, resid)
             weight += np.sum(Ez, axis=0)
 
-        # self._sqrt_Sigmas = np.linalg.cholesky(sqerr / weight[:, None, None] + 1e-8 * np.eye(D))
         self.Sigmas = sqerr / weight[:, None, None] + 1e-8 * np.eye(D)
 
-    def new_m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
-        K, D, M, lags = self.K, self.D, self.M, self.lags
+    def _compute_statistics(self, expectations, data, inputs, masks, tags, covariances):
+        """
+        Compute the sufficient statistics for updating the AR model.
 
-        # Collect (expected) sufficient statistics E[xx^T], E[xy^T], E[yy^T]
-        # where x is set of inputs to the regression (the lagged data
-        # plus inputs and biases) and y is the output (next data).
+        E[x_{t-l}] for l = 0, ..., L
+        E[x_{t-l} x_{t-j}^T] for j,l = 0, ..., L
+
+        Denote lag 0 (i.e. the predicted data) by y_t
+        and the lagged data (l = 1, ..., L) as x
+        """
+        K, D, M, lags = self.K, self.D, self.M, self.lags
         C = D * lags + M + 1            # covariate dim
+
+        # Initialize outputs
         E_xxT = np.zeros((K, C, C))
         E_xyT = np.zeros((K, C, D))
         E_yyT = np.zeros((K, D, D))
@@ -953,7 +960,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                         E_xxT[:, xslcs[j], xslcs[l]] += tmp
 
                 # lagged data x inputs
-                if M >0:
+                if M > 0:
                     tmp = np.einsum('tk,td,tm->dm', Ez[lags:], lagged_data[l], input[lags:])
                     E_xxT[:, xslcs[l], islc] += tmp
                     E_xxT[:, islc, xslcs[l]] += tmp
@@ -971,7 +978,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 E_xxT[:, -1, islc] += tmp
 
             # Expected bias
-            E_xxT[:, -1, -1] += np.sum(Ez, axis=0)
+            E_xxT[:, -1, -1] += np.sum(Ez[lags:], axis=0)
 
             # Compute E[x y^T] statistics
             for l in range(lags):
@@ -986,6 +993,16 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
         assert np.allclose(E_xxT, np.swapaxes(E_xxT, -1, -2))
 
+        return E_xxT, E_xyT, E_yyT
+
+    def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
+        K, D, M, lags = self.K, self.D, self.M, self.lags
+        C = D * lags + M + 1            # covariate dim
+
+        # Compute sufficient statistics
+        E_xxT, E_xyT, E_yyT = \
+            self._compute_statistics(expectations, datas, inputs, masks, tags, covariances)
+
         # M step: Fit the weighted linear regressions for each K and D
         mus = np.linalg.solve(E_xxT + 1e-8 * np.eye(C), E_xyT)    # (K, C, D)
         self.As = np.swapaxes(mus[:, :D*lags, :], 1, 2)
@@ -993,7 +1010,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         self.bs = mus[:, -1, :]
 
         # Update the covariance
-        self.Sigmas = (E_yyT - np.matmul(np.swapaxes(mus, -1, -2), E_xyT)) / E_xxT[:, -1:, -1:]
+        self.Sigmas = (E_yyT - np.matmul(np.swapaxes(mus, -1, -2), E_xyT)) / E_xxT[:, -1:, -1:] + 1e-8 * np.eye(D)
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, As, bs, Vs = self.D, self.As, self.bs, self.Vs

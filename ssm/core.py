@@ -966,6 +966,21 @@ class BaseSwitchingLDS(object):
 
         return elbos
 
+    def _fit_variational_em_with_conjugate_updates(\
+            self, variational_posterior, datas, inputs, masks, tags,
+            learning=True, alpha=.75, optimizer="adam", num_iters=100, **kwargs):
+        """
+        In the special case where the dynamics and observations are both linear
+        Gaussian, we can perform mean field coordinate ascent in a posterior
+        approximation of the form,
+
+            p(x, z | y) \approx q(x) q(z)
+
+        where q(x) is a linear Gaussian dynamical system and q(z) is a hidden
+        Markov model.
+        """
+        raise NotImplementedError
+
     @ensure_variational_args_are_lists
     def fit(self, variational_posterior, datas,
             inputs=None, masks=None, tags=None, method="svi",

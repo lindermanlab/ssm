@@ -257,7 +257,6 @@ def expected_multivariate_normal_logpdf(E_xs, E_xxTs, E_mus, E_mumuTs, Sigmas, L
     # E_muxT = np.swapaxes(E_xmuT, -1, -2)
     # As = E_xxTs - E_xmuT - E_muxT + E_mumuTs
     As = E_xxTs - 2 * E_xmuT + E_mumuTs
-
     lp = -0.5 * np.sum(Sigma_invs * As, axis=(-2, -1))
 
     # Normalizer
