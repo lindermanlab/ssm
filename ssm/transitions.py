@@ -25,7 +25,7 @@ class _Transitions(object):
     def params(self, value):
         raise NotImplementedError
 
-    def initialize(self, datas, inputs, masks, tags, covariances):
+    def initialize(self, datas, inputs, masks, tagss):
         pass
 
     def permute(self, perm):
@@ -34,10 +34,10 @@ class _Transitions(object):
     def log_prior(self):
         return 0
 
-    def log_transition_matrices(self, data, input, mask, tag, covariance):
+    def log_transition_matrices(self, data, input, mask, tag):
         raise NotImplementedError
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances,
+    def m_step(self, expectations, datas, inputs, masks, tagss,
                optimizer="bfgs", num_iters=100, **kwargs):
         """
         If M-step cannot be done in closed form for the transitions, default to BFGS.
@@ -47,9 +47,9 @@ class _Transitions(object):
         # Maximize the expected log joint
         def _expected_log_joint(expectations):
             elbo = self.log_prior()
-            for data, input, mask, tag, covariance, (expected_states, expected_joints, _) \
-                in zip(datas, inputs, masks, tags, covariances, expectations):
-                log_Ps = self.log_transition_matrices(data, input, mask, tag, covariance)
+            for data, input, mask, tag, (expected_states, expected_joints, _) \
+                in zip(datas, inputs, masks, tagss, expectations):
+                log_Ps = self.log_transition_matrices(data, input, mask, tag)
                 elbo += np.sum(expected_joints * log_Ps)
             return elbo
 
@@ -92,12 +92,12 @@ class StationaryTransitions(_Transitions):
     def transition_matrix(self):
         return np.exp(self.log_Ps - logsumexp(self.log_Ps, axis=1, keepdims=True))
 
-    def log_transition_matrices(self, data, input, mask, tag, covariance):
+    def log_transition_matrices(self, data, input, mask, tag):
         T = data.shape[0]
         log_Ps = self.log_Ps - logsumexp(self.log_Ps, axis=1, keepdims=True)
         return np.tile(log_Ps[None, :, :], (T-1, 1, 1))
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tagss, **kwargs):
         P = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations]) + 1e-16
         P /= P.sum(axis=-1, keepdims=True)
         self.log_Ps = np.log(P)
@@ -124,7 +124,7 @@ class StickyTransitions(StationaryTransitions):
             lp += dirichlet.logpdf(Ps[k], alpha)
         return lp
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tagss, **kwargs):
         expected_joints = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations]) + 1e-8
         expected_joints += self.kappa * np.eye(self.K)
         P = expected_joints / expected_joints.sum(axis=1, keepdims=True)
@@ -158,7 +158,7 @@ class InputDrivenTransitions(StickyTransitions):
         self.log_Ps = self.log_Ps[np.ix_(perm, perm)]
         self.Ws = self.Ws[perm]
 
-    def log_transition_matrices(self, data, input, mask, tag, covariance):
+    def log_transition_matrices(self, data, input, mask, tag):
         T = data.shape[0]
         assert input.shape[0] == T
         # Previous state effect
@@ -167,7 +167,7 @@ class InputDrivenTransitions(StickyTransitions):
         log_Ps = log_Ps + np.dot(input[1:], self.Ws.T)[:, None, :]
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tagss, **kwargs):
         _Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
 
@@ -197,7 +197,7 @@ class RecurrentTransitions(InputDrivenTransitions):
         super(RecurrentTransitions, self).permute(perm)
         self.Rs = self.Rs[perm]
 
-    def log_transition_matrices(self, data, input, mask, tag, covariance):
+    def log_transition_matrices(self, data, input, mask, tag):
         T, D = data.shape
         # Previous state effect
         log_Ps = np.tile(self.log_Ps[None, :, :], (T-1, 1, 1))
@@ -207,8 +207,8 @@ class RecurrentTransitions(InputDrivenTransitions):
         log_Ps = log_Ps + np.dot(data[:-1], self.Rs.T)[:, None, :]
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
-        _Transitions.m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs)
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        _Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
 
 class RecurrentOnlyTransitions(_Transitions):
@@ -241,7 +241,7 @@ class RecurrentOnlyTransitions(_Transitions):
         self.Rs = self.Rs[perm]
         self.r = self.r[perm]
 
-    def log_transition_matrices(self, data, input, mask, tag, covariance):
+    def log_transition_matrices(self, data, input, mask, tag):
         T, D = data.shape
         log_Ps = np.dot(input[1:], self.Ws.T)[:, None, :]              # inputs
         log_Ps = log_Ps + np.dot(data[:-1], self.Rs.T)[:, None, :]     # past observations
@@ -249,7 +249,7 @@ class RecurrentOnlyTransitions(_Transitions):
         log_Ps = np.tile(log_Ps, (1, self.K, 1))                       # expand
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)       # normalize
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tagss, **kwargs):
         _Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
 
@@ -295,7 +295,7 @@ class RBFRecurrentTransitions(InputDrivenTransitions):
     def Sigmas(self):
         return np.matmul(self._sqrt_Sigmas, np.swapaxes(self._sqrt_Sigmas, -1, -2))
 
-    def initialize(self, datas, inputs, masks, tags, covariances):
+    def initialize(self, datas, inputs, masks, tagss):
         # Fit a GMM to the data to set the means and covariances
         from sklearn.mixture import GaussianMixture
         gmm = GaussianMixture(self.K, covariance_type="full")
@@ -312,7 +312,7 @@ class RBFRecurrentTransitions(InputDrivenTransitions):
         self.sqrt_Sigmas = self.sqrt_Sigmas[perm]
         self.Ws = self.Ws[perm]
 
-    def log_transition_matrices(self, data, input, mask, tag, covariance):
+    def log_transition_matrices(self, data, input, mask, tag):
         assert np.all(mask), "Recurrent models require that all data are present."
 
         T = data.shape[0]
@@ -330,7 +330,7 @@ class RBFRecurrentTransitions(InputDrivenTransitions):
         log_Ps = log_Ps + np.dot(input[1:], self.Ws.T)[:, None, :]
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tagss, **kwargs):
         _Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
 
@@ -368,7 +368,7 @@ class NeuralNetworkRecurrentTransitions(_Transitions):
         self.weights[-1] = self.weights[-1][:,perm]
         self.biases[-1] = self.biases[-1][perm]
 
-    def log_transition_matrices(self, data, input, mask, tag, covariance):
+    def log_transition_matrices(self, data, input, mask, tag):
         # Pass the data and inputs through the neural network
         x = np.hstack((data[:-1], input[1:]))
         for W, b in zip(self.weights, self.biases):
@@ -381,7 +381,7 @@ class NeuralNetworkRecurrentTransitions(_Transitions):
         # Normalize
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances, optimizer="adam", num_iters=100, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tagss, optimizer="adam", num_iters=100, **kwargs):
         # Default to adam instead of bfgs for the neural network model.
         _Transitions.m_step(self, expectations, datas, inputs, masks, tags,
             optimizer=optimizer, num_iters=num_iters, **kwargs)
@@ -533,12 +533,12 @@ class NegativeBinomialSemiMarkovTransitions(_Transitions):
 
         return P
 
-    def log_transition_matrices(self, data, input, mask, tag, covariance):
+    def log_transition_matrices(self, data, input, mask, tag):
         T = data.shape[0]
         P = self.transition_matrix
         return np.tile(np.log(P)[None, :, :], (T-1, 1, 1))
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances, samples, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tagss, samples, **kwargs):
         # Update the transition matrix between super states
         P = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations]) + 1e-16
         np.fill_diagonal(P, 0)

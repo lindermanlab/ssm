@@ -31,19 +31,19 @@ class _Observations(object):
         pass
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, covariances=None):
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
         pass
 
     def log_prior(self):
         return 0
 
-    def log_likelihoods(self, data, input, mask, tag, covariance):
+    def log_likelihoods(self, data, input, mask, tag):
         raise NotImplementedError
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         raise NotImplementedError
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances,
+    def m_step(self, expectations, datas, inputs, masks, tags,
                optimizer="bfgs", **kwargs):
         """
         If M-step cannot be done in closed form for the transitions, default to SGD.
@@ -53,9 +53,9 @@ class _Observations(object):
         # expected log joint
         def _expected_log_joint(expectations):
             elbo = self.log_prior()
-            for data, input, mask, tag, covariance, (expected_states, expected_joints, _) \
-                in zip(datas, inputs, masks, tags, covariances, expectations):
-                lls = self.log_likelihoods(data, input, mask, tag, covariance)
+            for data, input, mask, tag, (expected_states, expected_joints, _) \
+                in zip(datas, inputs, masks, tags, expectations):
+                lls = self.log_likelihoods(data, input, mask, tag)
                 elbo += np.sum(expected_states * lls)
             return elbo
 
@@ -68,7 +68,7 @@ class _Observations(object):
 
         self.params = optimizer(_objective, self.params, **kwargs)
 
-    def smooth(self, expectations, data, input, tag, covariance):
+    def smooth(self, expectations, data, input, tag):
         raise NotImplementedError
 
 
@@ -95,7 +95,7 @@ class GaussianObservations(_Observations):
         return np.matmul(self._sqrt_Sigmas, np.swapaxes(self._sqrt_Sigmas, -1, -2))
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, covariances=None):
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
         # Initialize with KMeans
         from sklearn.cluster import KMeans
         data = np.concatenate(datas)
@@ -104,7 +104,7 @@ class GaussianObservations(_Observations):
         Sigmas = np.array([np.cov(data[km.labels_ == k].T) for k in range(self.K)])
         self._sqrt_Sigmas = np.linalg.cholesky(Sigmas + 1e-8 * np.eye(self.D))
 
-    def log_likelihoods(self, data, input, mask, tag, covariance):
+    def log_likelihoods(self, data, input, mask, tag):
         mus, Sigmas = self.mus, self.Sigmas
         if mask is not None and np.any(~mask) and not isinstance(mus, np.ndarray):
             raise Exception("Current implementation of multivariate_normal_logpdf for masked data"
@@ -118,7 +118,7 @@ class GaussianObservations(_Observations):
         sqrt_Sigmas = self._sqrt_Sigmas if with_noise else np.zeros((self.K, self.D, self.D))
         return mus[z] + np.dot(sqrt_Sigmas[z], npr.randn(D))
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         K, D = self.K, self.D
         J = np.zeros((K, D))
         h = np.zeros((K, D))
@@ -136,7 +136,7 @@ class GaussianObservations(_Observations):
             weight += np.sum(Ez, axis=0)
         self._sqrt_Sigmas = np.linalg.cholesky(sqerr / weight[:, None, None] + 1e-8 * np.eye(self.D))
 
-    def smooth(self, expectations, data, input, tag, covariance):
+    def smooth(self, expectations, data, input, tag):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
@@ -172,7 +172,7 @@ class DiagonalGaussianObservations(_Observations):
         self._log_sigmasq = self._log_sigmasq[perm]
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, covariances=None):
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
         # Initialize with KMeans
         from sklearn.cluster import KMeans
         data = np.concatenate(datas)
@@ -182,7 +182,7 @@ class DiagonalGaussianObservations(_Observations):
                            for k in range(self.K)])
         self._log_sigmasq = np.log(sigmas + 1e-16)
 
-    def log_likelihoods(self, data, input, mask, tag, covariance):
+    def log_likelihoods(self, data, input, mask, tag):
         mus, sigmas = self.mus, np.exp(self._log_sigmasq) + 1e-16
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return stats.diagonal_gaussian_logpdf(data[:, None, :], mus, sigmas, mask=mask[:, None, :])
@@ -192,7 +192,7 @@ class DiagonalGaussianObservations(_Observations):
         sigmas = np.exp(self._log_sigmasq) if with_noise else np.zeros((self.K, self.D))
         return mus[z] + np.sqrt(sigmas[z]) * npr.randn(D)
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         x = np.concatenate(datas)
         weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
@@ -200,7 +200,7 @@ class DiagonalGaussianObservations(_Observations):
             sqerr = (x - self.mus[k])**2
             self._log_sigmasq[k] = np.log(np.average(sqerr, weights=weights[:,k], axis=0))
 
-    def smooth(self, expectations, data, input, tag, covariance):
+    def smooth(self, expectations, data, input, tag):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
@@ -238,7 +238,7 @@ class StudentsTObservations(_Observations):
         self._log_nus = self._log_nus[perm]
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, covariances=None):
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
         # Initialize with KMeans
         from sklearn.cluster import KMeans
         data = np.concatenate(datas)
@@ -248,7 +248,7 @@ class StudentsTObservations(_Observations):
         self._log_sigmasq = np.log(sigmas + 1e-16)
         self._log_nus = np.log(4) * np.ones((self.K, self.D))
 
-    def log_likelihoods(self, data, input, mask, tag, covariance):
+    def log_likelihoods(self, data, input, mask, tag):
         D, mus, sigmas, nus = self.D, self.mus, self.sigmasq, self.nus
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return stats.independent_studentst_logpdf(data[:, None, :], mus, sigmas, nus, mask=mask[:, None, :])
@@ -259,14 +259,14 @@ class StudentsTObservations(_Observations):
         sigma = sigmas[z] / tau if with_noise else 0
         return mus[z] + np.sqrt(sigma) * npr.randn(D)
 
-    def smooth(self, expectations, data, input, tag, covariance):
+    def smooth(self, expectations, data, input, tag):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
         return expectations.dot(self.mus)
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         """
         Student's t is a scale mixture of Gaussians.  We can estimate its
         parameters using the EM algorithm. See the notebook in doc/students_t for
@@ -365,7 +365,7 @@ class MultivariateStudentsTObservations(_Observations):
         self._log_nus = self._log_nus[perm]
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, covariances=None):
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
         # Initialize with KMeans
         from sklearn.cluster import KMeans
         data = np.concatenate(datas)
@@ -375,12 +375,12 @@ class MultivariateStudentsTObservations(_Observations):
         self._sqrt_Sigmas = np.linalg.cholesky(Sigmas + 1e-8 * np.eye(self.D))
         self._log_nus = np.log(4) * np.ones((self.K,))
 
-    def log_likelihoods(self, data, input, mask, tag, covariance):
+    def log_likelihoods(self, data, input, mask, tag):
         assert np.all(mask), "MultivariateStudentsTObservations does not support missing data"
         D, mus, Sigmas, nus = self.D, self.mus, self.Sigmas, self.nus
         return stats.multivariate_studentst_logpdf(data[:, None, :], mus, Sigmas, nus)
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         """
         Student's t is a scale mixture of Gaussians.  We can estimate its
         parameters using the EM algorithm. See the notebook in doc/students_t for
@@ -457,7 +457,7 @@ class MultivariateStudentsTObservations(_Observations):
         sqrt_Sigma = np.linalg.cholesky(Sigmas[z] / tau) if with_noise else 0
         return mus[z] + np.dot(sqrt_Sigma, npr.randn(D))
 
-    def smooth(self, expectations, data, input, tag, covariance):
+    def smooth(self, expectations, data, input, tag):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
@@ -483,7 +483,7 @@ class BernoulliObservations(_Observations):
         self.logit_ps = self.logit_ps[perm]
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, covariances=None):
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
 
         # Initialize with KMeans
         from sklearn.cluster import KMeans
@@ -492,7 +492,7 @@ class BernoulliObservations(_Observations):
         ps = np.clip(km.cluster_centers_, 1e-3, 1-1e-3)
         self.logit_ps = logit(ps)
 
-    def log_likelihoods(self, data, input, mask, tag, covariance):
+    def log_likelihoods(self, data, input, mask, tag):
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return stats.bernoulli_logpdf(data[:, None, :], self.logit_ps, mask=mask[:, None, :])
 
@@ -500,14 +500,14 @@ class BernoulliObservations(_Observations):
         ps = 1 / (1 + np.exp(self.logit_ps))
         return npr.rand(self.D) < ps[z]
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         x = np.concatenate(datas)
         weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
             ps = np.clip(np.average(x, axis=0, weights=weights[:,k]), 1e-3, 1-1e-3)
             self.logit_ps[k] = logit(ps)
 
-    def smooth(self, expectations, data, input, tag, covariance):
+    def smooth(self, expectations, data, input, tag):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
@@ -534,7 +534,7 @@ class PoissonObservations(_Observations):
         self.log_lambdas = self.log_lambdas[perm]
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, covariances=None):
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
 
         # Initialize with KMeans
         from sklearn.cluster import KMeans
@@ -542,7 +542,7 @@ class PoissonObservations(_Observations):
         km = KMeans(self.K).fit(data)
         self.log_lambdas = np.log(km.cluster_centers_ + 1e-3)
 
-    def log_likelihoods(self, data, input, mask, tag, covariance):
+    def log_likelihoods(self, data, input, mask, tag):
         lambdas = np.exp(self.log_lambdas)
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return stats.poisson_logpdf(data[:, None, :], lambdas, mask=mask[:, None, :])
@@ -551,13 +551,13 @@ class PoissonObservations(_Observations):
         lambdas = np.exp(self.log_lambdas)
         return npr.poisson(lambdas[z])
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         x = np.concatenate(datas)
         weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
             self.log_lambdas[k] = np.log(np.average(x, axis=0, weights=weights[:,k]) + 1e-16)
 
-    def smooth(self, expectations, data, input, tag, covariance):
+    def smooth(self, expectations, data, input, tag):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
@@ -587,10 +587,10 @@ class CategoricalObservations(_Observations):
         self.logits = self.logits[perm]
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, covariances=None):
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
         pass
 
-    def log_likelihoods(self, data, input, mask, tag, covariance):
+    def log_likelihoods(self, data, input, mask, tag):
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return stats.categorical_logpdf(data[:, None, :], self.logits, mask=mask[:, None, :])
 
@@ -598,7 +598,7 @@ class CategoricalObservations(_Observations):
         ps = np.exp(self.logits - logsumexp(self.logits, axis=2, keepdims=True))
         return np.array([npr.choice(self.C, p=ps[z, d]) for d in range(self.D)])
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         x = np.concatenate(datas)
         weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
@@ -608,7 +608,7 @@ class CategoricalObservations(_Observations):
             ps /= np.sum(ps, axis=-1, keepdims=True)
             self.logits[k] = np.log(ps)
 
-    def smooth(self, expectations, data, input, tag, covariance):
+    def smooth(self, expectations, data, input, tag):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
@@ -685,77 +685,7 @@ class _AutoRegressiveObservationsBase(_Observations):
         assert mus.shape == (T, self.K, D)
         return mus
 
-    def _compute_second_moment_mus(self, data, input, mask, tag, covariance):
-        """
-        Compute the second order statistics of the AR mean. We assume
-        that time steps are independent with Gaussian distributions.
-        The mean is given by `data` and the second moment by `E_xxT`.
-        Let mu_t = c_t + d_t where c_t = \sum_{l=1}^L A_l x_{t-l} and
-        d_t = Vu_t + b. The first term is a random variable; the second
-        is deterministic.
-
-        E[mu_t mu_t^T] = E[c_t c_t^T] + E[c_t] d_t^T + d_t E[c_t]^T + d_t d_t^T
-
-        E[c_t] = \sum_{l=1}^L A_l E[x_{t-l}]
-
-        E[c_t c_t^T] = \sum_{l=1}^L A_l E[x_{t-l} x_{t-l}^T] A_l^T
-                       + \sum_{l=1}^L \sum_{j=1}^L A_l E[x_{t-l}] E[x_{t-j}]^T A_j^T
-        """
-        K, D, L, = self.K, self.D, self.lags
-        mu0, As, bs, Vs = self.mu_init, self.As, self.bs, self.Vs
-        T = data.shape[0]
-
-        # Compute second moments
-        E_xxT = covariance + data[:, :, None] * data[:, None, :]
-
-        # Split the dynamics matrix
-        As = np.split(As, np.arange(1, L) * L, axis=2)
-
-        # Construct views of the lagged data and moments
-        l_obs = [data[L-l-1:-l-1] for l in range(L)]
-        l_xxT = [E_xxT[L-l-1:-l-1] for l in range(L)]
-
-        # Pad with the initial condition
-        mu0_mu0T = np.einsum('ki,kj->kij', mu0, mu0)
-
-        # Compute the constant term
-        d = np.einsum('kdm,tm->tkd', Vs, input[L:]) + bs
-        ddT = np.einsum('tki,tkj->tkij', d, d)
-
-        # Precompute linear expecations
-        Axs = [np.einsum('kij,tj->tki', As[l], l_obs[l]) for l in range(L)]
-
-        # Compute the terms that depend on the data
-        E_c = np.zeros((T-L, K, D))
-        E_ccT = np.zeros((T-L, K, D, D))
-        for l in range(self.lags):
-            # E_c += np.einsum('kij,tj->tki', As[l], l_obs[l])
-            E_c += Axs[l]
-            # E_ccT += np.einsum('kij,tjm,knm->tkin', As[l], l_xxT[l], As[l])
-            AxxT = np.matmul(As[l][None, ...], l_xxT[l][:, None, ...])          # (T-L, K, D, D)
-            E_ccT += np.matmul(AxxT, np.swapaxes(As[l], -1, -2)[None, ...])     # (T-L, K, D, D)
-            # E_ccT += np.einsum('tki,tkj->tkij', Axs[l], Axs[])
-
-            # Add the cross terms
-            for j in range(self.lags):
-                if j != l:
-                    # E_ccT += np.einsum('kij,tj,tm,knm->tkin', As[l], l_obs[l], l_obs[j], As[j])
-                    E_ccT += np.einsum('tki,tkj->tkij', Axs[l], Axs[j])
-
-        # Compute E[c_t] d_t^T
-        E_cdT = np.einsum('tki,tkj->tkij', E_c, d)
-        E_dcT = np.swapaxes(E_cdT, -1, -2)
-
-        # Combine terms to compute E_mu_mu^T
-        E_mu_muT = E_ccT + E_cdT + E_dcT + ddT
-
-        # Compute initial condition and predictions
-        E_mu_muT = np.concatenate((np.tile(mu0_mu0T[None, ...], (L, 1, 1, 1)), E_mu_muT))
-
-        assert E_mu_muT.shape == (T, K, D, D)
-        return E_mu_muT
-
-    def smooth(self, expectations, data, input, tag, covariance):
+    def smooth(self, expectations, data, input, tag):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
@@ -813,7 +743,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         super(AutoRegressiveObservations, self).permute(perm)
         self._sqrt_Sigmas = self._sqrt_Sigmas[perm]
 
-    def initialize(self, datas, inputs=None, masks=None, tags=None, covariances=None, localize=True):
+    def initialize(self, datas, inputs=None, masks=None, tags=None, localize=True):
         from sklearn.linear_model import LinearRegression
 
         # Sample time bins for each discrete state
@@ -846,41 +776,20 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         # Set the variances all at once to use the setter
         self.Sigmas = np.array(Sigmas)
 
-    def log_likelihoods(self, data, input, mask, tag, covariance=None):
+    def log_likelihoods(self, data, input, mask, tag=None):
         assert np.all(mask), "Cannot compute likelihood of autoregressive obsevations with missing data."
         L = self.lags
         mus = self._compute_mus(data, input, mask, tag)
 
-        # Return standard log likelihood if no data covariance is given
-        if covariance is None:
-            # Compute the likelihood of the initial data and remainder separately
-            ll_init = stats.multivariate_normal_logpdf(data[:L, None, :], mus[:L], self.Sigmas_init)
-            ll_ar = stats.multivariate_normal_logpdf(data[L:, None, :], mus[L:], self.Sigmas)
-            return np.row_stack((ll_init, ll_ar))
-
-        # Otherwise, use the second order moments to evaluate expected log likelihood
-        E_xxT =  covariance + data[:, :, None] * data[:, None, :]
-        E_mu_muT = self._compute_second_moment_mus(data, input, mask, tag, covariance)
-
         # Compute the likelihood of the initial data and remainder separately
-        S0 = self.Sigmas_init
-        ll_init = stats.expected_multivariate_normal_logpdf(
-            data[:L, None, :], E_xxT[:L, None, :, :],
-            mus[:L], E_mu_muT[:L], S0)
-
-        S = self.Sigmas
-        ll_ar = stats.expected_multivariate_normal_logpdf(
-            data[L:, None, :], E_xxT[L:, None, :, :],
-            mus[L:], E_mu_muT[L:], S)
-
+        ll_init = stats.multivariate_normal_logpdf(data[:L, None, :], mus[:L], self.Sigmas_init)
+        ll_ar = stats.multivariate_normal_logpdf(data[L:, None, :], mus[L:], self.Sigmas)
         return np.row_stack((ll_init, ll_ar))
 
-    def old_m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
-        """
-        M step that ignores data covariances.
-        """
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         K, D, M, lags = self.K, self.D, self.M, self.lags
-        # Collect data for this dimension
+
+        # Collect all the data
         xs, ys, Ezs = [], [], []
         for (Ez, _, _), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
             # Only use data if it is complete
@@ -915,110 +824,6 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             weight += np.sum(Ez, axis=0)
 
         self.Sigmas = sqerr / weight[:, None, None] + 1e-8 * np.eye(D)
-
-    def _compute_statistics(self, expectations, datas, inputs, masks, tags, covariances):
-        """
-        Compute the sufficient statistics for updating the AR model.
-
-        E[x_{t-l}] for l = 0, ..., L
-        E[x_{t-l} x_{t-j}^T] for j,l = 0, ..., L
-
-        Denote lag 0 (i.e. the predicted data) by y_t
-        and the lagged data (l = 1, ..., L) as x
-        """
-        K, D, M, lags = self.K, self.D, self.M, self.lags
-        C = D * lags + M + 1            # covariate dim
-
-        # Initialize outputs
-        E_xxT = np.zeros((K, C, C))
-        E_xyT = np.zeros((K, C, D))
-        E_yyT = np.zeros((K, D, D))
-
-        for (Ez, _, _), data, input, mask, tag, covariance in \
-            zip(expectations, datas, inputs, masks, tags, covariances):
-
-            # Make sure data is complete
-            if not np.all(mask):
-                raise Exception("Encountered missing data in AutoRegressiveObservations!")
-
-            # Get views of lagged data
-            lagged_data = [data[lags-l-1:-l-1] for l in range(lags)]
-            xslcs = [slice(j*D, (j+1)*D) for j in range(lags)]
-            islc = slice(lags*D, lags*D+M)
-
-            # Fill in the statistics by block
-            for l in range(lags):
-                for j in range(l, lags):
-                    tmp = np.einsum('tk,ti,tj->kij', Ez[lags:], lagged_data[l], lagged_data[j])
-                    E_xxT[:, xslcs[l], xslcs[j]] += tmp
-                    if l == j:
-                        if covariance is not None:
-                            # Add covariance to block diagonal
-                            E_xxT[:, xslcs[l], xslcs[l]] += np.einsum('tk,tij->kij', Ez[lags:], covariance[lags-l-1:-l-1])
-                    else:
-                        # Copy to symmetric block
-                        E_xxT[:, xslcs[j], xslcs[l]] += tmp
-
-                # lagged data x inputs
-                if M > 0:
-                    tmp = np.einsum('tk,td,tm->dm', Ez[lags:], lagged_data[l], input[lags:])
-                    E_xxT[:, xslcs[l], islc] += tmp
-                    E_xxT[:, islc, xslcs[l]] += tmp
-
-                # lagged data x ones (for bias)
-                tmp = np.einsum('tk,td->kd', Ez[lags:], lagged_data[l])
-                E_xxT[:, xslcs[l], -1] += tmp
-                E_xxT[:, -1, xslcs[l]] += tmp
-
-            # Fill in the inputs and bias blocks
-            if M > 0:
-                E_xxT[:, islc, islc] += np.einsum('tk,ti,tj->kij', Ez[lags:], input[lags:], input[lags:])
-                tmp = np.einsum('tk,td->kd', Ez[lags:], input[lags:])
-                E_xxT[:, islc, -1] += tmp
-                E_xxT[:, -1, islc] += tmp
-
-            # Expected bias
-            E_xxT[:, -1, -1] += np.sum(Ez[lags:], axis=0)
-
-            # Compute E[x y^T] statistics
-            for l in range(lags):
-                E_xyT[:, xslcs[l], :] += np.einsum('tk,ti,tj->kij', Ez[lags:], lagged_data[l], data[lags:])
-            E_xyT[:, islc, :] += np.einsum('tk,ti,tj->kij', Ez[lags:], input[lags:], data[lags:])
-            E_xyT[:, -1, :] += np.einsum('tk,tj->kj', Ez[lags:], data[lags:])
-
-            # Compute E[y y^T]
-            E_yyT += np.einsum('tk,ti,tj->kij', Ez[lags:], data[lags:], data[lags:])
-            if covariance is not None:
-                E_yyT += np.einsum('tk,tij->kij', Ez[lags:], covariance[lags:])
-
-        assert np.allclose(E_xxT, np.swapaxes(E_xxT, -1, -2))
-
-        return E_xxT, E_xyT, E_yyT
-
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances,
-               J0=None, h0=None, **kwargs):
-        K, D, M, lags = self.K, self.D, self.M, self.lags
-        C = D * lags + M + 1            # covariate dim
-
-        # Compute sufficient statistics
-        E_xxT, E_xyT, E_yyT = \
-            self._compute_statistics(expectations, datas, inputs, masks, tags, covariances)
-
-        # Add in prior, if given
-        if J0 is None or h0 is None:
-            J0 = 1e-8 * np.eye(C)
-            h0 = 0
-        J = J0 + E_xxT
-        h = h0 + E_xyT
-
-        # M step: Fit the weighted linear regressions for each K and D
-        mus = np.linalg.solve(J, h)    # (K, C, D)
-        self.As = np.swapaxes(mus[:, :D*lags, :], 1, 2)
-        self.Vs = np.swapaxes(mus[:, D*lags:D*lags+M, :], 1, 2)
-        self.bs = mus[:, -1, :]
-
-        # Update the covariance
-        self.Sigmas = (E_yyT - np.matmul(np.swapaxes(mus, -1, -2), E_xyT)) / E_xxT[:, -1:, -1:] + 1e-8 * np.eye(D)
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, As, bs, Vs = self.D, self.As, self.bs, self.Vs
@@ -1101,7 +906,7 @@ class AutoRegressiveDiagonalNoiseObservations(AutoRegressiveObservations):
         self._log_sigmasq_init = self._log_sigmasq_init[perm]
         self._log_sigmasq = self._log_sigmasq[perm]
 
-    def log_likelihoods(self, data, input, mask, tag, covariance):
+    def log_likelihoods(self, data, input, mask, tag):
         assert np.all(mask), "Cannot compute likelihood of autoregressive obsevations with missing data."
         mus = self._compute_mus(data, input, mask, tag)
 
@@ -1156,7 +961,7 @@ class IndependentAutoRegressiveObservations(_AutoRegressiveObservationsBase):
         self._log_sigmasq_init = self._log_sigmasq_init[perm]
         self._log_sigmasq = self._log_sigmasq[perm]
 
-    def initialize(self, datas, inputs=None, masks=None, tags=None, covariances=None):
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
         # Initialize with linear regressions
         from sklearn.linear_model import LinearRegression
         data = np.concatenate(datas)
@@ -1198,7 +1003,7 @@ class IndependentAutoRegressiveObservations(_AutoRegressiveObservationsBase):
         assert mus.shape == (T, self.K, D)
         return mus
 
-    def log_likelihoods(self, data, input, mask, tag, covariance):
+    def log_likelihoods(self, data, input, mask, tag):
         mus = self._compute_mus(data, input, mask, tag)
 
         # Compute the likelihood of the initial data and remainder separately
@@ -1207,7 +1012,7 @@ class IndependentAutoRegressiveObservations(_AutoRegressiveObservationsBase):
         ll_ar = stats.diagonal_gaussian_logpdf(data[L:, None, :], mus[L:], self.sigmasq)
         return np.row_stack((ll_init, ll_ar))
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         D, M = self.D, self.M
 
         for d in range(self.D):
@@ -1317,7 +1122,7 @@ class _RobustAutoRegressiveObservationsMixin(object):
         super(_RobustAutoRegressiveObservationsMixin, self).permute(perm)
         self._log_nus = self._log_nus[perm]
 
-    def log_likelihoods(self, data, input, mask, tag, covariance):
+    def log_likelihoods(self, data, input, mask, tag):
         assert np.all(mask), "Cannot compute likelihood of autoregressive obsevations with missing data."
         mus = self._compute_mus(data, input, mask, tag)
 
@@ -1327,7 +1132,7 @@ class _RobustAutoRegressiveObservationsMixin(object):
         ll_ar = stats.multivariate_studentst_logpdf(data[L:, None, :], mus[L:], self.Sigmas, self.nus)
         return np.row_stack((ll_init, ll_ar))
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances,
+    def m_step(self, expectations, datas, inputs, masks, tags,
                num_em_iters=1, optimizer="adam", num_iters=10, **kwargs):
         """
         Student's t is a scale mixture of Gaussians.  We can estimate its
@@ -1509,7 +1314,7 @@ class AltRobustAutoRegressiveDiagonalNoiseObservations(AutoRegressiveDiagonalNoi
         super(AltRobustAutoRegressiveDiagonalNoiseObservations, self).permute(perm)
         self.inv_nus = self.inv_nus[perm]
 
-    def log_likelihoods(self, data, input, mask, tag, covariance):
+    def log_likelihoods(self, data, input, mask, tag):
         assert np.all(mask), "Cannot compute likelihood of autoregressive obsevations with missing data."
         mus = self._compute_mus(data, input, mask, tag)
 
@@ -1519,7 +1324,7 @@ class AltRobustAutoRegressiveDiagonalNoiseObservations(AutoRegressiveDiagonalNoi
         ll_ar = stats.independent_studentst_logpdf(data[L:, None, :], mus[L:], self.sigmasq, self.nus)
         return np.row_stack((ll_init, ll_ar))
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances,
+    def m_step(self, expectations, datas, inputs, masks, tags,
                num_em_iters=1, optimizer="adam", num_iters=10, **kwargs):
         """
         Student's t is a scale mixture of Gaussians.  We can estimate its
@@ -1635,11 +1440,11 @@ class VonMisesObservations(_Observations):
         self.log_kappas = self.log_kappas[perm]
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, covariances=None):
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
         # TODO: add spherical k-means for initialization
         pass
 
-    def log_likelihoods(self, data, input, mask, tag, covariance):
+    def log_likelihoods(self, data, input, mask, tag):
         mus, kappas = self.mus, np.exp(self.log_kappas)
 
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
@@ -1649,7 +1454,7 @@ class VonMisesObservations(_Observations):
         D, mus, kappas = self.D, self.mus, np.exp(self.log_kappas)
         return npr.vonmises(self.mus[z], kappas[z], D)
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
 
         x = np.concatenate(datas)
         weights = np.concatenate([Ez for Ez, _, _ in expectations])  # T x D
@@ -1677,6 +1482,6 @@ class VonMisesObservations(_Observations):
             self.mus[k] = np.arctan2(*mus_k[k])  #
             self.log_kappas[k] = np.log(kappa0[k])  # K, D
 
-    def smooth(self, expectations, data, input, tag, covariance):
+    def smooth(self, expectations, data, input, tag):
         mus = self.mus
         return expectations.dot(mus)
