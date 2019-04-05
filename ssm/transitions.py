@@ -47,9 +47,9 @@ class _Transitions(object):
         # Maximize the expected log joint
         def _expected_log_joint(expectations):
             elbo = self.log_prior()
-            for data, input, mask, tag, (expected_states, expected_joints, _) \
-                in zip(datas, inputs, masks, tags, expectations):
-                log_Ps = self.log_transition_matrices(data, input, mask, tag)
+            for data, input, mask, tag, covariance, (expected_states, expected_joints, _) \
+                in zip(datas, inputs, masks, tags, covariances, expectations):
+                log_Ps = self.log_transition_matrices(data, input, mask, tag, covariance)
                 elbo += np.sum(expected_joints * log_Ps)
             return elbo
 
@@ -208,7 +208,7 @@ class RecurrentTransitions(InputDrivenTransitions):
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
     def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
-        _Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
+        _Transitions.m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs)
 
 
 class RecurrentOnlyTransitions(_Transitions):

@@ -916,7 +916,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
         self.Sigmas = sqerr / weight[:, None, None] + 1e-8 * np.eye(D)
 
-    def _compute_statistics(self, expectations, data, inputs, masks, tags, covariances):
+    def _compute_statistics(self, expectations, datas, inputs, masks, tags, covariances):
         """
         Compute the sufficient statistics for updating the AR model.
 
@@ -995,7 +995,8 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
         return E_xxT, E_xyT, E_yyT
 
-    def m_step(self, expectations, datas, inputs, masks, tags, covariances, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, covariances,
+               J0=None, h0=None, **kwargs):
         K, D, M, lags = self.K, self.D, self.M, self.lags
         C = D * lags + M + 1            # covariate dim
 
@@ -1003,8 +1004,15 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         E_xxT, E_xyT, E_yyT = \
             self._compute_statistics(expectations, datas, inputs, masks, tags, covariances)
 
+        # Add in prior, if given
+        if J0 is None or h0 is None:
+            J0 = 1e-8 * np.eye(C)
+            h0 = 0
+        J = J0 + E_xxT
+        h = h0 + E_xyT
+
         # M step: Fit the weighted linear regressions for each K and D
-        mus = np.linalg.solve(E_xxT + 1e-8 * np.eye(C), E_xyT)    # (K, C, D)
+        mus = np.linalg.solve(J, h)    # (K, C, D)
         self.As = np.swapaxes(mus[:, :D*lags, :], 1, 2)
         self.Vs = np.swapaxes(mus[:, D*lags:D*lags+M, :], 1, 2)
         self.bs = mus[:, -1, :]
@@ -1329,7 +1337,8 @@ class _RobustAutoRegressiveObservationsMixin(object):
         self._m_step_ar(expectations, datas, inputs, masks, tags, num_em_iters)
         self._m_step_nu(expectations, datas, inputs, masks, tags, optimizer, num_iters, **kwargs)
 
-    def _m_step_ar(self, expectations, datas, inputs, masks, tags, num_em_iters):
+    def _m_step_ar(self, expectations, datas, inputs, masks, tags, num_em_iters,
+                   J0=None, h0=None):
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
         # Collect data for this dimension
@@ -1361,8 +1370,15 @@ class _RobustAutoRegressiveObservationsMixin(object):
             # M step: Fit the weighted linear regressions for each K and D
             # This is exactly the same as the M-step for the AutoRegressiveObservations,
             # but it has an extra scaling factor of tau applied to the weight.
-            J = np.tile(1e-8 * np.eye(D * lags + M + 1)[None, :, :], (K, 1, 1))
-            h = np.zeros((K, D * lags + M + 1, D))
+            if J0 is None and h0 is None:
+                J = np.tile(1e-8 * np.eye(D * lags + M + 1)[None, :, :], (K, 1, 1))
+                h = np.zeros((K, D * lags + M + 1, D))
+            else:
+                assert J0.shape == (K, D*lags + M + 1, D*lags + M + 1)
+                assert h0.shape == (K, D*lags + M + 1, D)
+                J = J0
+                h = h0
+
             for x, y, Ez, tau in zip(xs, ys, Ezs, taus):
                 weight = Ez * tau
                 J += np.einsum('tk, ti, tj -> kij', weight, x, x)
