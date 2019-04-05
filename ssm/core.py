@@ -441,7 +441,7 @@ class BaseHSMM(BaseHMM):
             mask = np.ones((T,) + D, dtype=bool)
 
             # Sample the first state from the initial distribution
-            pi0 = np.exp(self.init_state_distn.log_initial_state_distn(data, input, mask, tag=None))
+            pi0 = np.exp(self.init_state_distn.log_initial_state_distn(data, input, mask, tag))
             z[0] = npr.choice(self.K, p=pi0)
             data[0] = self.observations.sample_x(z[0], data[:0], input=input[0], with_noise=with_noise)
 

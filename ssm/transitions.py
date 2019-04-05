@@ -25,7 +25,7 @@ class _Transitions(object):
     def params(self, value):
         raise NotImplementedError
 
-    def initialize(self, datas, inputs, masks, tagss):
+    def initialize(self, datas, inputs, masks, tags):
         pass
 
     def permute(self, perm):
@@ -37,7 +37,7 @@ class _Transitions(object):
     def log_transition_matrices(self, data, input, mask, tag):
         raise NotImplementedError
 
-    def m_step(self, expectations, datas, inputs, masks, tagss,
+    def m_step(self, expectations, datas, inputs, masks, tags,
                optimizer="bfgs", num_iters=100, **kwargs):
         """
         If M-step cannot be done in closed form for the transitions, default to BFGS.
@@ -48,7 +48,7 @@ class _Transitions(object):
         def _expected_log_joint(expectations):
             elbo = self.log_prior()
             for data, input, mask, tag, (expected_states, expected_joints, _) \
-                in zip(datas, inputs, masks, tagss, expectations):
+                in zip(datas, inputs, masks, tags, expectations):
                 log_Ps = self.log_transition_matrices(data, input, mask, tag)
                 elbo += np.sum(expected_joints * log_Ps)
             return elbo
@@ -97,7 +97,7 @@ class StationaryTransitions(_Transitions):
         log_Ps = self.log_Ps - logsumexp(self.log_Ps, axis=1, keepdims=True)
         return np.tile(log_Ps[None, :, :], (T-1, 1, 1))
 
-    def m_step(self, expectations, datas, inputs, masks, tagss, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         P = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations]) + 1e-16
         P /= P.sum(axis=-1, keepdims=True)
         self.log_Ps = np.log(P)
@@ -124,7 +124,7 @@ class StickyTransitions(StationaryTransitions):
             lp += dirichlet.logpdf(Ps[k], alpha)
         return lp
 
-    def m_step(self, expectations, datas, inputs, masks, tagss, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         expected_joints = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations]) + 1e-8
         expected_joints += self.kappa * np.eye(self.K)
         P = expected_joints / expected_joints.sum(axis=1, keepdims=True)
@@ -167,7 +167,7 @@ class InputDrivenTransitions(StickyTransitions):
         log_Ps = log_Ps + np.dot(input[1:], self.Ws.T)[:, None, :]
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
-    def m_step(self, expectations, datas, inputs, masks, tagss, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         _Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
 
@@ -249,7 +249,7 @@ class RecurrentOnlyTransitions(_Transitions):
         log_Ps = np.tile(log_Ps, (1, self.K, 1))                       # expand
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)       # normalize
 
-    def m_step(self, expectations, datas, inputs, masks, tagss, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         _Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
 
@@ -295,7 +295,7 @@ class RBFRecurrentTransitions(InputDrivenTransitions):
     def Sigmas(self):
         return np.matmul(self._sqrt_Sigmas, np.swapaxes(self._sqrt_Sigmas, -1, -2))
 
-    def initialize(self, datas, inputs, masks, tagss):
+    def initialize(self, datas, inputs, masks, tags):
         # Fit a GMM to the data to set the means and covariances
         from sklearn.mixture import GaussianMixture
         gmm = GaussianMixture(self.K, covariance_type="full")
@@ -330,7 +330,7 @@ class RBFRecurrentTransitions(InputDrivenTransitions):
         log_Ps = log_Ps + np.dot(input[1:], self.Ws.T)[:, None, :]
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
-    def m_step(self, expectations, datas, inputs, masks, tagss, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         _Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
 
@@ -381,7 +381,7 @@ class NeuralNetworkRecurrentTransitions(_Transitions):
         # Normalize
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
-    def m_step(self, expectations, datas, inputs, masks, tagss, optimizer="adam", num_iters=100, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, optimizer="adam", num_iters=100, **kwargs):
         # Default to adam instead of bfgs for the neural network model.
         _Transitions.m_step(self, expectations, datas, inputs, masks, tags,
             optimizer=optimizer, num_iters=num_iters, **kwargs)
@@ -538,7 +538,7 @@ class NegativeBinomialSemiMarkovTransitions(_Transitions):
         P = self.transition_matrix
         return np.tile(np.log(P)[None, :, :], (T-1, 1, 1))
 
-    def m_step(self, expectations, datas, inputs, masks, tagss, samples, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, samples, **kwargs):
         # Update the transition matrix between super states
         P = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations]) + 1e-16
         np.fill_diagonal(P, 0)
