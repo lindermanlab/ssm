@@ -108,3 +108,7 @@ venv.bak/
 # Other
 *~
 notebooks/dask-worker-space
+notebooks/*.pdf
+notebooks/*.html
+
+.DS_Store

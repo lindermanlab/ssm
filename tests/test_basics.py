@@ -6,7 +6,7 @@ from ssm.models import HMM
 
 def test_sample(T=10, K=4, D=3, M=2):
     """
-    Test that we can construct and sample an HMM 
+    Test that we can construct and sample an HMM
     with or withou, prefixes, noise, and noise.
     """
     transition_names = [
@@ -21,13 +21,18 @@ def test_sample(T=10, K=4, D=3, M=2):
 
     observation_names = [
         "gaussian",
+        "diagonal_gaussian",
         "t",
+        "diagonal_t",
         "bernoulli",
         "categorical",
         "poisson",
         "vonmises",
         "ar",
-        "robust_ar"
+        "diagonal_ar",
+        "independent_ar",
+        "robust_ar",
+        "diagonal_robust_ar"
     ]
 
     # Sample basic (no prefix, inputs, etc.)
@@ -86,7 +91,7 @@ def test_hmm_likelihood(T=1000, K=5, D=2):
     hmm = HMM(K, D, observations="diagonal_gaussian")
     hmm.transitions.log_Ps = np.log(A)
     hmm.observations.mus = C
-    hmm.observations.inv_sigmas = np.log(sigma) * np.ones((K, D))
+    hmm.observations.sigmasq = sigma * np.ones((K, D))
     test_lkhd = hmm.log_probability(y)
 
     assert np.allclose(true_lkhd, test_lkhd)
@@ -128,7 +133,7 @@ def test_expectations(T=1000, K=20, D=2):
     hmm = HMM(K, D, observations="diagonal_gaussian")
     hmm.transitions.log_Ps = np.log(A)
     hmm.observations.mus = C
-    hmm.observations.inv_sigmas = np.log(sigma) * np.ones((K, D))
+    hmm.observations.sigmasq = sigma * np.ones((K, D))
     test_Ez, test_Ezzp1, _ = hmm.expected_states(y)
     test_E_trans = test_Ezzp1.sum(0)
 
@@ -170,7 +175,7 @@ def test_viterbi(T=1000, K=20, D=2):
     hmm = HMM(K, D, observations="diagonal_gaussian")
     hmm.transitions.log_Ps = np.log(A)
     hmm.observations.mus = C
-    hmm.observations.inv_sigmas = np.log(sigma) * np.ones((K, D))
+    hmm.observations.sigmasq = sigma * np.ones((K, D))
     z_star2 = hmm.most_likely_states(y)
 
     assert np.allclose(z_star, z_star2)

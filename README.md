@@ -1,7 +1,7 @@
-# SSM: Bayesian learning and inference for state space models 
+# SSM: Bayesian learning and inference for state space models
 [![Test status](https://travis-ci.org/slinderman/ssm.svg?branch=master)](https://travis-ci.org/slinderman/ssm)
 
-This package has fast and flexible code for simulating, learning, and performing inference in a variety of state space models. 
+This package has fast and flexible code for simulating, learning, and performing inference in a variety of state space models.
 Currently, it supports:
 
 - Hidden Markov Models (HMM)
@@ -23,7 +23,7 @@ We support the following observation models:
 - Categorical
 - Von Mises
 
-HMM inference is done with either expectation maximization (EM) or stochastic gradient descent (SGD).  For SLDS, we use stochastic variational inference (SVI). 
+HMM inference is done with either expectation maximization (EM) or stochastic gradient descent (SGD).  For SLDS, we use stochastic variational inference (SVI).
 
 # Examples
 Here's a snippet to illustrate how we simulate from an HMM.
@@ -38,19 +38,20 @@ hmm = HMM(K, D, observations="gaussian")
 z, y = hmm.sample(T)
 ```
 
-Fitting an HMM is simple. 
+Fitting an HMM is simple.
 ```
 test_hmm = HMM(K, D, observations="gaussian")
 test_hmm.fit(y)
 zhat = test_hmm.most_likely_states(y)
 ```
 
-The notebooks folder has more thorough, complete examples of HMMs, SLDS, and recurrent SLDS.  
+The notebooks folder has more thorough, complete examples of HMMs, SLDS, and recurrent SLDS.
 
 # Installation
 ```
 git clone git@github.com:slinderman/ssm.git
 cd ssm
+pip install numpy cython
 pip install -e .
 ```
 This will install "from source" and compile the Cython code for fast message passing and gradients.

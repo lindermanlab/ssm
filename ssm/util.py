@@ -335,7 +335,7 @@ def fit_multiclass_logistic_regression(X, y, bias=None, K=None, W0=None, mu0=0, 
 
 
 def fit_linear_regression(Xs, ys, weights=None,
-                          mu0=0, sigmasq0=1, alpha0=1, beta0=1,
+                          mu0=0, sigmasq0=1, nu0=1, Psi0=1,
                           fit_intercept=True):
     """
     Fit a linear regression y_i ~ N(Wx_i + b, diag(S)) for W, b, S.
@@ -385,21 +385,24 @@ def fit_linear_regression(Xs, ys, weights=None,
         b = 0
 
     # Compute the residual and the posterior variance
-    alpha = alpha0
-    beta = beta0 * np.ones(P)
+    nu = nu0
+    Psi = Psi0 * np.eye(P)
     for X, y, weight in zip(Xs, ys, weights):
         yhat = np.dot(X, W.T) + b
         resid = y - yhat
-        alpha += 0.5 * np.sum(weight)
-        beta += 0.5 * np.sum(weight[:, None] * resid**2, axis=0)
+        nu += np.sum(weight)
+        tmp1 = np.einsum('t,ti,tj->ij', weight, resid, resid)
+        tmp2 = np.sum(weight[:, None, None] * resid[:, :, None] * resid[:, None, :], axis=0)
+        assert np.allclose(tmp1, tmp2)
+        Psi += tmp1
 
-    # Get MAP estimate of posterior mode of precision
-    sigmasq = beta / (alpha + 1e-16)
+    # Get MAP estimate of posterior covariance
+    Sigma = Psi / (nu + P + 1)
 
     if fit_intercept:
-        return W, b, sigmasq
+        return W, b, Sigma
     else:
-        return W, sigmasq
+        return W, Sigma
 
 
 def fit_negative_binomial_integer_r(xs, r_min=1, r_max=20):

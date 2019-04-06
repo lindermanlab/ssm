@@ -195,6 +195,78 @@ def multivariate_normal_logpdf(data, mus, Sigmas, mask=None):
     return np.reshape(lls, shp)
 
 
+def expected_multivariate_normal_logpdf(E_xs, E_xxTs, E_mus, E_mumuTs, Sigmas, Ls=None):
+    """
+    Compute the expected log probability density of a multivariate Gaussian distribution.
+    This will broadcast as long as data, mus, Sigmas have the same (or at
+    least be broadcast compatible along the) leading dimensions.
+    Parameters
+    ----------
+    E_xs : array_like (..., D)
+        The expected value of the points at which to evaluate the log density
+    E_xxTs : array_like (..., D, D)
+        The second moment of the points at which to evaluate the log density
+    E_mus : array_like (..., D)
+        The expected mean(s) of the Gaussian distribution(s)
+    E_mumuTs : array_like (..., D, D)
+        The second moment of the mean
+    Sigmas : array_like (..., D, D)
+        The covariances(s) of the Gaussian distribution(s)
+    Ls : array_like (..., D, D)
+        Optionally pass in the Cholesky decomposition of Sigmas
+    Returns
+    -------
+    lps : array_like (...,)
+        Expected log probabilities under the multivariate Gaussian distribution(s).
+    TODO
+    ----
+    - Allow for uncertainty in the covariance as well.
+    """
+    # Check inputs
+    D = E_xs.shape[-1]
+    assert E_xxTs.shape[-2] == E_xxTs.shape[-1] == D
+    assert E_mus.shape[-1] == D
+    assert E_mumuTs.shape[-2] == E_mumuTs.shape[-1] == D
+    assert Sigmas.shape[-2] == Sigmas.shape[-1] == D
+    if Ls is not None:
+        assert Ls.shape[-2] == Ls.shape[-1] == D
+    else:
+        Ls = np.linalg.cholesky(Sigmas)                              # (..., D, D)
+
+    # TODO: Figure out how to perform this computation without explicit inverse
+    Sigma_invs = np.linalg.inv(Sigmas)
+
+    # Compute  E[(x-mu)^T Sigma^{-1}(x-mu)]
+    #        = Tr(Sigma^{-1} E[(x-mu)(x-mu)^T])
+    #        = Tr(Sigma^{-1} E[xx^T - x mu^T - mu x^T + mu mu^T])
+    #        = Tr(Sigma^{-1} (E[xx^T - E[x]E[mu]^T - E[mu]E[x]^T + E[mu mu^T]]))
+    #        = Tr(Sigma^{-1} A)
+    #        = Tr((LL^T)^{-1} A)
+    #        = Tr(L^{-1} A L^{-T} )
+    #        = sum_{ij} [Sigma^{-1}]_{ij} * A_{ij}
+    # where
+    #
+    # A = E[xx^T - E[x]E[mu]^T - E[mu]E[x]^T + E[mu mu^T]]
+    #
+    # However, since Sigma^{-1} is symmetric, we get the same
+    # answer with
+    #
+    # A = E[xx^T - 2 * E[x]E[mu]^T + E[mu mu^T]]
+    #
+    E_xmuT = E_xs[..., :, None] * E_mus[..., None, :]
+    # E_muxT = np.swapaxes(E_xmuT, -1, -2)
+    # As = E_xxTs - E_xmuT - E_muxT + E_mumuTs
+    As = E_xxTs - 2 * E_xmuT + E_mumuTs
+    lp = -0.5 * np.sum(Sigma_invs * As, axis=(-2, -1))
+
+    # Normalizer
+    L_diag = np.reshape(Ls, Ls.shape[:-2] + (-1,))[..., ::D + 1]     # (..., D)
+    half_log_det = np.sum(np.log(abs(L_diag)), axis=-1)              # (...,)
+    lp = lp - 0.5 * D * np.log(2 * np.pi) - half_log_det             # (...,)
+
+    return lp
+
+
 def diagonal_gaussian_logpdf(data, mus, sigmasqs, mask=None):
     """
     Compute the log probability density of a Gaussian distribution with
@@ -231,6 +303,122 @@ def diagonal_gaussian_logpdf(data, mus, sigmasqs, mask=None):
 
     normalizer = -0.5 * np.log(2 * np.pi * sigmasqs)
     return np.sum((normalizer - 0.5 * (data - mus)**2 / sigmasqs) * mask, axis=-1)
+
+
+def multivariate_studentst_logpdf(data, mus, Sigmas, nus, Ls=None):
+    """
+    Compute the log probability density of a multivariate Student's t distribution.
+    This will broadcast as long as data, mus, Sigmas, nus have the same (or at
+    least be broadcast compatible along the) leading dimensions.
+
+    Parameters
+    ----------
+    data : array_like (..., D)
+        The points at which to evaluate the log density
+
+    mus : array_like (..., D)
+        The mean(s) of the t distribution(s)
+
+    Sigmas : array_like (..., D, D)
+        The covariances(s) of the t distribution(s)
+
+    nus : array_like (...,)
+        The degrees of freedom of the t distribution(s)
+
+    Ls : array_like (..., D, D)
+        Optionally pass in the Cholesky decomposition of Sigmas
+
+    Returns
+    -------
+    lps : array_like (...,)
+        Log probabilities under the multivariate Gaussian distribution(s).
+    """
+    # Check inputs
+    D = data.shape[-1]
+    assert mus.shape[-1] == D
+    assert Sigmas.shape[-2] == Sigmas.shape[-1] == D
+    if Ls is not None:
+        assert Ls.shape[-2] == Ls.shape[-1] == D
+    else:
+        Ls = np.linalg.cholesky(Sigmas)                              # (..., D, D)
+
+    # Quadratic term
+    q = batch_mahalanobis(Ls, data - mus) / nus                      # (...,)
+    lp = - 0.5 * (nus + D) * np.log1p(q)                             # (...,)
+
+    # Normalizer
+    lp = lp + gammaln(0.5 * (nus + D)) - gammaln(0.5 * nus)          # (...,)
+    lp = lp - 0.5 * D * np.log(np.pi) - 0.5 * D * np.log(nus)        # (...,)
+    L_diag = np.reshape(Ls, Ls.shape[:-2] + (-1,))[..., ::D + 1]     # (..., D)
+    half_log_det = np.sum(np.log(abs(L_diag)), axis=-1)              # (...,)
+    lp = lp - half_log_det
+
+    return lp
+
+
+def expected_multivariate_studentst_logpdf(E_xs, E_xxTs, E_mus, E_mumuTs, Sigmas, nus, Ls=None):
+    """
+    Compute the expected log probability density of a multivariate Gaussian distribution.
+    This will broadcast as long as data, mus, Sigmas have the same (or at
+    least be broadcast compatible along the) leading dimensions.
+    Parameters
+    ----------
+    E_xs : array_like (..., D)
+        The expected value of the points at which to evaluate the log density
+    E_xxTs : array_like (..., D, D)
+        The second moment of the points at which to evaluate the log density
+    E_mus : array_like (..., D)
+        The expected mean(s) of the Gaussian distribution(s)
+    E_mumuTs : array_like (..., D, D)
+        The second moment of the mean
+    Sigmas : array_like (..., D, D)
+        The covariances(s) of the Gaussian distribution(s)
+    Ls : array_like (..., D, D)
+        Optionally pass in the Cholesky decomposition of Sigmas
+    Returns
+    -------
+    lps : array_like (...,)
+        Expected log probabilities under the multivariate Gaussian distribution(s).
+    TODO
+    ----
+    - Allow for uncertainty in the covariance Sigmas and dof nus as well.
+    """
+    # Check inputs
+    D = E_xs.shape[-1]
+    assert E_xxTs.shape[-2] == E_xxTs.shape[-1] == D
+    assert E_mus.shape[-1] == D
+    assert E_mumuTs.shape[-2] == E_mumuTs.shape[-1] == D
+    assert Sigmas.shape[-2] == Sigmas.shape[-1] == D
+    if Ls is not None:
+        assert Ls.shape[-2] == Ls.shape[-1] == D
+    else:
+        Ls = np.linalg.cholesky(Sigmas)                              # (..., D, D)
+
+    # TODO: Figure out how to perform this computation without explicit inverse
+    Sigma_invs = np.linalg.inv(Sigmas)
+
+    # Compute  E[(x-mu)^T Sigma^{-1}(x-mu)]
+    #        = Tr(Sigma^{-1} E[(x-mu)(x-mu)^T])
+    #        = Tr(Sigma^{-1} E[xx^T - 2 x mu^T + mu mu^T])
+    #        = Tr(Sigma^{-1} (E[xx^T - 2 E[x]E[mu]^T + E[mu mu^T]]))
+    #        = Tr(Sigma^{-1} A)
+    #        = Tr((LL^T)^{-1} A)
+    #        = Tr(L^{-1} A L^{-T} )
+    #        = sum_{ij} [Sigma^{-1}]_{ij} * A_{ij}
+    # where
+    #
+    # A = E[xx^T - 2 E[x]E[mu]^T + E[mu mu^T]]
+    #
+    As = E_xxTs - 2 * E_xs[..., :, None] * E_mus[..., None, :] + E_mumuTs   # (..., D, D)
+    q = np.sum(Sigma_invs * As, axis=(-2, -1)) / nus                        # (...,)
+    lp = - 0.5 * (nus + D) * np.log1p(q)                                    # (...,)
+
+    # Normalizer
+    L_diag = np.reshape(Ls, Ls.shape[:-2] + (-1,))[..., ::D + 1]            # (..., D)
+    half_log_det = np.sum(np.log(abs(L_diag)), axis=-1)                     # (...,)
+    lp = lp - 0.5 * D * np.log(2 * np.pi) - half_log_det                    # (...,)
+
+    return lp
 
 
 def independent_studentst_logpdf(data, mus, sigmasqs, nus, mask=None):

@@ -6,6 +6,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 from ssm.models import HMM
+from ssm.util import find_permutation
 
 # Set the parameters of the HMM
 T = 500     # number of time bins
@@ -22,115 +23,109 @@ true_ll = true_hmm.log_probability(y)
 N_sgd_iters = 1000
 N_em_iters = 100
 
-print("Fitting diagonal Gaussian HMM with SGD")
-hmm = HMM(K, D, observations="diagonal_gaussian")
-hmm_sgd_lls = hmm.fit(y, method="sgd", num_iters=N_sgd_iters)
-hmm_sgd_test_ll = hmm.log_probability(y_test)
-hmm_sgd_smooth = hmm.smooth(y)
+# A bunch of observation models that all include the
+# diagonal Gaussian as a special case.
+observations = [
+    "diagonal_gaussian",
+    "gaussian",
+    "diagonal_t",
+    "studentst",
+    "diagonal_ar",
+    "ar",
+    "diagonal_robust_ar",
+    "robust_ar"
+]
 
-print("Fitting diagonal Gaussian HMM with EM")
-hmm = HMM(K, D, observations="diagonal_gaussian")
-hmm_em_lls = hmm.fit(y, method="em", num_em_iters=N_em_iters)
-hmm_em_test_ll = hmm.log_probability(y_test)
-hmm_em_smooth = hmm.smooth(y)
+# Fit with both SGD and EM
+methods = ["sgd", "em"]
 
-print("Fitting full Gaussian HMM with SGD")
-mvnhmm = HMM(K, D, observations="gaussian")
-mvnhmm_sgd_lls = hmm.fit(y, method="sgd", num_iters=N_sgd_iters)
-mvnhmm_sgd_test_ll = hmm.log_probability(y_test)
-mvnhmm_sgd_smooth = hmm.smooth(y)
+results = {}
+for obs in observations:
+    for method in methods:
+        print("Fitting {} HMM with {}".format(obs, method))
+        model = HMM(K, D, observations=obs)
+        train_lls = model.fit(y, method=method)
+        test_ll = model.log_likelihood(y_test)
+        smoothed_y = model.smooth(y)
 
-print("Fitting full Gaussian HMM with EM")
-mvnhmm = HMM(K, D, observations="gaussian")
-mvnhmm_em_lls = hmm.fit(y, method="em", num_em_iters=N_em_iters)
-mvnhmm_em_test_ll = hmm.log_probability(y_test)
-mvnhmm_em_smooth = hmm.smooth(y)
+        # Permute to match the true states
+        model.permute(find_permutation(z, model.most_likely_states(y)))
+        smoothed_z = model.most_likely_states(y)
+        results[(obs, method)] = (model, train_lls, test_ll, smoothed_z, smoothed_y)
 
-print("Fitting Student's t HMM with SGD")
-thmm = HMM(K, D, observations="studentst")
-thmm_sgd_lls = thmm.fit(y, method="sgd", num_iters=N_sgd_iters)
-thmm_sgd_test_ll = thmm.log_probability(y_test)
-thmm_sgd_smooth = thmm.smooth(y)
+# Plot the inferred states
+fig, axs = plt.subplots(len(observations) + 1, 1, figsize=(12, 8))
 
-print("Fitting Student's t HMM with EM")
-thmm = HMM(K, D, observations="studentst")
-thmm_em_lls = thmm.fit(y, method="em", num_em_iters=N_em_iters)
-thmm_em_test_ll = thmm.log_probability(y_test)
-thmm_em_smooth = thmm.smooth(y)
+# Plot the true states
+plt.sca(axs[0])
+plt.imshow(z[None, :], aspect="auto", cmap="jet")
+plt.title("true")
+plt.xticks()
 
-print("Fitting ARHMM with SGD")
-arhmm = HMM(K, D, observations="ar")
-arhmm_sgd_lls = arhmm.fit(y, method="sgd", num_iters=N_sgd_iters)
-arhmm_sgd_test_ll = arhmm.log_probability(y_test)
-arhmm_sgd_smooth = arhmm.smooth(y)
+# Plot the inferred states
+for i, obs in enumerate(observations):
+    zs = []
+    for method, ls in zip(methods, ['-', ':']):
+        _, _, _, smoothed_z, _ = results[(obs, method)]
+        zs.append(smoothed_z)
 
-print("Fitting ARHMM with EM")
-arhmm = HMM(K, D, observations="ar")
-arhmm_em_lls = arhmm.fit(y, method="em", num_em_iters=N_em_iters)
-arhmm_em_test_ll = arhmm.log_probability(y_test)
-arhmm_em_smooth = arhmm.smooth(y)
+    plt.sca(axs[i+1])
+    plt.imshow(np.row_stack(zs), aspect="auto", cmap="jet")
+    plt.yticks([0, 1], methods)
+    if i != len(observations) - 1:
+        plt.xticks()
+    else:
+        plt.xlabel("time")
+    plt.title(obs)
 
-print("Fitting tARHMM with SGD")
-tarhmm = HMM(K, D, observations="robust_ar")
-tarhmm_sgd_lls = tarhmm.fit(y, method="sgd", num_iters=N_sgd_iters)
-tarhmm_sgd_test_ll = tarhmm.log_probability(y_test)
-tarhmm_sgd_smooth = tarhmm.smooth(y)
-
-print("Fitting tARHMM with EM")
-tarhmm = HMM(K, D, observations="robust_ar")
-tarhmm_em_lls = tarhmm.fit(y, method="em", num_em_iters=N_em_iters)
-tarhmm_em_test_ll = tarhmm.log_probability(y_test)
-tarhmm_em_smooth = tarhmm.smooth(y)
+plt.tight_layout()
 
 # Plot smoothed observations
-plt.figure()
+fig, axs = plt.subplots(D, 1, figsize=(12, 8))
+
+# Plot the true data
 for d in range(D):
-	plt.subplot(D, 1, d+1)
-	plt.plot(y, '-k', lw=2, label="true")
-	l1 = plt.plot(hmm_sgd_smooth, '-', lw=1,
-                      label="HMM (SGD)")[0]
-	plt.plot(hmm_em_smooth, ':', lw=1, color=l1.get_color(),
-                 label="HMM (EM)")
-	l2 = plt.plot(thmm_sgd_smooth, '-', lw=1,
-                      label="tHMM (SGD)")[0]
-	plt.plot(thmm_em_smooth, ':', lw=1, color=l2.get_color(),
-                 label="tHMM (EM)")
-	l3 = plt.plot(arhmm_sgd_smooth, '-', lw=1,
-                      label="ARHMM (SGD)")[0]
-	plt.plot(arhmm_em_smooth, ':', lw=1, color=l3.get_color(),
-                 label="ARHMM (EM)")
-	l4 = plt.plot(tarhmm_sgd_smooth, '-', lw=1,
-                      label="tARHMM (SGD)")[0]
-	plt.plot(arhmm_em_smooth, ':', lw=1, color=l4.get_color(),
-                 label="tARHMM (EM)")
-	plt.legend(loc="upper right")
+    plt.sca(axs[d])
+    plt.plot(y[:, d], '-k', lw=2, label="True")
+    plt.xlabel("time")
+    plt.ylabel("$y_{{}}$".format(d+1))
+
+for obs in observations:
+    line = None
+    for method, ls in zip(methods, ['-', ':']):
+        _, _, _, _, smoothed_y = results[(obs, method)]
+        for d in range(D):
+            plt.sca(axs[d])
+            color = line.get_color() if line is not None else None
+            line = plt.plot(smoothed_y[:, d], ls=ls, lw=1, color=color, label="{}({})".format(obs, method))[0]
+
+# Make a legend
+plt.sca(axs[0])
+plt.legend(loc="upper right")
+plt.tight_layout()
 
 # Plot log likelihoods
-plt.figure()
-l1 = plt.plot(hmm_sgd_lls, ls='-', label="HMM (SGD)")[0]
-plt.plot(hmm_em_lls, ls=':', label="HMM (EM)", color=l1.get_color())
-l1b = plt.plot(mvnhmm_sgd_lls, ls='-', label="MVN HMM (SGD)")[0]
-plt.plot(mvnhmm_em_lls, ls=':', label="MVN HMM (EM)", color=l1b.get_color())
-l2 = plt.plot(thmm_sgd_lls, ls='-', label="tHMM (SGD)")[0]
-plt.plot(thmm_em_lls, ls=':', label="tHMM (EM)", color=l2.get_color())
-l3 = plt.plot(arhmm_sgd_lls, ls='-', label="ARHMM (SGD)")[0]
-plt.plot(arhmm_em_lls, ls=':', label="ARHMM (EM)", color=l3.get_color())
-l4 = plt.plot(tarhmm_sgd_lls, ls='-', label="tARHMM (SGD)")[0]
-plt.plot(tarhmm_em_lls, ls=':', label="tARHMM (EM)", color=l4.get_color())
-plt.plot(true_ll * np.ones(max(N_em_iters, N_sgd_iters)), ':', label="true")
-plt.legend(loc="lower right")
+plt.figure(figsize=(12, 8))
+for obs in observations:
+    line = None
+    for method, ls in zip(methods, ['-', ':']):
+        _, lls, _, _, _ = results[(obs, method)]
+        color = line.get_color() if line is not None else None
+        line = plt.plot(lls, ls=ls, lw=1, color=color, label="{}({})".format(obs, method))[0]
 
+xlim = plt.xlim()
+plt.plot(xlim, true_ll * np.ones(2), '-k', label="true")
+plt.xlim(xlim)
+
+plt.legend(loc="lower right")
+plt.tight_layout()
+
+# Print the test log likelihoods
 print("Test log likelihood")
-print("True: ", true_hmm.log_probability(y_test))
-print("HMM (SGD) ", hmm_sgd_test_ll)
-print("HMM (EM) ", hmm_em_test_ll)
-print("MVN HMM (SGD) ", mvnhmm_sgd_test_ll)
-print("MVN HMM (EM) ", mvnhmm_em_test_ll)
-print("tHMM (SGD) ", thmm_sgd_test_ll)
-print("tHMM (EM) ", thmm_em_test_ll)
-print("ARHMM (SGD) ", arhmm_sgd_test_ll)
-print("ARHMM (EM) ", arhmm_em_test_ll)
-print("tARHMM (SGD) ", tarhmm_sgd_test_ll)
-print("tARHMM (EM) ", tarhmm_em_test_ll)
+print("True: ", true_hmm.log_likelihood(y_test))
+for obs in observations:
+    for method in methods:
+        _, _, test_ll, _, _ = results[(obs, method)]
+        print("{} ({}): {}".format(obs, method, test_ll))
 
 plt.show()

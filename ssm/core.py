@@ -223,7 +223,8 @@ class BaseHMM(object):
         :return total log probability of the data.
         """
         elp = self.log_prior()
-        for (Ez, Ezzp1, _), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
+        for (Ez, Ezzp1, _), data, input, mask, tag in \
+            zip(expectations, datas, inputs, masks, tags):
             log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
             log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
             log_likes = self.observations.log_likelihoods(data, input, mask, tag)
@@ -276,7 +277,7 @@ class BaseHMM(object):
             epoch = itr // M
             m = itr % M
             i = perm[epoch][m]
-            return datas[i], inputs[i], masks[i], tags[i]
+            return datas[i], inputs[i], masks[i], tags[i][i]
 
         # Define the objective (negative ELBO)
         def _objective(params, itr):
@@ -335,7 +336,8 @@ class BaseHMM(object):
         for itr in pbar:
             # E step: compute expected latent states with current parameters
             expectations = [self.expected_states(data, input, mask, tag)
-                            for data, input, mask, tag in zip(datas, inputs, masks, tags)]
+                            for data, input, mask, tag,
+                            in zip(datas, inputs, masks, tags)]
 
             # M step: maximize expected log joint wrt parameters
             self.init_state_distn.m_step(expectations, datas, inputs, masks, tags, **kwargs)
@@ -349,7 +351,8 @@ class BaseHMM(object):
         return lls
 
     @ensure_args_are_lists
-    def fit(self, datas, inputs=None, masks=None, tags=None, method="em", initialize=True, **kwargs):
+    def fit(self, datas, inputs=None, masks=None, tags=None,
+            method="em", initialize=True, **kwargs):
         _fitting_methods = \
             dict(sgd=partial(self._fit_sgd, "sgd"),
                  adam=partial(self._fit_sgd, "adam"),
@@ -360,7 +363,7 @@ class BaseHMM(object):
 
         if method not in _fitting_methods:
             raise Exception("Invalid method: {}. Options are {}".\
-                            format(method, self._fitting_methods.keys()))
+                            format(method, _fitting_methods.keys()))
 
         if initialize:
             self.initialize(datas, inputs=inputs, masks=masks, tags=tags)
@@ -596,7 +599,7 @@ class BaseHSMM(BaseHMM):
 
         if method not in _fitting_methods:
             raise Exception("Invalid method: {}. Options are {}".\
-                            format(method, self._fitting_methods.keys()))
+                            format(method, _fitting_methods.keys()))
 
         if initialize:
             self.initialize(datas, inputs=inputs, masks=masks, tags=tags)
@@ -913,7 +916,7 @@ class BaseSwitchingLDS(object):
         Let gamma denote the emission parameters and theta denote the transition
         and initial discrete state parameters. This is a mix of EM and SVI:
             1. Sample x ~ q(x; phi)
-            2. Compute L(x, theta') E_p(z | x, theta)[log p(x, z; theta')]
+            2. Compute L(x, theta') = E_p(z | x, theta)[log p(x, z; theta')]
             3. Set theta = (1 - alpha) theta + alpha * argmax L(x, theta')
             4. Set gamma = gamma + eps * nabla log p(y | x; gamma)
             5. Set phi = phi + eps * dx/dphi * d/dx [L(x, theta) + log p(y | x; gamma) - log q(x; phi)]
@@ -961,6 +964,21 @@ class BaseSwitchingLDS(object):
 
         return elbos
 
+    def _fit_variational_em_with_conjugate_updates(\
+            self, variational_posterior, datas, inputs, masks, tags,
+            learning=True, alpha=.75, optimizer="adam", num_iters=100, **kwargs):
+        """
+        In the special case where the dynamics and observations are both linear
+        Gaussian, we can perform mean field coordinate ascent in a posterior
+        approximation of the form,
+
+            p(x, z | y) \approx q(x) q(z)
+
+        where q(x) is a linear Gaussian dynamical system and q(z) is a hidden
+        Markov model.
+        """
+        raise NotImplementedError
+
     @ensure_variational_args_are_lists
     def fit(self, variational_posterior, datas,
             inputs=None, masks=None, tags=None, method="svi",
@@ -972,7 +990,7 @@ class BaseSwitchingLDS(object):
 
         if method not in _fitting_methods:
             raise Exception("Invalid method: {}. Options are {}".\
-                            format(method, self._fitting_methods.keys()))
+                            format(method, _fitting_methods.keys()))
 
         if initialize:
             self.initialize(datas, inputs, masks, tags)
@@ -1006,7 +1024,7 @@ class BaseLDS(BaseSwitchingLDS):
         from ssm.transitions import StationaryTransitions
         init_state_distn = InitialStateDistribution(1, D, M)
         transitions = StationaryTransitions(1, D, M)
-        super(_LDS, self).__init__(N, 1, D, M, init_state_distn, transitions, dynamics, emissions)
+        super(BaseLDS, self).__init__(N, 1, D, M, init_state_distn, transitions, dynamics, emissions)
 
     @ensure_slds_args_not_none
     def expected_states(self, variational_mean, data, input=None, mask=None, tag=None):

@@ -37,7 +37,8 @@ class _Transitions(object):
     def log_transition_matrices(self, data, input, mask, tag):
         raise NotImplementedError
 
-    def m_step(self, expectations, datas, inputs, masks, tags, optimizer="bfgs", num_iters=100, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags,
+               optimizer="bfgs", num_iters=100, **kwargs):
         """
         If M-step cannot be done in closed form for the transitions, default to BFGS.
         """
@@ -438,7 +439,8 @@ class NegativeBinomialSemiMarkovTransitions(_Transitions):
 
     where we used the geometric series and the fact that \sum_{j != k} P[k, j] = 1.
     """
-    def __init__(self, K, D, M=0):
+    def __init__(self, K, D, M=0, r_min=1, r_max=20):
+        assert K > 1, "Explicit duration models only work if num states > 1."
         super(NegativeBinomialSemiMarkovTransitions, self).__init__(K, D, M=M)
 
         # Initialize the super state transition probabilities
@@ -447,13 +449,14 @@ class NegativeBinomialSemiMarkovTransitions(_Transitions):
         self.Ps /= self.Ps.sum(axis=1, keepdims=True)
 
         # Initialize the negative binomial duration probabilities
-        self.rs = npr.randint(1, 11, size=K)
+        self.r_min, self.r_max = r_min, r_max
+        self.rs = npr.randint(r_min, r_max + 1, size=K)
         # self.rs = np.ones(K, dtype=int)
         # self.ps = npr.rand(K)
         self.ps = 0.5 * np.ones(K)
 
         # Initialize the transition matrix
-        self._trans_matrix = None
+        self._transition_matrix = None
 
     @property
     def params(self):
@@ -474,7 +477,7 @@ class NegativeBinomialSemiMarkovTransitions(_Transitions):
         self.Ps, self.rs, self.ps = Ps, rs, ps
 
         # Reset the transition matrix
-        self._trans_matrix = None
+        self._transition_matrix = None
 
     def permute(self, perm):
         """
@@ -485,7 +488,7 @@ class NegativeBinomialSemiMarkovTransitions(_Transitions):
         self.ps = self.ps[perm]
 
         # Reset the transition matrix
-        self._trans_matrix = None
+        self._transition_matrix = None
 
     @property
     def total_num_states(self):
@@ -496,9 +499,9 @@ class NegativeBinomialSemiMarkovTransitions(_Transitions):
         return np.repeat(np.arange(self.K), self.rs)
 
     @property
-    def trans_matrix(self):
-        if self._trans_matrix is not None:
-            return self._trans_matrix
+    def transition_matrix(self):
+        if self._transition_matrix is not None:
+            return self._transition_matrix
 
         As, rs, ps = self.Ps, self.rs, self.ps
 
@@ -526,13 +529,13 @@ class NegativeBinomialSemiMarkovTransitions(_Transitions):
         assert (0 <= P).all() and (P <= 1.).all()
 
         # Cache the transition matrix
-        self._trans_matrix = P
+        self._transition_matrix = P
 
         return P
 
     def log_transition_matrices(self, data, input, mask, tag):
         T = data.shape[0]
-        P = self.trans_matrix
+        P = self.transition_matrix
         return np.tile(np.log(P)[None, :, :], (T-1, 1, 1))
 
     def m_step(self, expectations, datas, inputs, masks, tags, samples, **kwargs):
@@ -545,8 +548,9 @@ class NegativeBinomialSemiMarkovTransitions(_Transitions):
         # Fit negative binomial models for each duration based on sampled states
         states, durations = map(np.concatenate, zip(*[rle(z_smpl) for z_smpl in samples]))
         for k in range(self.K):
-            self.rs[k], self.ps[k] = fit_negative_binomial_integer_r(durations[states == k])
+            self.rs[k], self.ps[k] = \
+                fit_negative_binomial_integer_r(durations[states == k], self.r_min, self.r_max)
 
         # Reset the transition matrix
-        self._trans_matrix = None
+        self._transition_matrix = None
 

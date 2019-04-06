@@ -9,7 +9,8 @@ from scipy.stats import norm, t, bernoulli, poisson, vonmises
 from scipy.stats import multivariate_normal as mvn
 from scipy.special import logsumexp
 
-from ssm.stats import multivariate_normal_logpdf, diagonal_gaussian_logpdf, \
+from ssm.stats import multivariate_normal_logpdf, \
+    expected_multivariate_normal_logpdf, diagonal_gaussian_logpdf, \
     independent_studentst_logpdf, bernoulli_logpdf, categorical_logpdf, \
     poisson_logpdf, vonmises_logpdf
 
@@ -135,7 +136,7 @@ def test_multivariate_normal_logpdf_batches_and_states_masked(D=10):
             else:
                 for k in range(K):
                     ll2[b, n, k] = mvn.logpdf(x[b, n][m], mu[k][m], Sigma[k][np.ix_(m, m)])
-                    
+
     assert np.allclose(ll1, ll2)
 
 
@@ -162,8 +163,44 @@ def test_multivariate_normal_logpdf_batches_and_states_shared_cov_masked(D=10):
             else:
                 for k in range(K):
                     ll2[b, n, k] = mvn.logpdf(x[b, n][m], mu[k][m], Sigma[np.ix_(m, m)])
-                    
+
     assert np.allclose(ll1, ll2)
+
+
+def test_expected_multivariate_normal_logpdf_simple(D=10):
+    # Test single datapoint log pdf
+    x = npr.randn(D)
+    mu = npr.randn(D)
+    L = npr.randn(D, D)
+    Sigma = np.dot(L, L.T)
+
+    # Check that when the covariance is zero we get the regular mvn pdf
+    xxT = np.outer(x, x)
+    mumuT = np.outer(mu, mu)
+    ll1 = expected_multivariate_normal_logpdf(x, xxT, mu, mumuT, Sigma)
+    ll2 = multivariate_normal_logpdf(x, mu, Sigma)
+    assert np.allclose(ll1, ll2)
+
+
+def test_expected_multivariate_normal_logpdf_bound(D=10):
+    """
+    Make sure the expected likelihood at the mode is less than
+    the likelihood at the mode for nonzero Sigma.
+    """
+    x = npr.randn(D)
+    sqrt_x_cov = npr.randn(D, D)
+    x_cov = np.dot(sqrt_x_cov, sqrt_x_cov.T)
+
+    mu = x.copy()
+    sqrt_Sigma = npr.randn(D, D)
+    Sigma = np.dot(sqrt_Sigma, sqrt_Sigma.T)
+
+    # Check that when the covariance is zero we get the regular mvn pdf
+    xxT = x_cov + np.outer(x, x)
+    mumuT = np.outer(mu, mu)
+    ell = expected_multivariate_normal_logpdf(x, xxT, mu, mumuT, Sigma)
+    ll = multivariate_normal_logpdf(x, mu, Sigma)
+    assert ell < ll
 
 
 def test_diagonal_gaussian_logpdf(T=100, K=4, D=10):
@@ -227,6 +264,10 @@ def test_poisson_logpdf(T=100, K=4, D=10):
 
 @nottest
 def test_vonmises_logpdf(T=100, K=4, D=10):
+    """
+    NOTE: Skipping this test until the scipy special functions
+    make it into the release version of autograd.
+    """
     # Test single datapoint log pdf
     x = npr.vonmises(0, 1, size=(T, D))
     mus = npr.randn(K, D)
