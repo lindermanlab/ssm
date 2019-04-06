@@ -239,7 +239,7 @@ def SLDS(N, K, D, M=0,
          dynamics="gaussian",
          dynamics_kwargs=None,
          hierarchical_dynamics_tags=None,
-         emissions="gaussian",
+         emissions="gaussian_orthog",
          emission_kwargs=None,
          hierarchical_emission_tags=None,
          single_subspace=True,
@@ -359,7 +359,7 @@ def LDS(N, D, M=0,
         dynamics="gaussian",
         dynamics_kwargs=None,
         hierarchical_dynamics_tags=None,
-        emissions="gaussian",
+        emissions="gaussian_orthog",
         emission_kwargs=None,
         hierarchical_emission_tags=None,
         **kwargs):
@@ -391,7 +391,7 @@ def LDS(N, D, M=0,
                 format(dynamics, list(dynamics_classes.keys())))
 
         dynamics_kwargs = dynamics_kwargs or {}
-        dynamics_distn = dynamics_classes[dynamics](K, D, M=M, **dynamics_kwargs)
+        dynamics_distn = dynamics_classes[dynamics](1, D, M=M, **dynamics_kwargs)
     else:
         assert isinstance(dynamics, _Observations)
 
@@ -434,8 +434,8 @@ def LDS(N, D, M=0,
                 format(emissions, list(emission_classes.keys())))
 
         emission_kwargs = emission_kwargs or {}
-        emission_distn = emission_classes[emissions](N, K, D, M=M,
-            single_subspace=single_subspace, **emission_kwargs)
+        emission_distn = emission_classes[emissions](N, 1, D, M=M,
+            single_subspace=True, **emission_kwargs)
     else:
         assert isinstance(emissions, _Emissions)
 

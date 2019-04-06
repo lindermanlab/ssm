@@ -1024,7 +1024,7 @@ class BaseLDS(BaseSwitchingLDS):
         from ssm.transitions import StationaryTransitions
         init_state_distn = InitialStateDistribution(1, D, M)
         transitions = StationaryTransitions(1, D, M)
-        super(_LDS, self).__init__(N, 1, D, M, init_state_distn, transitions, dynamics, emissions)
+        super(BaseLDS, self).__init__(N, 1, D, M, init_state_distn, transitions, dynamics, emissions)
 
     @ensure_slds_args_not_none
     def expected_states(self, variational_mean, data, input=None, mask=None, tag=None):

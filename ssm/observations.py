@@ -873,9 +873,21 @@ class AutoRegressiveDiagonalNoiseObservations(AutoRegressiveObservations):
     def sigmasq_init(self):
         return np.exp(self._log_sigmasq_init)
 
+    @sigmasq_init.setter
+    def sigmasq_init(self, value):
+        assert value.shape == (self.K, self.D)
+        assert np.all(value > 0)
+        self._log_sigmasq_init = np.log(value)
+
     @property
     def sigmasq(self):
         return np.exp(self._log_sigmasq)
+
+    @sigmasq.setter
+    def sigmasq(self, value):
+        assert value.shape == (self.K, self.D)
+        assert np.all(value > 0)
+        self._log_sigmasq = np.log(value)
 
     @property
     def Sigmas_init(self):
