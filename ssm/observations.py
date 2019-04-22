@@ -101,7 +101,9 @@ class GaussianObservations(_Observations):
         data = np.concatenate(datas)
         km = KMeans(self.K).fit(data)
         self.mus = km.cluster_centers_
-        Sigmas = np.array([np.cov(data[km.labels_ == k].T) for k in range(self.K)])
+        Sigmas = np.array([np.atleast_2d(np.cov(data[km.labels_ == k].T))
+                           for k in range(self.K)])
+        assert np.all(np.isfinite(Sigmas))
         self._sqrt_Sigmas = np.linalg.cholesky(Sigmas + 1e-8 * np.eye(self.D))
 
     def log_likelihoods(self, data, input, mask, tag):
@@ -371,7 +373,9 @@ class MultivariateStudentsTObservations(_Observations):
         data = np.concatenate(datas)
         km = KMeans(self.K).fit(data)
         self.mus = km.cluster_centers_
-        Sigmas = np.array([np.cov(data[km.labels_ == k].T) for k in range(self.K)])
+        Sigmas = np.array([np.atleast_2d(np.cov(data[km.labels_ == k].T))
+                           for k in range(self.K)])
+        assert np.all(np.isfinite(Sigmas))
         self._sqrt_Sigmas = np.linalg.cholesky(Sigmas + 1e-8 * np.eye(self.D))
         self._log_nus = np.log(4) * np.ones((self.K,))
 
