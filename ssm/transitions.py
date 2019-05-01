@@ -10,7 +10,7 @@ from ssm.util import one_hot, logistic, relu, rle, \
     fit_multiclass_logistic_regression, \
     fit_negative_binomial_integer_r
 from ssm.stats import multivariate_normal_logpdf
-from ssm.optimizers import adam, bfgs, rmsprop, sgd
+from ssm.optimizers import adam, bfgs, lbfgs, rmsprop, sgd
 
 
 class _Transitions(object):
@@ -38,11 +38,11 @@ class _Transitions(object):
         raise NotImplementedError
 
     def m_step(self, expectations, datas, inputs, masks, tags,
-               optimizer="bfgs", num_iters=100, **kwargs):
+               optimizer="lbfgs", num_iters=100, **kwargs):
         """
         If M-step cannot be done in closed form for the transitions, default to BFGS.
         """
-        optimizer = dict(sgd=sgd, adam=adam, rmsprop=rmsprop, bfgs=bfgs)[optimizer]
+        optimizer = dict(sgd=sgd, adam=adam, rmsprop=rmsprop, bfgs=bfgs, lbfgs=lbfgs)[optimizer]
 
         # Maximize the expected log joint
         def _expected_log_joint(expectations):
@@ -60,8 +60,11 @@ class _Transitions(object):
             obj = _expected_log_joint(expectations)
             return -obj / T
 
-        # Call the optimizer
-        self.params = optimizer(_objective, self.params, num_iters=num_iters, **kwargs)
+        # Call the optimizer. Persist state (e.g. SGD momentum) across calls to m_step.
+        optimizer_state = self.optimizer_state if hasattr(self, "optimizer_state") else None
+        self.params, self.optimizer_state = \
+            optimizer(_objective, self.params, num_iters=num_iters,
+                      state=optimizer_state, full_output=True, **kwargs)
 
 
 class StationaryTransitions(_Transitions):
@@ -137,11 +140,14 @@ class InputDrivenTransitions(StickyTransitions):
     determined by a generalized linear model applied to the
     exogenous input.
     """
-    def __init__(self, K, D, M, alpha=1, kappa=0):
+    def __init__(self, K, D, M, alpha=1, kappa=0, l2_penalty=0.0):
         super(InputDrivenTransitions, self).__init__(K, D, M=M, alpha=alpha, kappa=kappa)
 
         # Parameters linking input to state distribution
         self.Ws = npr.randn(K, M)
+
+        # Regularization of Ws
+        self.l2_penalty = l2_penalty
 
     @property
     def params(self):
@@ -157,6 +163,11 @@ class InputDrivenTransitions(StickyTransitions):
         """
         self.log_Ps = self.log_Ps[np.ix_(perm, perm)]
         self.Ws = self.Ws[perm]
+
+    def log_prior(self):
+        lp = super(InputDrivenTransitions, self).log_prior()
+        lp = lp + np.sum(-0.5 * self.l2_penalty * self.Ws**2)
+        return lp
 
     def log_transition_matrices(self, data, input, mask, tag):
         T = data.shape[0]

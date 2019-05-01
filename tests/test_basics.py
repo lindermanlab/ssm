@@ -29,9 +29,11 @@ def test_sample(T=10, K=4, D=3, M=2):
         "poisson",
         "vonmises",
         "ar",
+        "no_input_ar",
         "diagonal_ar",
         "independent_ar",
         "robust_ar",
+        "no_input_robust_ar",
         "diagonal_robust_ar"
     ]
 

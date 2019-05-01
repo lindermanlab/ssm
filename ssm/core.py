@@ -322,7 +322,10 @@ class BaseHMM(object):
 
         return lls
 
-    def _fit_em(self, datas, inputs, masks, tags, num_em_iters=100, **kwargs):
+    def _fit_em(self, datas, inputs, masks, tags, num_em_iters=100, tolerance=0,
+                init_state_mstep_kwargs={},
+                transitions_mstep_kwargs={},
+                observations_mstep_kwargs={}):
         """
         Fit the parameters with expectation maximization.
 
@@ -340,13 +343,18 @@ class BaseHMM(object):
                             in zip(datas, inputs, masks, tags)]
 
             # M step: maximize expected log joint wrt parameters
-            self.init_state_distn.m_step(expectations, datas, inputs, masks, tags, **kwargs)
-            self.transitions.m_step(expectations, datas, inputs, masks, tags, **kwargs)
-            self.observations.m_step(expectations, datas, inputs, masks, tags, **kwargs)
+            self.init_state_distn.m_step(expectations, datas, inputs, masks, tags, **init_state_mstep_kwargs)
+            self.transitions.m_step(expectations, datas, inputs, masks, tags, **transitions_mstep_kwargs)
+            self.observations.m_step(expectations, datas, inputs, masks, tags, **observations_mstep_kwargs)
 
             # Store progress
             lls.append(self.log_prior() + sum([ll for (_, _, ll) in expectations]))
             pbar.set_description("LP: {:.1f}".format(lls[-1]))
+
+            # Check for convergence
+            if itr > 0 and abs(lls[-1] - lls[-2]) < tolerance:
+                pbar.set_description("Converged to LP: {:.1f}".format(lls[-1]))
+                break
 
         return lls
 
@@ -984,9 +992,50 @@ class BaseSwitchingLDS(object):
             inputs=None, masks=None, tags=None, method="svi",
             initialize=True, **kwargs):
 
+        """
+        Fitting methods for an arbitrary switching LDS:
+
+        1. Black box variational inference (bbvi/svi): stochastic gradient ascent
+           on the evidence lower bound, collapsing out the discrete states and
+           maintaining a variational posterior over the continuous states only.
+
+           Pros: simple and broadly applicable.  easy to implement.
+           Cons: doesn't leverage model structure.  slow to converge.
+
+        2. Variational expectation maximization (vem): variational posterior
+           on the continuous states q(x) and a discrete Markov chain
+           posterior on the discrete states q(z). We use samples of q(x)
+           to approximate the log transition matrix (pairwise potentials)
+           and the log transition bias (unary potentials) for q(z).  From
+           these we can derive the necessary expectations wrt q(z) for
+           updating the model parameters theta.
+
+        In the future, we could also consider some other possibilities, like:
+
+        3. Particle EM: run a (Rao-Blackwellized) particle filter targeting
+           the posterior distribution of the continuous latent states and
+           use its weighted trajectories to get the discrete states and perform
+           a Monte Carlo M-step.
+
+        4. Structured mean field: Maintain variational factors q(z) and q(x).
+           Update them using block mean field coordinate ascent, if we have a
+           Gaussian emission model and linear Gaussian dynamics, or using an
+           approximate update (e.g. a Laplace approximation) if we have a
+           nonconjugate model.
+
+        5. Gibbs sampling: As above, if we have a conjugate emission and dynamics
+           model we can do block Gibbs sampling of the discrete and continuous
+           states.
+        """
+
         # Specify fitting methods
         _fitting_methods = dict(svi=self._fit_svi,
+                                bbvi=self._fit_svi,
                                 vem=self._fit_variational_em)
+
+        # Deprecate "svi" as a method
+        warnings.warn("SLDS fitting method 'svi' will be renamed 'bbvi' in future releases.",
+                      category=DeprecationWarning)
 
         if method not in _fitting_methods:
             raise Exception("Invalid method: {}. Options are {}".\

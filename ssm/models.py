@@ -24,9 +24,11 @@ from ssm.observations import \
     MultivariateStudentsTObservations, \
     StudentsTObservations, \
     AutoRegressiveObservations, \
+    AutoRegressiveObservationsNoInput, \
     AutoRegressiveDiagonalNoiseObservations, \
     IndependentAutoRegressiveObservations, \
     RobustAutoRegressiveObservations, \
+    RobustAutoRegressiveObservationsNoInput, \
     RobustAutoRegressiveDiagonalNoiseObservations
 
 from ssm.hierarchical import \
@@ -125,10 +127,12 @@ def HMM(K, D, M=0,
         vonmises=VonMisesObservations,
         ar=AutoRegressiveObservations,
         autoregressive=AutoRegressiveObservations,
+        no_input_ar=AutoRegressiveObservationsNoInput,
         diagonal_ar=AutoRegressiveDiagonalNoiseObservations,
         diagonal_autoregressive=AutoRegressiveDiagonalNoiseObservations,
         independent_ar=IndependentAutoRegressiveObservations,
         robust_ar=RobustAutoRegressiveObservations,
+        no_input_robust_ar=RobustAutoRegressiveObservationsNoInput,
         robust_autoregressive=RobustAutoRegressiveObservations,
         diagonal_robust_ar=RobustAutoRegressiveDiagonalNoiseObservations,
         diagonal_robust_autoregressive=RobustAutoRegressiveDiagonalNoiseObservations,

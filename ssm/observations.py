@@ -672,7 +672,7 @@ class _AutoRegressiveObservationsBase(_Observations):
         As, bs, Vs = self.As, self.bs, self.Vs
 
         # Instantaneous inputs
-        mus = np.matmul(Vs[None, ...], input[self.lags:, None, :, None])[:, :, :, 0]
+        mus = np.matmul(Vs[None, ...], input[self.lags:, None, :self.M, None])[:, :, :, 0]
 
         # Lagged data
         for l in range(self.lags):
@@ -710,7 +710,10 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
     The parameters are fit via maximum likelihood estimation.
     """
-    def __init__(self, K, D, M=0, lags=1):
+    def __init__(self, K, D, M=0, lags=1,
+                 l2_penalty_A=1e-8,
+                 l2_penalty_b=1e-8,
+                 l2_penalty_V=1e-8):
         super(AutoRegressiveObservations, self).__init__(K, D, M)
 
         # Initialize the dynamics and the noise covariances
@@ -720,6 +723,12 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
         self._sqrt_Sigmas_init = np.tile(np.eye(D)[None, ...], (K, 1, 1))
         self._sqrt_Sigmas = npr.randn(K, D, D)
+
+        # Regularization penalties on A, b, and V
+        self.l2_penalty_A = l2_penalty_A
+        self.l2_penalty_b = l2_penalty_b
+        self.l2_penalty_V = l2_penalty_V
+
 
     @property
     def Sigmas_init(self):
@@ -766,7 +775,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         Sigmas = []
         for k in range(self.K):
             ts = [np.where(z == k)[0] for z in zs]
-            Xs = [np.column_stack([data[t + l] for l in range(self.lags)] + [input[t]])
+            Xs = [np.column_stack([data[t + l] for l in range(self.lags)] + [input[t, :self.M]])
                   for t, data, input in zip(ts, datas, inputs)]
             ys = [data[t+self.lags] for t, data in zip(ts, datas)]
 
@@ -790,7 +799,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         ll_ar = stats.multivariate_normal_logpdf(data[L:, None, :], mus[L:], self.Sigmas)
         return np.row_stack((ll_init, ll_ar))
 
-    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, J0=None, h0=None):
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
         # Collect all the data
@@ -807,11 +816,32 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             Ezs.append(Ez[self.lags:])
 
         # M step: Fit the weighted linear regressions for each K and D
-        J = np.tile(1e-8 * np.eye(D * lags + M + 1)[None, :, :], (K, 1, 1))
+        if J0 is None and h0 is None:
+            J_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
+                                 self.l2_penalty_V * np.ones(M),
+                                 self.l2_penalty_b * np.ones(1)))
+            J = np.tile(np.diag(J_diag)[None, :, :], (K, 1, 1))
+            h = np.zeros((K, D * lags + M + 1, D))
+        else:
+            assert J0.shape == (K, D*lags + M + 1, D*lags + M + 1)
+            assert h0.shape == (K, D*lags + M + 1, D)
+            J = J0
+            h = h0
+
+        J_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
+                                 self.l2_penalty_V * np.ones(M),
+                                 self.l2_penalty_b * np.ones(1)))
+        J = np.tile(np.diag(J_diag)[None, :, :], (K, 1, 1))
         h = np.zeros((K, D * lags + M + 1, D))
         for x, y, Ez in zip(xs, ys, Ezs):
-            J += np.einsum('tk, ti, tj -> kij', Ez, x, x)
-            h += np.einsum('tk, ti, td -> kid', Ez, x, y)
+            # Einsum is concise but slow!
+            # J += np.einsum('tk, ti, tj -> kij', Ez, x, x)
+            # h += np.einsum('tk, ti, td -> kid', Ez, x, y)
+            # Do weighted products for each of the k states
+            for k in range(K):
+                weighted_x = x * Ez[:, k:k+1]
+                J[k] += np.dot(weighted_x.T, x)
+                h[k] += np.dot(weighted_x.T, y)
 
         mus = np.linalg.solve(J, h)
         self.As = np.swapaxes(mus[:, :D*lags, :], 1, 2)
@@ -838,13 +868,24 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             return self.mu_init[z] + np.dot(S, npr.randn(D))
         else:
             # Sample from the autoregressive distribution
-            mu = Vs[z].dot(input) + bs[z]
+            mu = Vs[z].dot(input[:self.M]) + bs[z]
             for l in range(self.lags):
                 Al = As[z][:,l*D:(l+1)*D]
                 mu += Al.dot(xhist[-l-1])
 
             S = np.linalg.cholesky(self.Sigmas[z]) if with_noise else 0
             return mu + np.dot(S, npr.randn(D))
+
+
+class AutoRegressiveObservationsNoInput(AutoRegressiveObservations):
+    """
+    AutoRegressive observation model without the inputs.
+    """
+    def __init__(self, K, D, M=0, lags=1,
+                 l2_penalty_A=1e-8,
+                 l2_penalty_b=1e-8,
+                 l2_penalty_V=1e-8):
+        super(AutoRegressiveObservationsNoInput, self).__init__(K, D, M=0)
 
 
 class AutoRegressiveDiagonalNoiseObservations(AutoRegressiveObservations):
@@ -859,7 +900,11 @@ class AutoRegressiveDiagonalNoiseObservations(AutoRegressiveObservations):
 
     The parameters are fit via maximum likelihood estimation.
     """
-    def __init__(self, K, D, M=0, lags=1):
+    def __init__(self, K, D, M=0, lags=1,
+                 l2_penalty_A=1e-8,
+                 l2_penalty_b=1e-8,
+                 l2_penalty_V=1e-8):
+
         super(AutoRegressiveDiagonalNoiseObservations, self).__init__(K, D, M)
 
         # Initialize the dynamics and the noise covariances
@@ -1117,8 +1162,16 @@ class _RobustAutoRegressiveObservationsMixin(object):
     Sigma.  The mixin does not capitalize on structure in Sigma, so it will pay
     a small complexity penalty when used in conjunction with the diagonal noise model.
     """
-    def __init__(self, K, D, M=0, lags=1):
-        super(_RobustAutoRegressiveObservationsMixin, self).__init__(K, D, M=M, lags=lags)
+    def __init__(self, K, D, M=0, lags=1,
+                 l2_penalty_A=1e-8,
+                 l2_penalty_b=1e-8,
+                 l2_penalty_V=1e-8):
+
+        super(_RobustAutoRegressiveObservationsMixin, self).\
+            __init__(K, D, M=M, lags=lags,
+                     l2_penalty_A=l2_penalty_A,
+                     l2_penalty_b=l2_penalty_b,
+                     l2_penalty_V=l2_penalty_V)
         self._log_nus = np.log(4) * np.ones(K)
 
     @property
@@ -1148,18 +1201,16 @@ class _RobustAutoRegressiveObservationsMixin(object):
         ll_ar = stats.multivariate_studentst_logpdf(data[L:, None, :], mus[L:], self.Sigmas, self.nus)
         return np.row_stack((ll_init, ll_ar))
 
-    def m_step(self, expectations, datas, inputs, masks, tags,
-               num_em_iters=1, optimizer="adam", num_iters=10, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, num_em_iters=1, J0=None, h0=None):
         """
         Student's t is a scale mixture of Gaussians.  We can estimate its
         parameters using the EM algorithm. See the notebook in doc/students_t
         for complete details.
         """
-        self._m_step_ar(expectations, datas, inputs, masks, tags, num_em_iters)
-        self._m_step_nu(expectations, datas, inputs, masks, tags, optimizer, num_iters, **kwargs)
+        self._m_step_ar(expectations, datas, inputs, masks, tags, num_em_iters, J0=J0, h0=h0)
+        self._m_step_nu(expectations, datas, inputs, masks, tags)
 
-    def _m_step_ar(self, expectations, datas, inputs, masks, tags, num_em_iters,
-                   J0=None, h0=None):
+    def _m_step_ar(self, expectations, datas, inputs, masks, tags, num_em_iters, J0=None, h0=None):
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
         # Collect data for this dimension
@@ -1192,7 +1243,10 @@ class _RobustAutoRegressiveObservationsMixin(object):
             # This is exactly the same as the M-step for the AutoRegressiveObservations,
             # but it has an extra scaling factor of tau applied to the weight.
             if J0 is None and h0 is None:
-                J = np.tile(1e-8 * np.eye(D * lags + M + 1)[None, :, :], (K, 1, 1))
+                J_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
+                                 self.l2_penalty_V * np.ones(M),
+                                 self.l2_penalty_b * np.ones(1)))
+                J = np.tile(np.diag(J_diag)[None, :, :], (K, 1, 1))
                 h = np.zeros((K, D * lags + M + 1, D))
             else:
                 assert J0.shape == (K, D*lags + M + 1, D*lags + M + 1)
@@ -1202,8 +1256,14 @@ class _RobustAutoRegressiveObservationsMixin(object):
 
             for x, y, Ez, tau in zip(xs, ys, Ezs, taus):
                 weight = Ez * tau
-                J += np.einsum('tk, ti, tj -> kij', weight, x, x)
-                h += np.einsum('tk, ti, td -> kid', weight, x, y)
+                # Einsum is concise but slow!
+                # J += np.einsum('tk, ti, tj -> kij', weight, x, x)
+                # h += np.einsum('tk, ti, td -> kid', weight, x, y)
+                # Do weighted products for each of the k states
+                for k in range(K):
+                    weighted_x = x * weight[:, k:k+1]
+                    J[k] += np.dot(weighted_x.T, x)
+                    h[k] += np.dot(weighted_x.T, y)
 
             mus = np.linalg.solve(J, h)
             self.As = np.swapaxes(mus[:, :D*lags, :], 1, 2)
@@ -1221,7 +1281,7 @@ class _RobustAutoRegressiveObservationsMixin(object):
 
             self.Sigmas = sqerr / weight[:, None, None] + 1e-8 * np.eye(D)
 
-    def _m_step_nu(self, expectations, datas, inputs, masks, tags, optimizer, num_iters, **kwargs):
+    def _m_step_nu(self, expectations, datas, inputs, masks, tags):
         """
         Update the degrees of freedom parameter of the multivariate t distribution
         using a generalized Newton update. See notes in the ssm repo.
@@ -1248,12 +1308,12 @@ class _RobustAutoRegressiveObservationsMixin(object):
             self._log_nus[k] = np.log(generalized_newton_studentst_dof(E_taus[k], E_logtaus[k]))
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
-        D, As, bs, Sigmas, nus = self.D, self.As, self.bs, self.Sigmas, self.nus
+        D, As, bs, Vs, Sigmas, nus = self.D, self.As, self.bs, self.Vs, self.Sigmas, self.nus
         if xhist.shape[0] < self.lags:
             S = np.linalg.cholesky(self.Sigmas_init[z]) if with_noise else 0
             return self.mu_init[z] + np.dot(S, npr.randn(D))
         else:
-            mu = bs[z].copy()
+            mu = Vs[z].dot(input[:self.M]) + bs[z]
             for l in range(self.lags):
                 mu += As[z][:,l*D:(l+1)*D].dot(xhist[-l-1])
 
@@ -1276,6 +1336,23 @@ class RobustAutoRegressiveObservations(_RobustAutoRegressiveObservationsMixin, A
     Here, Sigma is a general covariance matrix.
     """
     pass
+
+
+class RobustAutoRegressiveObservationsNoInput(RobustAutoRegressiveObservations):
+    """
+    RobusAutoRegressiveObservations model without the inputs.
+    """
+    def __init__(self, K, D, M=0, lags=1,
+             l2_penalty_A=1e-8,
+             l2_penalty_b=1e-8,
+             l2_penalty_V=1e-8):
+
+        super(RobustAutoRegressiveObservationsNoInput, self).\
+            __init__(K, D, M=0, lags=lags,
+                     l2_penalty_A=l2_penalty_A,
+                     l2_penalty_b=l2_penalty_b,
+                     l2_penalty_V=l2_penalty_V)
+
 
 
 class RobustAutoRegressiveDiagonalNoiseObservations(

@@ -81,26 +81,26 @@ def adam_step(value_and_grad, x, itr, state=None, step_size=0.001, b1=0.9, b2=0.
     return x, val, g, (m, v)
 
 
-def _generic_sgd(method, loss, x0, callback=None, num_iters=200, step_size=0.1, mass=0.9, full_output=False):
+def _generic_sgd(method, loss, x0, callback=None, num_iters=200, state=None, full_output=False, **kwargs):
     """
     Generic stochastic gradient descent step.
     """
     step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[method]
 
     # Initialize outputs
-    x, losses, grads, state = x0, [], [], None
+    x, losses, grads = x0, [], []
     for itr in range(num_iters):
         x, val, g, state = step(value_and_grad(loss), x, itr, state, **kwargs)
         losses.append(val)
         grads.append(g)
 
     if full_output:
-        return x, losses, grads
+        return x, state
     else:
         return x
 
 
-def _generic_minimize(method, loss, x0, verbose=False, num_iters=1000):
+def _generic_minimize(method, loss, x0, verbose=False, num_iters=1000, state=None, full_output=False, **kwargs):
     """
     Minimize a given loss function with scipy.optimize.minimize.
     """
@@ -122,17 +122,22 @@ def _generic_minimize(method, loss, x0, verbose=False, num_iters=1000):
     result = minimize(_objective, _x0, args=(-1,), jac=grad(_objective),
                       method=method,
                       callback=callback if verbose else None,
-                      options=dict(maxiter=num_iters, disp=verbose))
+                      options=dict(maxiter=num_iters, disp=verbose),
+                      **kwargs)
     if verbose:
         print("{} completed with message: \n{}".format(method, result.message))
 
     if not result.success:
         warn("{} failed with message:\n{}".format(method, result.message))
 
-    return unflatten(result.x)
+    if full_output:
+        return unflatten(result.x), result
+    else:
+        return unflatten(result.x)
 
 # Define optimizers
 sgd = partial(_generic_sgd, "sgd")
 rmsprop = partial(_generic_sgd, "rmsprop")
 adam = partial(_generic_sgd, "adam")
 bfgs = partial(_generic_minimize, "BFGS")
+lbfgs = partial(_generic_minimize, "L-BFGS-B")
