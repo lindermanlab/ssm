@@ -660,7 +660,7 @@ class BaseSwitchingLDS(object):
                      copy.deepcopy(self.dynamics))
 
         arhmm.fit(xs, inputs=inputs, masks=xmasks, tags=tags,
-                  method="em", num_em_iters=num_em_iters, num_iters=10)
+                  method="em", num_em_iters=num_em_iters)
 
         self.init_state_distn = copy.deepcopy(arhmm.init_state_distn)
         self.transitions = copy.deepcopy(arhmm.transitions)
