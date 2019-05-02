@@ -714,7 +714,8 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                  l2_penalty_A=1e-8,
                  l2_penalty_b=1e-8,
                  l2_penalty_V=1e-8):
-        super(AutoRegressiveObservations, self).__init__(K, D, M)
+        super(AutoRegressiveObservations, self).\
+            __init__(K, D, M, lags=lags)
 
         # Initialize the dynamics and the noise covariances
         self._As = .95 * np.array([
@@ -883,9 +884,12 @@ class AutoRegressiveObservationsNoInput(AutoRegressiveObservations):
     """
     def __init__(self, K, D, M=0, lags=1,
                  l2_penalty_A=1e-8,
-                 l2_penalty_b=1e-8,
-                 l2_penalty_V=1e-8):
-        super(AutoRegressiveObservationsNoInput, self).__init__(K, D, M=0)
+                 l2_penalty_b=1e-8):
+
+        super(AutoRegressiveObservationsNoInput, self).\
+            __init__(K, D, M=0, lags=lags,
+                     l2_penalty_A=l2_penalty_A,
+                     l2_penalty_b=l2_penalty_b)
 
 
 class AutoRegressiveDiagonalNoiseObservations(AutoRegressiveObservations):
@@ -905,7 +909,11 @@ class AutoRegressiveDiagonalNoiseObservations(AutoRegressiveObservations):
                  l2_penalty_b=1e-8,
                  l2_penalty_V=1e-8):
 
-        super(AutoRegressiveDiagonalNoiseObservations, self).__init__(K, D, M)
+        super(AutoRegressiveDiagonalNoiseObservations, self).\
+            __init__(K, D, M, lags=lags,
+                     l2_penalty_A=l2_penalty_A,
+                     l2_penalty_b=l2_penalty_b,
+                     l2_penalty_V=l2_penalty_V)
 
         # Initialize the dynamics and the noise covariances
         self._As = .95 * np.array([
@@ -980,7 +988,7 @@ class AutoRegressiveDiagonalNoiseObservations(AutoRegressiveObservations):
 
 class IndependentAutoRegressiveObservations(_AutoRegressiveObservationsBase):
     def __init__(self, K, D, M=0, lags=1):
-        super(IndependentAutoRegressiveObservations, self).__init__(K, D, M)
+        super(IndependentAutoRegressiveObservations, self).__init__(K, D, M, lags=lags)
 
         self._As = np.concatenate((.95 * np.ones((K, D, 1)), np.zeros((K, D, lags-1))), axis=2)
         self._log_sigmasq_init = np.zeros((K, D))
