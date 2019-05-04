@@ -32,7 +32,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as manimation
 get_ipython().run_line_magic('matplotlib', 'inline')
 
-from ssm.models import HMM
+import ssm
 from ssm.primitives import hmm_sample, lds_sample
 from ssm.observations import GaussianObservations
 from ssm.init_state_distns import InitialStateDistribution
@@ -262,7 +262,7 @@ for mu in mog.observations.mus:
 # In[9]:
 
 
-arhmm = HMM(K=8, D=D, observations="ar")
+arhmm = ssm.HMM(K=8, D=D, observations="ar")
 arhmm.fit(x)
 
 

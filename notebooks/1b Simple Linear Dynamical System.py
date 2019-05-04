@@ -36,7 +36,7 @@ color_names = ["windows blue",
 
 colors = sns.xkcd_palette(color_names)
 
-from ssm.models import LDS
+import ssm
 from ssm.variational import SLDSMeanFieldVariationalPosterior, SLDSTriDiagVariationalPosterior
 from ssm.util import random_rotation, find_permutation
 
@@ -58,7 +58,7 @@ N = 10      # number of observed dimensions
 
 
 # Make an LDS with the somewhat interesting dynamics parameters
-true_lds = LDS(N, D, emissions="gaussian")
+true_lds = ssm.LDS(N, D, emissions="gaussian")
 A0 = .99 * random_rotation(D, theta=np.pi/20)
 # S = (1 + 3 * npr.rand(D))
 S = np.arange(1, D+1)
@@ -132,7 +132,7 @@ if save_figures:
 print("Fitting LDS with SVI")
 
 # Create the model and initialize its parameters
-lds = LDS(N, D, emissions="gaussian_orthog")
+lds = ssm.LDS(N, D, emissions="gaussian_orthog")
 lds.initialize(y)
 
 # Create a variational posterior
@@ -154,7 +154,7 @@ q_mf_y = lds.smooth(q_mf_x, y)
 
 
 print("Fitting LDS with SVI using structured variational posterior")
-lds = LDS(N, D, emissions="gaussian_orthog")
+lds = ssm.LDS(N, D, emissions="gaussian_orthog")
 lds.initialize(y)
 
 q_struct = SLDSTriDiagVariationalPosterior(lds, y)
@@ -212,8 +212,8 @@ from ssm.models import HMM
 
 N_iters = 50
 K = 15
-hmm = HMM(K, D, observations="gaussian")
-hmm_lls = hmm.fit(x, method="em", num_em_iters=N_iters, verbose=True)
+hmm = ssm.HMM(K, D, observations="gaussian")
+hmm_lls = hmm.fit(x, method="em", num_em_iters=N_iters)
 z = hmm.most_likely_states(x)
 
 
@@ -333,7 +333,7 @@ if save_figures:
 
 import copy
 
-plds = LDS(N, D, emissions="poisson_orthog", emission_kwargs=dict(link="softplus"))
+plds = ssm.LDS(N, D, emissions="poisson_orthog", emission_kwargs=dict(link="softplus"))
 plds.dynamics.params = copy.deepcopy(true_lds.dynamics.params)
 plds.emissions.ds = 0 * np.ones(N)
 _, x_plds, y_plds = plds.sample(T)

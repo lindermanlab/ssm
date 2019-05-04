@@ -16,7 +16,7 @@ import seaborn as sns
 sns.set_style("white")
 sns.set_context("talk")
 
-from ssm.models import LDS
+import ssm
 from ssm.variational import SLDSMeanFieldVariationalPosterior
 from ssm.util import random_rotation, find_permutation
 
@@ -35,7 +35,7 @@ N = 10      # number of observed dimensions
 
 
 # Make an SLDS with the true parameters
-true_lds = LDS(N, D, emissions="poisson_nn", 
+true_lds = ssm.LDS(N, D, emissions="poisson_nn", 
                emission_kwargs=dict(link="softplus", 
                                     hidden_layer_sizes=(50, 50))
               )
@@ -126,7 +126,7 @@ for b in range(5):
 
 
 print("Fitting LDS with SVI")
-lds = LDS(N, D, emissions="poisson_nn", 
+lds = ssm.LDS(N, D, emissions="poisson_nn", 
           emission_kwargs=dict(link="softplus", 
                                hidden_layer_sizes=(50, 50))
          )

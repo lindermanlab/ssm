@@ -15,7 +15,7 @@ import seaborn as sns
 sns.set_style("white")
 sns.set_context("talk")
 
-from ssm.models import SLDS
+import ssm
 from ssm.variational import SLDSMeanFieldVariationalPosterior, SLDSTriDiagVariationalPosterior
 from ssm.util import random_rotation, find_permutation
 
@@ -34,7 +34,7 @@ N = 100     # number of observed dimensions
 
 
 # Make an SLDS with the true parameters
-true_slds = SLDS(N, K, D, emissions="poisson_orthog", emission_kwargs=dict(link="softplus"))
+true_slds = ssm.SLDS(N, K, D, emissions="poisson_orthog", emission_kwargs=dict(link="softplus"))
 
 # Set rotational dynamics
 for k in range(K):
@@ -65,7 +65,7 @@ plt.colorbar()
 
 
 print("Fitting SLDS with SVI")
-slds = SLDS(N, K, D, emissions="poisson_orthog", emission_kwargs=dict(link="softplus"))
+slds = ssm.SLDS(N, K, D, emissions="poisson_orthog", emission_kwargs=dict(link="softplus"))
 slds.initialize(y_masked, masks=mask)
 
 q = SLDSTriDiagVariationalPosterior(slds, y, masks=mask, initial_variance=1)

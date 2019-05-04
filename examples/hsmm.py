@@ -2,7 +2,7 @@ import autograd.numpy as np
 import autograd.numpy.random as npr
 from scipy.stats import nbinom
 import matplotlib.pyplot as plt
-from ssm.models import HMM, HSMM
+import ssm
 from ssm.util import rle, find_permutation
 
 npr.seed(0)
@@ -13,7 +13,7 @@ K = 5       # number of discrete states
 D = 2       # number of observed dimensions
 
 # Make an HMM with the true parameters
-true_hsmm = HSMM(K, D, observations="gaussian")
+true_hsmm = ssm.HSMM(K, D, observations="gaussian")
 true_hsmm.transitions.rs
 z, y = true_hsmm.sample(T)
 z_test, y_test = true_hsmm.sample(T)
@@ -23,11 +23,11 @@ true_ll = true_hsmm.log_probability(y)
 N_em_iters = 100
 
 print("Fitting Gaussian HSMM with EM")
-hsmm = HSMM(K, D, observations="gaussian")
+hsmm = ssm.HSMM(K, D, observations="gaussian")
 hsmm_em_lls = hsmm.fit(y, method="em", num_em_iters=N_em_iters)
 
 print("Fitting Gaussian HMM with EM")
-hmm = HMM(K, D, observations="gaussian")
+hmm = ssm.HMM(K, D, observations="gaussian")
 hmm_em_lls = hmm.fit(y, method="em", num_em_iters=N_em_iters)
 
 # Plot log likelihoods (fit model is typically better)

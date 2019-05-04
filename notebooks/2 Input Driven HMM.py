@@ -21,7 +21,7 @@
 import numpy as np
 import numpy.random as npr
 import matplotlib.pyplot as plt
-from ssm.models import HMM
+import ssm
 from ssm.util import one_hot, find_permutation
 
 get_ipython().run_line_magic('matplotlib', 'inline')
@@ -40,7 +40,7 @@ M = 1    # input dimension
 C = 3    # number of output types/categories
 
 # Make an HMM
-true_hmm = HMM(K, D, M, 
+true_hmm = ssm.HMM(K, D, M, 
                observations="categorical", observation_kwargs=dict(C=C),
                transitions="inputdriven")
 
@@ -88,7 +88,7 @@ plt.yticks(np.arange(C))
 
 # Now create a new HMM and fit it to the data with EM
 N_iters = 50
-hmm = HMM(K, D, M, 
+hmm = ssm.HMM(K, D, M, 
           observations="categorical", observation_kwargs=dict(C=C),
           transitions="inputdriven")
 
