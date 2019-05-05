@@ -28,19 +28,19 @@ HMM inference is done with either expectation maximization (EM) or stochastic gr
 # Examples
 Here's a snippet to illustrate how we simulate from an HMM.
 ```
-from ssm import HMM
+import ssm
 T = 100  # number of time bins
 K = 5    # number of discrete states
 D = 2    # dimension of the observations
 
 # make an hmm and sample from it
-hmm = HMM(K, D, observations="gaussian")
+hmm = ssm.HMM(K, D, observations="gaussian")
 z, y = hmm.sample(T)
 ```
 
 Fitting an HMM is simple.
 ```
-test_hmm = HMM(K, D, observations="gaussian")
+test_hmm = ssm.HMM(K, D, observations="gaussian")
 test_hmm.fit(y)
 zhat = test_hmm.most_likely_states(y)
 ```
