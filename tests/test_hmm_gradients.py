@@ -6,7 +6,6 @@ from autograd.test_util import check_grads
 
 from ssm.messages import forward_pass, backward_pass, grad_hmm_normalizer
 from ssm.primitives import hmm_normalizer
-from ssm.models import HMM
 
 from tqdm import trange
 

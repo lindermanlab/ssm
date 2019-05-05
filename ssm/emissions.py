@@ -8,7 +8,7 @@ from ssm.preprocessing import interpolate_data, pca_with_imputation
 
 
 # Observation models for SLDS
-class _Emissions(object):
+class Emissions(object):
     def __init__(self, N, K, D, M=0, single_subspace=True):
         self.N, self.K, self.D, self.M, self.single_subspace = \
             N, K, D, M, single_subspace
@@ -55,7 +55,7 @@ class _Emissions(object):
 
 
 # Many emissions models start with a linear layer
-class _LinearEmissions(_Emissions):
+class _LinearEmissions(Emissions):
     """
     A simple linear mapping from continuous states x to data y.
 
@@ -229,7 +229,7 @@ class _OrthogonalLinearEmissions(_LinearEmissions):
 
 
 # Sometimes we just want a bit of additive noise on the observations
-class _IdentityEmissions(_Emissions):
+class _IdentityEmissions(Emissions):
     def __init__(self, N, K, D, M=0, single_subspace=True):
         super(_IdentityEmissions, self).__init__(N, K, D, M=M, single_subspace=single_subspace)
         assert N == D
@@ -245,7 +245,7 @@ class _IdentityEmissions(_Emissions):
 
 
 # Allow general nonlinear emission models with neural networks
-class _NeuralNetworkEmissions(_Emissions):
+class _NeuralNetworkEmissions(Emissions):
     def __init__(self, N, K, D, M=0, hidden_layer_sizes=(50,), single_subspace=True):
         assert single_subspace, "_NeuralNetworkEmissions only supports `single_subspace=True`"
         super(_NeuralNetworkEmissions, self).__init__(N, K, D, M=M, single_subspace=True)

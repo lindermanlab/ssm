@@ -30,7 +30,7 @@ color_names = [
 colors = sns.xkcd_palette(color_names)
 cmap = gradient_cmap(colors)
 
-from ssm.models import HMM
+import ssm
 from ssm.util import find_permutation
 
 # Speficy whether or not to save figures
@@ -46,7 +46,7 @@ K = 5       # number of discrete states
 D = 2       # data dimension
 
 # Make an HMM
-true_hmm = HMM(K, D, observations="gaussian")
+true_hmm = ssm.HMM(K, D, observations="gaussian")
 
 # Manually tweak the means to make them farther apart
 thetas = np.linspace(0, 2 * np.pi, K, endpoint=False)
@@ -99,7 +99,7 @@ lim = 1.05 * abs(y).max()
 plt.figure(figsize=(8, 6))
 plt.imshow(z[None,:], aspect="auto", cmap=cmap, vmin=0, vmax=len(colors)-1, extent=(0, T, -lim, (D)*lim))
 
-Ey = hmm.observations.mus[z]
+Ey = true_hmm.observations.mus[z]
 for d in range(D):
     plt.plot(y[:,d] + lim * d, '-k')
     plt.plot(Ey[:,d] + lim * d, ':k')
@@ -122,8 +122,8 @@ if save_figures:
 
 
 N_iters = 50
-hmm = HMM(K, D, observations="gaussian")
-hmm_lls = hmm.fit(y, method="em", num_em_iters=N_iters, verbose=True)
+hmm = ssm.HMM(K, D, observations="gaussian")
+hmm_lls = hmm.fit(y, method="em", num_em_iters=N_iters)
 
 plt.plot(hmm_lls, label="EM")
 plt.plot([0, N_iters], true_ll * np.ones(2), ':k', label="True")

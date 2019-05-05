@@ -34,7 +34,7 @@ color_names = ["windows blue",
 
 colors = sns.xkcd_palette(color_names)
 
-from ssm.models import SLDS
+import ssm
 from ssm.variational import SLDSMeanFieldVariationalPosterior, SLDSTriDiagVariationalPosterior
 from ssm.util import random_rotation, find_permutation
 
@@ -53,7 +53,7 @@ N = 10      # number of observed dimensions
 
 
 # Make an SLDS with the true parameters
-true_slds = SLDS(N, K, D, emissions="gaussian_orthog")
+true_slds = ssm.SLDS(N, K, D, emissions="gaussian_orthog")
 for k in range(K):
     true_slds.dynamics.As[k] = .95 * random_rotation(D, theta=(k+1) * np.pi/20)
 z, x, y = true_slds.sample(T)
@@ -69,7 +69,7 @@ y_masked = y * mask
 print("Fitting SLDS with SVI")
 
 # Create the model and initialize its parameters
-slds = SLDS(N, K, D, emissions="gaussian_orthog")
+slds = ssm.SLDS(N, K, D, emissions="gaussian_orthog")
 slds.initialize(y_masked, masks=mask)
 
 # Create a variational posterior
@@ -91,7 +91,7 @@ q_mf_y = slds.smooth(q_mf_x, y)
 
 
 print("Fitting SLDS with SVI using structured variational posterior")
-slds = SLDS(N, K, D, emissions="gaussian_orthog")
+slds = ssm.SLDS(N, K, D, emissions="gaussian_orthog")
 slds.initialize(y_masked, masks=mask)
 
 q_struct = SLDSTriDiagVariationalPosterior(slds, y_masked, masks=mask)

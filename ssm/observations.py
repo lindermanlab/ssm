@@ -14,7 +14,7 @@ from ssm.optimizers import adam, bfgs, rmsprop, sgd
 import ssm.stats as stats
 
 
-class _Observations(object):
+class Observations(object):
 
     def __init__(self, K, D, M=0):
         self.K, self.D, self.M = K, D, M
@@ -72,7 +72,7 @@ class _Observations(object):
         raise NotImplementedError
 
 
-class GaussianObservations(_Observations):
+class GaussianObservations(Observations):
     def __init__(self, K, D, M=0):
         super(GaussianObservations, self).__init__(K, D, M)
         self.mus = npr.randn(K, D)
@@ -146,7 +146,7 @@ class GaussianObservations(_Observations):
         return expectations.dot(self.mus)
 
 
-class DiagonalGaussianObservations(_Observations):
+class DiagonalGaussianObservations(Observations):
     def __init__(self, K, D, M=0):
         super(DiagonalGaussianObservations, self).__init__(K, D, M)
         self.mus = npr.randn(K, D)
@@ -210,7 +210,7 @@ class DiagonalGaussianObservations(_Observations):
         return expectations.dot(self.mus)
 
 
-class StudentsTObservations(_Observations):
+class StudentsTObservations(Observations):
     def __init__(self, K, D, M=0):
         super(StudentsTObservations, self).__init__(K, D, M)
         self.mus = npr.randn(K, D)
@@ -338,7 +338,7 @@ class StudentsTObservations(_Observations):
                 self._log_nus[k, d] = np.log(generalized_newton_studentst_dof(E_taus[k, d], E_logtaus[k, d]))
 
 
-class MultivariateStudentsTObservations(_Observations):
+class MultivariateStudentsTObservations(Observations):
     def __init__(self, K, D, M=0):
         super(MultivariateStudentsTObservations, self).__init__(K, D, M)
         self.mus = npr.randn(K, D)
@@ -469,7 +469,7 @@ class MultivariateStudentsTObservations(_Observations):
         return expectations.dot(self.mus)
 
 
-class BernoulliObservations(_Observations):
+class BernoulliObservations(Observations):
 
     def __init__(self, K, D, M=0):
         super(BernoulliObservations, self).__init__(K, D, M)
@@ -520,7 +520,7 @@ class BernoulliObservations(_Observations):
         return expectations.dot(ps)
 
 
-class PoissonObservations(_Observations):
+class PoissonObservations(Observations):
 
     def __init__(self, K, D, M=0):
         super(PoissonObservations, self).__init__(K, D, M)
@@ -569,7 +569,7 @@ class PoissonObservations(_Observations):
         return expectations.dot(np.exp(self.log_lambdas))
 
 
-class CategoricalObservations(_Observations):
+class CategoricalObservations(Observations):
 
     def __init__(self, K, D, M=0, C=2):
         """
@@ -620,7 +620,7 @@ class CategoricalObservations(_Observations):
         raise NotImplementedError
 
 
-class _AutoRegressiveObservationsBase(_Observations):
+class _AutoRegressiveObservationsBase(Observations):
     """
     Base class for autoregressive observations of the form,
 
@@ -1522,7 +1522,7 @@ class AltRobustAutoRegressiveDiagonalNoiseObservations(AutoRegressiveDiagonalNoi
             return mu + np.sqrt(var) * npr.randn(D)
 
 
-class VonMisesObservations(_Observations):
+class VonMisesObservations(Observations):
     def __init__(self, K, D, M=0):
         super(VonMisesObservations, self).__init__(K, D, M)
         self.mus = npr.randn(K, D)

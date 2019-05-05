@@ -13,9 +13,10 @@ from ssm.stats import multivariate_normal_logpdf
 from ssm.optimizers import adam, bfgs, lbfgs, rmsprop, sgd
 
 
-class _Transitions(object):
+class Transitions(object):
     def __init__(self, K, D, M=0):
         self.K, self.D, self.M = K, D, M
+        self.type_name = self.__class__.__name__
 
     @property
     def params(self):
@@ -67,7 +68,7 @@ class _Transitions(object):
                       state=optimizer_state, full_output=True, **kwargs)
 
 
-class StationaryTransitions(_Transitions):
+class StationaryTransitions(Transitions):
     """
     Standard Hidden Markov Model with fixed initial distribution and transition matrix.
     """
@@ -179,7 +180,7 @@ class InputDrivenTransitions(StickyTransitions):
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        _Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
+        Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
 
 class RecurrentTransitions(InputDrivenTransitions):
@@ -219,10 +220,10 @@ class RecurrentTransitions(InputDrivenTransitions):
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        _Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
+        Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
 
-class RecurrentOnlyTransitions(_Transitions):
+class RecurrentOnlyTransitions(Transitions):
     """
     Only allow the past observations and inputs to influence the
     next state.  Get rid of the transition matrix and replace it
@@ -261,7 +262,7 @@ class RecurrentOnlyTransitions(_Transitions):
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)       # normalize
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        _Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
+        Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
 
 class RBFRecurrentTransitions(InputDrivenTransitions):
@@ -342,11 +343,11 @@ class RBFRecurrentTransitions(InputDrivenTransitions):
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        _Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
+        Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
 
 # Allow general nonlinear emission models with neural networks
-class NeuralNetworkRecurrentTransitions(_Transitions):
+class NeuralNetworkRecurrentTransitions(Transitions):
     def __init__(self, K, D, M=0, hidden_layer_sizes=(50,), nonlinearity="relu"):
         super(NeuralNetworkRecurrentTransitions, self).__init__(K, D, M=M)
 
@@ -394,11 +395,11 @@ class NeuralNetworkRecurrentTransitions(_Transitions):
 
     def m_step(self, expectations, datas, inputs, masks, tags, optimizer="adam", num_iters=100, **kwargs):
         # Default to adam instead of bfgs for the neural network model.
-        _Transitions.m_step(self, expectations, datas, inputs, masks, tags,
+        Transitions.m_step(self, expectations, datas, inputs, masks, tags,
             optimizer=optimizer, num_iters=num_iters, **kwargs)
 
 
-class NegativeBinomialSemiMarkovTransitions(_Transitions):
+class NegativeBinomialSemiMarkovTransitions(Transitions):
     """
     Semi-Markov transition model with negative binomial (NB) distributed
     state durations, as compared to the geometric state durations in the

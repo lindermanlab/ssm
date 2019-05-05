@@ -1,7 +1,7 @@
 import autograd.numpy as np
 import autograd.numpy.random as npr
 
-from ssm.core import BaseSwitchingLDS
+from . import SLDS
 from ssm.emissions import _LinearEmissions
 from ssm.preprocessing import interpolate_data
 from ssm.primitives import lds_log_probability, lds_sample, lds_mean
@@ -90,7 +90,7 @@ class SLDSMeanFieldVariationalPosterior(VariationalPosterior):
             __init__(model, datas, masks, tags)
 
         # Initialize the parameters
-        assert isinstance(model, BaseSwitchingLDS)
+        assert isinstance(model, SLDS)
         self.D = model.D
         self.Ts = [data.shape[0] for data in datas]
         self.initial_variance = initial_variance
@@ -154,7 +154,7 @@ class SLDSTriDiagVariationalPosterior(VariationalPosterior):
             __init__(model, datas, masks, tags)
 
         # Initialize the parameters
-        assert isinstance(model, BaseSwitchingLDS)
+        assert isinstance(model, SLDS)
         self.D = model.D
         self.Ts = [data.shape[0] for data in datas]
         self.initial_variance = initial_variance

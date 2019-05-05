@@ -5,7 +5,7 @@ npr.seed(0)
 import matplotlib
 import matplotlib.pyplot as plt
 
-from ssm.models import SLDS, LDS
+import ssm
 from ssm.variational import SLDSMeanFieldVariationalPosterior, SLDSTriDiagVariationalPosterior
 from ssm.util import random_rotation, find_permutation
 
@@ -16,7 +16,7 @@ D = 2       # number of latent dimensions
 N = 10      # number of observed dimensions
 
 # Make an SLDS with the true parameters
-true_slds = SLDS(N, K, D, emissions="gaussian")
+true_slds = ssm.SLDS(N, K, D, emissions="gaussian")
 for k in range(K):
     true_slds.dynamics.As[k] = .95 * random_rotation(D, theta=(k+1) * np.pi/20)
 
@@ -30,7 +30,7 @@ y_masked = y * mask
 
 # Fit an SLDS with mean field posterior
 print("Fitting SLDS with SVI using structured variational posterior")
-slds = SLDS(N, K, D, emissions="gaussian")
+slds = ssm.SLDS(N, K, D, emissions="gaussian")
 slds.initialize(y_masked, masks=mask)
 
 q_mf = SLDSMeanFieldVariationalPosterior(slds, y_masked, masks=mask)
@@ -44,7 +44,7 @@ q_mf_z = slds.most_likely_states(q_mf_x, y)
 
 # Do the same with the structured posterior
 print("Fitting SLDS with SVI using structured variational posterior")
-slds = SLDS(N, K, D, emissions="gaussian")
+slds = ssm.SLDS(N, K, D, emissions="gaussian")
 slds.initialize(y_masked, masks=mask)
 
 q_struct = SLDSTriDiagVariationalPosterior(slds, y_masked, masks=mask)
