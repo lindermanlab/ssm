@@ -28,7 +28,7 @@ HMM inference is done with either expectation maximization (EM) or stochastic gr
 # Examples
 Here's a snippet to illustrate how we simulate from an HMM.
 ```
-from ssm.models import HMM
+from ssm import HMM
 T = 100  # number of time bins
 K = 5    # number of discrete states
 D = 2    # dimension of the observations
