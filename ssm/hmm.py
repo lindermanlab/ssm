@@ -5,17 +5,17 @@ import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd import value_and_grad
 
-from .optimizers import adam_step, rmsprop_step, sgd_step, convex_combination
-from .primitives import hmm_normalizer, hmm_expected_states, hmm_filter, hmm_sample, viterbi
-from .util import ensure_args_are_lists, ensure_args_not_none, \
+from ssm.optimizers import adam_step, rmsprop_step, sgd_step, convex_combination
+from ssm.primitives import hmm_normalizer, hmm_expected_states, hmm_filter, hmm_sample, viterbi
+from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
     ensure_slds_args_not_none, ensure_variational_args_are_lists, \
     replicate, collapse
 
-from . import observations as obs
-from . import transitions as trans
-from . import init_state_distns as isd
-from . import hierarchical as hier
-from . import emissions as emssn
+import ssm.observations as obs
+import ssm.transitions as trans
+import ssm.init_state_distns as isd
+import ssm.hierarchical as hier
+import ssm.emissions as emssn
 
 __all__ = ['HMM', 'HSMM']
 
