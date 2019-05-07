@@ -212,3 +212,81 @@ class SLDSTriDiagVariationalPosterior(VariationalPosterior):
         for s, prms in zip(sample, self.params):
             logq += lds_log_probability(s, *prms)
         return logq
+
+
+class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
+    """
+    p(z, x | y) \approx q(z) q(x).
+
+    Assume q(x) is a Gaussian with a block tridiagonal precision matrix,
+    and that we update q(x) via Laplace approximation.
+    Assume q(z) is a chain-structured discrete graphical model.
+    """
+    @ensure_variational_args_are_lists
+    def __init__(self, model, datas,
+                 inputs=None, masks=None, tags=None):
+
+        super(SLDSStructuredMeanFieldVariationalPosterior, self).\
+            __init__(model, datas, masks, tags)
+
+        # Initialize the parameters
+        assert isinstance(model, SLDS)
+        self.D = model.D
+        self.Ts = [data.shape[0] for data in datas]
+        self.params = [self._initialize_variational_params(data, input, mask, tag)
+                       for data, input, mask, tag in zip(datas, inputs, masks, tags)]
+
+    def _initialize_variational_params(self, data, input, mask, tag):
+        T = data.shape[0]
+        K = self.K
+        D = self.D
+
+        # Initialize q(z) parameters: log_pi0, log_likes, log_transition_matrices
+        log_pi0 = np.zeros(K)
+        log_Ps = np.zeros((T-1, K, K))
+        log_likes = 0.1 * npr.randn(T, K)
+
+        # Initialize q(x) = = N(J, h) where J is block tridiagonal precision
+        # and h is the linear potential.  The mapping to mean parameters is
+        # mu = J^{-1} h and Sigma = J^{-1}.  Initialize J to be identity so
+        # that h is the mean.
+        J_diag = np.tile(np.eye(D)[None, :, :], (T, 1, 1))
+        J_lower_diag = np.zeros((T-1, D, D))
+        h = self.model.emissions.invert(data, input=input, mask=mask, tag=tag)
+
+        return dict(log_pi0=log_pi0,
+                    log_Ps=log_Ps,
+                    log_likes=log_likes,
+                    J_diag=J_diag,
+                    J_lower_diag=J_lower_diag,
+                    h=h)
+
+    def sample_discrete_states(self):
+        return [hmm_sample(prms["log_pi0"], prms["log_Ps"], prms["log_likes"])
+                for prms in self.params]
+
+    def sample_continuous_states(self):
+        return [block_tridiagonal_sample(prms["J_diag"], prms["J_lower_diag"], prms["h"])
+                for prms in self.params]
+
+    def sample(self):
+        return list(zip(self.sample_discrete_states(), self.sample_continuous_states()))
+
+    @property
+    def mean_discrete_states(self):
+        # Now compute the posterior expectations of z under q(z)
+        return [hmm_expected_states(prms["log_pi0"], prms["log_Ps"], prms["log_likes"])
+                for prms in self.params]
+
+    @property
+    def mean_continuous_states(self):
+        # Now compute the posterior expectations of z under q(z)
+        return [block_tridiagonal_mean(prms["J_diag"], prms["J_lower_diag"], prms["h"])
+                for prms in self.params]
+
+    @property
+    def mean(self):
+        return list(zip(self.mean_discrete_states(), self.mean_continuous_states()))
+
+    def log_density(self, sample):
+        raise NotImplementedError

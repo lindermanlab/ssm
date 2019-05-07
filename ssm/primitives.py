@@ -429,8 +429,17 @@ def lds_sample(As, bs, Qi_sqrts, ms, Ri_sqrts, z=None):
     assert Qi_sqrts.shape == (T-1, D, D)
     assert Ri_sqrts.shape == (T, D, D)
 
-    # Convert to block form
-    J_diag, J_lower_diag, h = convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts)
+    return block_tridiagonal_sample(
+        convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts))
+
+def block_tridiagonal_sample(J_diag, J_lower_diag, h, z=None):
+    """
+    Sample a Gaussian chain graph represented by a block
+    tridiagonal precision matrix and a linear potential.
+    """
+    T, D = h.shape
+    assert J_diag.shape == (T, D, D)
+    assert J_lower_diag.shape == (T-1, D, D)
 
     # Convert blocks to banded form so we can capitalize on Lapack code
     J_banded = A_banded = blocks_to_bands(J_diag, J_lower_diag, lower=True)
@@ -460,10 +469,12 @@ def lds_mean(As, bs, Qi_sqrts, ms, Ri_sqrts):
     assert Ri_sqrts.shape == (T, D, D)
 
     # Convert to block form
-    J_diag, J_lower_diag, h = convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts)
+    return block_tridiagonal_mean(
+        convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts), lower=True)
 
+
+def block_tridiagonal_mean(J_diag, J_lower_diag, h, lower=True):
     # Convert blocks to banded form so we can capitalize on Lapack code
-    J_banded = blocks_to_bands(J_diag, J_lower_diag, lower=True)
-
-    return solveh_banded(J_banded, h.ravel(), lower=True).reshape((T, D))
+    J_banded = blocks_to_bands(J_diag, J_lower_diag, lower=lower)
+    return solveh_banded(J_banded, h.ravel(), lower=lower).reshape((T, D))
 

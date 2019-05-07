@@ -31,7 +31,7 @@ class SLDS(object):
     """
     def __init__(self, N, K, D, *, M=0,
                  init_state_distn=None,
-                 transitions="standard", 
+                 transitions="standard",
                  transition_kwargs=None,
                  hierarchical_transition_tags=None,
                  dynamics="gaussian",
@@ -139,7 +139,7 @@ class SLDS(object):
         if not isinstance(emissions, emssn.Emissions):
             raise TypeError("'emissions' must be a subclass of"
                             " ssm.emissions.Emissions")
-        
+
         self.N, self.K, self.D, self.M = N, K, D, M
         self.init_state_distn = init_state_distn
         self.transitions = transitions
@@ -504,6 +504,112 @@ class SLDS(object):
         Markov model.
         """
         raise NotImplementedError
+
+    def _fit_structured_meanfield(self, variational_posterior, datas,
+                                  inputs=None, masks=None, tags=None,
+                                  num_samples=1):
+        """
+        Fit an approximate posterior p(z, x | y) \approx q(z) q(x).
+        Perform block coordinate ascent on q(z) followed by q(x).
+        Assume q(x) is a Gaussian with a block tridiagonal precision matrix,
+        and that we update q(x) via Laplace approximation.
+        Assume q(z) is a chain-structured discrete graphical model.
+        """
+        # 0. Draw samples of q(x) for Monte Carlo approximating expectations
+        x_sampless = [variational_posterior.sample_continuous_states() for _ in range(num_samples)]
+        # Convert this to a list of length len(datas) where each entry
+        # is a tuple of length num_samples
+        x_sampless = list(zip(*x_sampless))
+
+        # 1. Update the variational posterior on q(z) for fixed q(x)
+        #    - Monte Carlo approximate the log transition matrices
+        #    - Compute the expected log likelihoods (i.e. log dynamics probs)
+        #    - If emissions depend on z, compute expected emission likelihoods
+        for prms, x_samples, data, input, mask, tag in \
+            zip(variational_posterior.params, x_sampless, datas, inputs, masks, tags):
+
+            x_mask = np.ones_like(x_sample, dtype=bool)
+
+            # Compute expected log initial distribution, transition matrices, and likelihoods
+            prms["log_pi0"] = np.mean(
+                [self.transitions.log_initial_state_distn(x, input, mask, tag)
+                 for x in x_samples], axis=0)
+
+            prms["log_Ps"] = np.mean(
+                [self.transitions.log_transition_matrices(x, input, mask, tag)
+                 for x in x_samples], axis=0)
+
+            prms["log_likes"] = np.mean(
+                [self.dynamics.log_likelihoods(x, input, mask, tag)
+                 for x in x_samples], axis=0)
+
+            if not self.single_subspace:
+                prms["log_likes"] += np.mean(
+                    [self.emissions.log_likelihoods(data, input, mask, tag, x)
+                     for x in x_samples], axis=0)
+
+        # 2. Update the variational posterior q(x) for fixed q(z)
+        #    - Use Newton's method to find the argmax of the expected log joint
+        #       - Compute the gradient g(x) and block tridiagonal Hessian J(x)
+        #       - Newton update: x' = x + J(x)^{-1} g(x)
+        #       - Check for convergence of x'
+        #    - Evaluate the J(x*) at the optimal x*
+        discrete_expectations = variational_posterior.mean_discrete_states
+
+        for prms, (Ez, Ezzp1, _), data, input, mask, tag in \
+            zip(variational_posterior.params, discrete_expectations, datas, inputs, masks, tags):
+
+            # Run Newton's method
+            # Compute the expected log joint
+            def expected_log_joint(x):
+                # The "mask" for x is all ones
+                x_mask = np.ones_like(x, dtype=bool)
+                log_pi0 = self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
+                log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
+                log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
+                log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
+
+                # Compute the expected log probability
+                elp += np.sum(Ez[0] * log_pi0)
+                elp += np.sum(Ezzp1 * log_Ps)
+                elp += np.sum(Ez * log_likes)
+
+                return elp
+
+            # Compute the gradient of the expected log joint at a point x
+            grad_expected_log_joint = grad(expected_log_joint)
+            hess_expected_log_joint = None
+
+            # Compute Hessian
+            # hessian(expected_log_joint) # -> TD x TD dense matrix. BAD!
+            # d^2/dx^2 log p(yt | xt)  -> DxD for t=1:T
+            # d^2/dxt^2 log p(xt+1 | xt) -> DxD for t=1:T-1
+            # d^2/dxt+1^2 log p(xt+1 | xt) -> DxD for t=2:T
+            # d^2/dxt dxt+1 log p(xt+1 | xt) -> DxD for t=1:T-1
+
+            def newtons_method(x0, grad, hessian_diag, hessian_lower_diag):
+                # TODO: damping, etc
+                x = x0
+                while not is_converged:
+                    J_banded = blocks_to_bands(hessian_diag(x), hessian_lower_diag(x), lower=True)
+                    dx = np.reshape(solveh_banded(J_banded, np.ravel(grad(x)), lower=True), x.shape)
+                    x = x + dx
+                    is_converged = np.mean(np.abs(dx)) < 1e-8
+
+                return x
+
+            xstar = newtons_method(...)
+            Jstar_diag = hessian_diag(xstar)
+            Jstar_lower_diag = hessian_lower_diag(xstar)
+
+            # Solve linear system in the Hessian to get h = J * xstar
+            hstar = ...
+
+        # 3. Update the model parameters
+        xstar_mask = np.ones_like(xstar, dtype=bool)
+        self.transitions.m_step(xstars, inputs, xstar_masks, tags)
+        self.dynamics.m_step(xstars, inputs, xstar_masks, tags)
+        self.emissions.m_step(xstars, inputs, xstar_masks, tags)
 
     @ensure_variational_args_are_lists
     def fit(self, variational_posterior, datas,
