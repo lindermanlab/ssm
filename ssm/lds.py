@@ -578,29 +578,32 @@ class SLDS(object):
 
             # Compute the gradient of the expected log joint at a point x
             grad_expected_log_joint = grad(expected_log_joint)
-            hess_expected_log_joint = None
 
-            # Compute Hessian
-            # hessian(expected_log_joint) # -> TD x TD dense matrix. BAD!
-            # d^2/dx^2 log p(yt | xt)  -> DxD for t=1:T
-            # d^2/dxt^2 log p(xt+1 | xt) -> DxD for t=1:T-1
-            # d^2/dxt+1^2 log p(xt+1 | xt) -> DxD for t=2:T
-            # d^2/dxt dxt+1 log p(xt+1 | xt) -> DxD for t=1:T-1
+            # Compute the expected Hessian, represented in blocks
+            def hessian_blocks(x):
+
+                # The "mask" for x is all ones
+                x_mask = np.ones_like(x, dtype=bool)
+                hessian_diag, hessiah_lower_diag = self.dynamics.hessian_expected_log_dynamics_prob(Ez, x, input, x_mask, tag)
+                hessian_diag += self.transitions.hessian_expected_log_trans_prob(x, input, x_mask, tag, Ezzp1)
+                hessian_diag += self.emissions.hessian_log_emissions_prob(data, input, mask, tag, x, Ez)
+
+                return hessian_diag, hessian_lower_diag
 
             def newtons_method(x0, grad, hessian_diag, hessian_lower_diag):
                 # TODO: damping, etc
                 x = x0
                 while not is_converged:
-                    J_banded = blocks_to_bands(hessian_diag(x), hessian_lower_diag(x), lower=True)
+                    hessian_diag, hessian_lower_diag = hessian_blocks(x)
+                    J_banded = blocks_to_bands(hessian_diag, hessian_lower_diag, lower=True)
                     dx = np.reshape(solveh_banded(J_banded, np.ravel(grad(x)), lower=True), x.shape)
                     x = x + dx
                     is_converged = np.mean(np.abs(dx)) < 1e-8
 
                 return x
 
-            xstar = newtons_method(...)
-            Jstar_diag = hessian_diag(xstar)
-            Jstar_lower_diag = hessian_lower_diag(xstar)
+            xstar = newtons_method(x, grad, hessian_blocks)
+            Jstar_diag, Jstar_lower_diag = hessian_blocks(xstar)
 
             # Solve linear system in the Hessian to get h = J * xstar
             hstar = ...

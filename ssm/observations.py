@@ -877,6 +877,34 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             S = np.linalg.cholesky(self.Sigmas[z]) if with_noise else 0
             return mu + np.dot(S, npr.randn(D))
 
+    def hessian_expected_log_dynamics_prob(self, Ez, data, input, mask, tag=None):
+        assert np.all(mask), "Cannot compute Hessian of autoregressive obsevations with missing data."
+        assert self.lags == 1, "Does not compute Hessian of autoregressive observations with lags > 1"
+        T = data.shape[0]
+        K = self.K
+        D = self.D
+
+        # Ez is (TxK) array of expected discrete states
+
+        # diagonal blocks, size ((T, D, D))
+        inv_Sigmas = np.linalg.inv(self.Sigmas) # get inverse covariance matrices
+        dynamics_terms = np.array([A.T@inv_Sigma@A for A, inv_Sigma in zip(self.As, inv_Sigmas)]) # A^T Qinv A terms
+
+        # first part of diagonal blocks are inverse covariance matrices
+        diagonal_blocks = -np.array([np.mean([ezk * inv_Sigma for inv_Sigma, ezk in zip(inv_Sigmas, Ezt)],axis=0)
+                           for Ezt in Ez])
+
+        # second part is transition dynamics - goes to all terms except final one
+        diagonal_blocks[:T] -= np.array([np.mean([ezk * dyn_term for dyn_term, ezk in zip(dynamics_terms, Ezt)],axis=0)
+                           for Ezt in Ez])
+
+        # lower diagonal blocks are (T-1,D,D)
+        off_diag_terms = np.array([inv_Sigma@A for A, inv_Sigma in zip(self.As, inv_Sigmas)])
+        lower_diagonal_blocks = np.array([np.mean([ezk * off_diag_term for off_diag_term, ezk in zip(off_diag_terms, Ezt)],axis=0)
+                           for Ezt in Ez])
+
+        return diagonal_blocks, lower_diagonal_blocks
+
 
 class AutoRegressiveObservationsNoInput(AutoRegressiveObservations):
     """

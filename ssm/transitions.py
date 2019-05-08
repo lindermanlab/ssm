@@ -5,6 +5,7 @@ import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.misc import logsumexp
 from autograd.scipy.stats import dirichlet
+from autograd import hessian
 
 from ssm.util import one_hot, logistic, relu, rle, \
     fit_multiclass_logistic_regression, \
@@ -67,6 +68,13 @@ class Transitions(object):
             optimizer(_objective, self.params, num_iters=num_iters,
                       state=optimizer_state, full_output=True, **kwargs)
 
+    def hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+        # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
+        T, D = data.shape
+        obj = lambda(xt, E_zzp1): np.sum(E_zzp1 * self.log_transition_matrices(xt, input, mask, tag))
+        hess = hessian(obj)
+        terms = [hess(xt, Ezzp1) for xt, Ezzp1 in zip(data, expected_joints)]
+        return terms
 
 class StationaryTransitions(Transitions):
     """
@@ -222,6 +230,8 @@ class RecurrentTransitions(InputDrivenTransitions):
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
+    def hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+        Transitions.hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints)
 
 class RecurrentOnlyTransitions(Transitions):
     """
@@ -264,6 +274,8 @@ class RecurrentOnlyTransitions(Transitions):
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
+    def hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+        Transitions.hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints)
 
 class RBFRecurrentTransitions(InputDrivenTransitions):
     """
@@ -565,4 +577,3 @@ class NegativeBinomialSemiMarkovTransitions(Transitions):
 
         # Reset the transition matrix
         self._transition_matrix = None
-
