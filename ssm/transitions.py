@@ -71,9 +71,9 @@ class Transitions(object):
     def hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
         T, D = data.shape
-        obj = lambda(xt, E_zzp1): np.sum(E_zzp1 * self.log_transition_matrices(xt, input, mask, tag))
+        obj = lambda x, E_zzp1: np.sum(E_zzp1 * self.log_transition_matrices(x, input, mask, tag))
         hess = hessian(obj)
-        terms = [hess(xt, Ezzp1) for xt, Ezzp1 in zip(data, expected_joints)]
+        terms = [hess(x, Ezzp1) for x, Ezzp1 in zip(data, expected_joints)]
         return terms
 
 class StationaryTransitions(Transitions):

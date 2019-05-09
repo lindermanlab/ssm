@@ -555,9 +555,11 @@ class SLDS(object):
         #       - Check for convergence of x'
         #    - Evaluate the J(x*) at the optimal x*
         discrete_expectations = variational_posterior.mean_discrete_states
+        continuous_expectations = variational_posterior.mean_continuous_states # use these to initialize newton steps
 
-        for prms, (Ez, Ezzp1, _), data, input, mask, tag in \
-            zip(variational_posterior.params, discrete_expectations, datas, inputs, masks, tags):
+        for prms, (Ez, Ezzp1, _), Ex, data, input, mask, tag in \
+            zip(variational_posterior.params, discrete_expectations, continuous_expectations,
+                datas, inputs, masks, tags):
 
             # Run Newton's method
             # Compute the expected log joint
@@ -584,13 +586,14 @@ class SLDS(object):
 
                 # The "mask" for x is all ones
                 x_mask = np.ones_like(x, dtype=bool)
-                hessian_diag, hessiah_lower_diag = self.dynamics.hessian_expected_log_dynamics_prob(Ez, x, input, x_mask, tag)
+                hessian_diag, hessian_lower_diag = self.dynamics.hessian_expected_log_dynamics_prob(Ez, x, input, x_mask, tag)
                 hessian_diag += self.transitions.hessian_expected_log_trans_prob(x, input, x_mask, tag, Ezzp1)
-                hessian_diag += self.emissions.hessian_log_emissions_prob(data, input, mask, tag, x, Ez)
+                #TODO include Ez
+                hessian_diag += self.emissions.hessian_log_emissions_prob(data, input, mask, tag, x)
 
                 return hessian_diag, hessian_lower_diag
 
-            def newtons_method(x0, grad, hessian_diag, hessian_lower_diag):
+            def newtons_method(x0, grad, hessian_blocks):
                 # TODO: damping, etc
                 x = x0
                 while not is_converged:
@@ -602,7 +605,7 @@ class SLDS(object):
 
                 return x
 
-            xstar = newtons_method(x, grad, hessian_blocks)
+            xstar = newtons_method(Ez, grad, hessian_blocks)
             Jstar_diag, Jstar_lower_diag = hessian_blocks(xstar)
 
             # Solve linear system in the Hessian to get h = J * xstar

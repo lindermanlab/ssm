@@ -53,6 +53,14 @@ class Emissions(object):
         """
         raise NotImplementedError
 
+    def hessian_log_emissions_prob(self, data, input, mask, tag, x):
+        assert single_subspace, "Only works with a single emission model"
+        # Return (T, D, D) array of blocks for the diagonal of the Hessian
+        T, D = data.shape
+        obj = lambda datat, xt: self.log_likelihoods(datat, input, mask, tag, xt)
+        hess = hessian(obj)
+        terms = [hess(datat, xt) for datat, xt in zip(data, x)]
+        return terms
 
 # Many emissions models start with a linear layer
 class _LinearEmissions(Emissions):
@@ -638,4 +646,3 @@ class AutoRegressiveIdentityEmissions(_AutoRegressiveEmissionsMixin, _IdentityEm
 
 class AutoRegressiveNeuralNetworkEmissions(_AutoRegressiveEmissionsMixin, _NeuralNetworkEmissions):
     pass
-

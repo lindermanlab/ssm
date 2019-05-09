@@ -891,17 +891,17 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         dynamics_terms = np.array([A.T@inv_Sigma@A for A, inv_Sigma in zip(self.As, inv_Sigmas)]) # A^T Qinv A terms
 
         # first part of diagonal blocks are inverse covariance matrices
-        diagonal_blocks = -np.array([np.mean([ezk * inv_Sigma for inv_Sigma, ezk in zip(inv_Sigmas, Ezt)],axis=0)
-                           for Ezt in Ez])
+        diagonal_blocks = -1.0 * np.sum(Ez[:,:,None,None] * inv_Sigmas[None,:], axis=1)
+        # diagonal_blocks = -np.array([np.sum([ezk * inv_Sigma for inv_Sigma, ezk in zip(inv_Sigmas, Ezt)],axis=0) for Ezt in Ez])
 
         # second part is transition dynamics - goes to all terms except final one
-        diagonal_blocks[:T] -= np.array([np.mean([ezk * dyn_term for dyn_term, ezk in zip(dynamics_terms, Ezt)],axis=0)
-                           for Ezt in Ez])
+        diagonal_blocks[:T-1] -= np.sum(Ez[:T-1,:,None,None] * dynamics_terms[None,:], axis=1)
+        # diagonal_blocks[:T-1] -= np.array([np.sum([ezk * dyn_term for dyn_term, ezk in zip(dynamics_terms, Ezt[:T-1])],axis=0)for Ezt in Ez[:T-1]])
 
         # lower diagonal blocks are (T-1,D,D)
         off_diag_terms = np.array([inv_Sigma@A for A, inv_Sigma in zip(self.As, inv_Sigmas)])
-        lower_diagonal_blocks = np.array([np.mean([ezk * off_diag_term for off_diag_term, ezk in zip(off_diag_terms, Ezt)],axis=0)
-                           for Ezt in Ez])
+        lower_diagonal_blocks = np.sum(Ez[:T-1,:,None,None] * off_diag_terms[None,:], axis=1)
+        # lower_diagonal_blocks = np.array([np.sum([ezk * off_diag_term for off_diag_term, ezk in zip(off_diag_terms, Ezt)],axis=0) for Ezt in Ez[:T-1]])
 
         return diagonal_blocks, lower_diagonal_blocks
 
