@@ -1,6 +1,7 @@
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.special import gammaln
+from autograd import hessian
 
 from ssm.util import ensure_args_are_lists, \
     logistic, logit, softplus, inv_softplus
@@ -54,13 +55,16 @@ class Emissions(object):
         raise NotImplementedError
 
     def hessian_log_emissions_prob(self, data, input, mask, tag, x):
-        assert single_subspace, "Only works with a single emission model"
+        assert self.single_subspace, "Only works with a single emission model"
         # Return (T, D, D) array of blocks for the diagonal of the Hessian
         T, D = data.shape
-        obj = lambda datat, xt: self.log_likelihoods(datat, input, mask, tag, xt)
+        obj = lambda xt, datat, inputt, maskt: self.log_likelihoods(datat[None,:], \
+            inputt[None,:], maskt[None,:], tag, xt[None,:])
         hess = hessian(obj)
-        terms = [hess(datat, xt) for datat, xt in zip(data, x)]
+        terms = np.array([np.squeeze(hess(xt, datat, inputt, maskt))
+                          for xt, datat, inputt, maskt in zip(x, data, input, mask)])
         return terms
+
 
 # Many emissions models start with a linear layer
 class _LinearEmissions(Emissions):

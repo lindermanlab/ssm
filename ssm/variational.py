@@ -4,7 +4,10 @@ import autograd.numpy.random as npr
 from . import SLDS
 from ssm.emissions import _LinearEmissions
 from ssm.preprocessing import interpolate_data
-from ssm.primitives import lds_log_probability, lds_sample, lds_mean
+from ssm.primitives import lds_log_probability, lds_sample, lds_mean, \
+                           block_tridiagonal_sample, hmm_expected_states, \
+                           hmm_sample, block_tridiagonal_mean
+
 from ssm.util import ensure_variational_args_are_lists
 
 class VariationalPosterior(object):
@@ -232,8 +235,9 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         # Initialize the parameters
         assert isinstance(model, SLDS)
         self.D = model.D
+        self.K = model.K
         self.Ts = [data.shape[0] for data in datas]
-        self.params = [self._initialize_variational_params(data, input, mask, tag)
+        self._params = [self._initialize_variational_params(data, input, mask, tag)
                        for data, input, mask, tag in zip(datas, inputs, masks, tags)]
 
     def _initialize_variational_params(self, data, input, mask, tag):
@@ -263,11 +267,11 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
 
     def sample_discrete_states(self):
         return [hmm_sample(prms["log_pi0"], prms["log_Ps"], prms["log_likes"])
-                for prms in self.params]
+                for prms in self._params]
 
     def sample_continuous_states(self):
         return [block_tridiagonal_sample(prms["J_diag"], prms["J_lower_diag"], prms["h"])
-                for prms in self.params]
+                for prms in self._params]
 
     def sample(self):
         return list(zip(self.sample_discrete_states(), self.sample_continuous_states()))
@@ -276,13 +280,13 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
     def mean_discrete_states(self):
         # Now compute the posterior expectations of z under q(z)
         return [hmm_expected_states(prms["log_pi0"], prms["log_Ps"], prms["log_likes"])
-                for prms in self.params]
+                for prms in self._params]
 
     @property
     def mean_continuous_states(self):
         # Now compute the posterior expectations of z under q(z)
-        return [block_tridiagonal_mean(prms["J_diag"], prms["J_lower_diag"], prms["h"])
-                for prms in self.params]
+        return [block_tridiagonal_mean(prms["J_diag"], prms["J_lower_diag"], prms["h"], lower=True, shape=np.shape(prms["h"]))
+                for prms in self._params]
 
     @property
     def mean(self):

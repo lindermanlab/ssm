@@ -73,7 +73,7 @@ class Transitions(object):
         T, D = data.shape
         obj = lambda x, E_zzp1: np.sum(E_zzp1 * self.log_transition_matrices(x, input, mask, tag))
         hess = hessian(obj)
-        terms = [hess(x, Ezzp1) for x, Ezzp1 in zip(data, expected_joints)]
+        terms = np.array([hess(x, Ezzp1) for x, Ezzp1 in zip(data, expected_joints)])
         return terms
 
 class StationaryTransitions(Transitions):

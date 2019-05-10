@@ -469,12 +469,13 @@ def lds_mean(As, bs, Qi_sqrts, ms, Ri_sqrts):
     assert Ri_sqrts.shape == (T, D, D)
 
     # Convert to block form
-    return block_tridiagonal_mean(
-        convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts), lower=True)
+    J_diag, J_lower_diag, h = convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts)
+    return block_tridiagonal_mean(J_diag, J_lower_diag, h, lower=True, shape=(T,D))
+        #convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts), lower=True)
 
 
-def block_tridiagonal_mean(J_diag, J_lower_diag, h, lower=True):
+def block_tridiagonal_mean(J_diag, J_lower_diag, h, lower=True, shape=None):
     # Convert blocks to banded form so we can capitalize on Lapack code
     J_banded = blocks_to_bands(J_diag, J_lower_diag, lower=lower)
-    return solveh_banded(J_banded, h.ravel(), lower=lower).reshape((T, D))
-
+    return solveh_banded(J_banded, h.ravel(), lower=lower) if shape is None else \
+         solveh_banded(J_banded, h.ravel(), lower=lower).reshape(shape)
