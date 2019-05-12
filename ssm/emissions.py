@@ -1,6 +1,7 @@
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.special import gammaln
+from autograd import hessian
 
 from ssm.util import ensure_args_are_lists, \
     logistic, logit, softplus, inv_softplus
@@ -52,6 +53,17 @@ class Emissions(object):
         of latent discrete states.
         """
         raise NotImplementedError
+
+    def hessian_log_emissions_prob(self, data, input, mask, tag, x):
+        assert self.single_subspace, "Only works with a single emission model"
+        # Return (T, D, D) array of blocks for the diagonal of the Hessian
+        T, D = data.shape
+        obj = lambda xt, datat, inputt, maskt: self.log_likelihoods(datat[None,:], \
+            inputt[None,:], maskt[None,:], tag, xt[None,:])
+        hess = hessian(obj)
+        terms = np.array([np.squeeze(hess(xt, datat, inputt, maskt))
+                          for xt, datat, inputt, maskt in zip(x, data, input, mask)])
+        return terms
 
 
 # Many emissions models start with a linear layer
@@ -321,6 +333,12 @@ class _GaussianEmissionsMixin(object):
         mus = self.forward(variational_mean, input, tag)
         return mus[:, 0, :] if self.single_subspace else np.sum(mus * expected_states[:,:,None], axis=1)
 
+    def hessian_log_emissions_prob(self, data, input, mask, tag, x):
+        assert self.single_subspace, "Only implemented for a single emission model"
+        # Return (T, D, D) array of blocks for the diagonal of the Hessian
+        T, D = data.shape
+        hess = -1.0 * self.Cs[0].T@np.diag( 1.0 / np.exp(self.inv_etas[0]) )@self.Cs[0]
+        return np.tile(hess[None,:,:], (T, 1, 1))
 
 class GaussianEmissions(_GaussianEmissionsMixin, _LinearEmissions):
 
@@ -638,4 +656,3 @@ class AutoRegressiveIdentityEmissions(_AutoRegressiveEmissionsMixin, _IdentityEm
 
 class AutoRegressiveNeuralNetworkEmissions(_AutoRegressiveEmissionsMixin, _NeuralNetworkEmissions):
     pass
-
