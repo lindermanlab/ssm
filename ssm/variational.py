@@ -246,7 +246,7 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         D = self.D
 
         # Initialize q(z) parameters: log_pi0, log_likes, log_transition_matrices
-        log_pi0 = np.zeros(K)
+        log_pi0 = -np.log(K) * np.ones(K)
         log_Ps = np.zeros((T-1, K, K))
         log_likes = 0.1 * npr.randn(T, K)
 
@@ -285,7 +285,7 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
     @property
     def mean_continuous_states(self):
         # Now compute the posterior expectations of z under q(z)
-        return [block_tridiagonal_mean(prms["J_diag"], prms["J_lower_diag"], prms["h"], lower=True, shape=np.shape(prms["h"]))
+        return [block_tridiagonal_mean(prms["J_diag"], prms["J_lower_diag"], prms["h"], lower=True).reshape(np.shape(prms["h"]))
                 for prms in self._params]
 
     @property

@@ -537,15 +537,15 @@ class SLDS(object):
 
                 # Compute expected log initial distribution, transition matrices, and likelihoods
                 prms["log_pi0"] = np.mean(
-                    [self.init_state_distn.log_initial_state_distn(x, input, mask, tag)
+                    [self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
                      for x in x_samples], axis=0)
 
                 prms["log_Ps"] = np.mean(
-                    [self.transitions.log_transition_matrices(x, input, mask, tag)
+                    [self.transitions.log_transition_matrices(x, input, x_mask, tag)
                      for x in x_samples], axis=0)
 
                 prms["log_likes"] = np.mean(
-                    [self.dynamics.log_likelihoods(x, input, mask, tag)
+                    [self.dynamics.log_likelihoods(x, input, x_mask, tag)
                      for x in x_samples], axis=0)
 
                 if not self.emissions.single_subspace:
@@ -597,11 +597,13 @@ class SLDS(object):
 
                     # transition terms contribute on diagonal until the last block
                     hessian_diag[:-1] += self.transitions.hessian_expected_log_trans_prob(x, input, x_mask, tag, Ezzp1)
+
                     #TODO include Ez
                     hessian_diag += self.emissions.hessian_log_emissions_prob(data, input, mask, tag, x)
-
+                    T, D = np.shape(x)
+                    hessian_diag += np.tile(1e-3*np.eye(D), (T, 1, 1))
                     # return the blocks of the Hessian
-                    return -1.0*hessian_diag, -1.0*hessian_lower_diag
+                    return -1.0 * hessian_diag, -1.0 * hessian_lower_diag
 
                 def newtons_method(x0, grad, neg_hessian_blocks):
                     # TODO: damping, etc
@@ -613,7 +615,8 @@ class SLDS(object):
                         J_banded = blocks_to_bands(hessian_diag, hessian_lower_diag, lower=True) # J is -Hessian
                         dx = np.reshape(solveh_banded(J_banded, np.ravel(grad(x)), lower=True), x.shape)
                         x = x + dx
-                        is_converged = np.mean(np.abs(dx)) < 1e-8
+                        # is_converged = np.mean(np.abs(dx)) < 1e-8
+                        is_converged = np.mean(np.abs(dx)) < 1e-5
                         count += 1
                         if count > 10:
                             is_converged = True, print("Stopping after 10 Newton steps")
@@ -637,12 +640,12 @@ class SLDS(object):
                 prms["h"] = hstar
 
             # 3. Update the model parameters
+            print("Step 3. Update model parameters")
             xstar_masks = [np.ones_like(xstar, dtype=bool) for xstar in xstars]
+            self.init_state_distn.m_step(discrete_expectations, xstars, inputs, xstar_masks, tags)
             self.transitions.m_step(discrete_expectations, xstars, inputs, xstar_masks, tags)
             self.dynamics.m_step(discrete_expectations, xstars, inputs, xstar_masks, tags)
-            # self.emissions.m_step(xstars, inputs, xstar_masks, tags)
 
-            # update emissions using autograd
             T = sum([data.shape[0] for data in datas])
             def _objective(params, itr):
                 self.emissions.params = params
@@ -652,11 +655,13 @@ class SLDS(object):
                 return -obj / T
 
             # Optimize emissions log-likelihood
+            optimizer = "adam"
             params = self.emissions.params
             state = None
-            num_iters = 5 # TODO: see if this works and if should set as input variable
+            step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
+            num_iters = 50 # TODO: see if this works and if should set as input variable
             for itr in range(num_iters):
-                params, val, g, state = sgd_step(value_and_grad(_objective), params, itr, state)
+                params, val, g, state = step(value_and_grad(_objective), params, itr, state)
 
             # set emissions parameters
             self.emissions.params = params
@@ -731,7 +736,7 @@ class SLDS(object):
         _fitting_methods = dict(svi=self._fit_svi,
                                 bbvi=self._fit_svi,
                                 vem=self._fit_variational_em,
-                                smf=self._fit_structured_meanfield)
+                                laplace_em=self._fit_structured_meanfield)
 
         # Deprecate "svi" as a method
         warnings.warn("SLDS fitting method 'svi' will be renamed 'bbvi' in future releases.",

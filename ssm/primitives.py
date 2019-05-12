@@ -430,7 +430,8 @@ def lds_sample(As, bs, Qi_sqrts, ms, Ri_sqrts, z=None):
     assert Ri_sqrts.shape == (T, D, D)
 
     return block_tridiagonal_sample(
-        convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts))
+        *convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts), z=z)
+
 
 def block_tridiagonal_sample(J_diag, J_lower_diag, h, z=None):
     """
@@ -469,13 +470,11 @@ def lds_mean(As, bs, Qi_sqrts, ms, Ri_sqrts):
     assert Ri_sqrts.shape == (T, D, D)
 
     # Convert to block form
-    J_diag, J_lower_diag, h = convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts)
-    return block_tridiagonal_mean(J_diag, J_lower_diag, h, lower=True, shape=(T,D))
-        #convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts), lower=True)
+    return block_tridiagonal_mean(
+        *convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts), lower=True).reshape((T,D))
 
 
-def block_tridiagonal_mean(J_diag, J_lower_diag, h, lower=True, shape=None):
+def block_tridiagonal_mean(J_diag, J_lower_diag, h, lower=True):
     # Convert blocks to banded form so we can capitalize on Lapack code
-    J_banded = blocks_to_bands(J_diag, J_lower_diag, lower=lower)
-    return solveh_banded(J_banded, h.ravel(), lower=lower) if shape is None else \
-         solveh_banded(J_banded, h.ravel(), lower=lower).reshape(shape)
+    return solveh_banded(
+        blocks_to_bands(J_diag, J_lower_diag, lower=lower), h.ravel(), lower=lower)

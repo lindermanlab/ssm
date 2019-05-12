@@ -333,6 +333,12 @@ class _GaussianEmissionsMixin(object):
         mus = self.forward(variational_mean, input, tag)
         return mus[:, 0, :] if self.single_subspace else np.sum(mus * expected_states[:,:,None], axis=1)
 
+    def hessian_log_emissions_prob(self, data, input, mask, tag, x):
+        assert self.single_subspace, "Only implemented for a single emission model"
+        # Return (T, D, D) array of blocks for the diagonal of the Hessian
+        T, D = data.shape
+        hess = -1.0 * self.Cs[0].T@np.diag( 1.0 / np.exp(self.inv_etas[0]) )@self.Cs[0]
+        return np.tile(hess[None,:,:], (T, 1, 1))
 
 class GaussianEmissions(_GaussianEmissionsMixin, _LinearEmissions):
 
