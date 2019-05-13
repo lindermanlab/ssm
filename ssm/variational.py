@@ -227,7 +227,8 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
     """
     @ensure_variational_args_are_lists
     def __init__(self, model, datas,
-                 inputs=None, masks=None, tags=None):
+                 inputs=None, masks=None, tags=None,
+                 initial_variance=1):
 
         super(SLDSStructuredMeanFieldVariationalPosterior, self).\
             __init__(model, datas, masks, tags)
@@ -237,6 +238,7 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         self.D = model.D
         self.K = model.K
         self.Ts = [data.shape[0] for data in datas]
+        self.initial_variance = initial_variance
         self._params = [self._initialize_variational_params(data, input, mask, tag)
                        for data, input, mask, tag in zip(datas, inputs, masks, tags)]
 
@@ -248,13 +250,13 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         # Initialize q(z) parameters: log_pi0, log_likes, log_transition_matrices
         log_pi0 = -np.log(K) * np.ones(K)
         log_Ps = np.zeros((T-1, K, K))
-        log_likes = 0.1 * npr.randn(T, K)
+        log_likes = np.zeros((T, K))
 
         # Initialize q(x) = = N(J, h) where J is block tridiagonal precision
         # and h is the linear potential.  The mapping to mean parameters is
         # mu = J^{-1} h and Sigma = J^{-1}.  Initialize J to be identity so
         # that h is the mean.
-        J_diag = np.tile(np.eye(D)[None, :, :], (T, 1, 1))
+        J_diag = np.tile(self.initial_variance * np.eye(D)[None, :, :], (T, 1, 1))
         J_lower_diag = np.zeros((T-1, D, D))
         h = self.model.emissions.invert(data, input=input, mask=mask, tag=tag)
 
@@ -290,7 +292,7 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
 
     @property
     def mean(self):
-        return list(zip(self.mean_discrete_states(), self.mean_continuous_states()))
+        return list(zip(self.mean_discrete_states, self.mean_continuous_states))
 
     def log_density(self, sample):
         raise NotImplementedError
