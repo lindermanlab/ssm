@@ -11,6 +11,7 @@ from ssm.util import ensure_args_are_lists
 
 class InitialStateDistribution(object):
     def __init__(self, K, D, M=0):
+        self.K, self.D, self.M = K, D, M
         self.log_pi0 = -np.log(K) * np.ones(K)
 
     @property
