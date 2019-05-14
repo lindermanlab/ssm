@@ -7,6 +7,8 @@ from autograd.scipy.misc import logsumexp
 from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
+from ssm.util import ensure_args_are_lists
+
 class InitialStateDistribution(object):
     def __init__(self, K, D, M=0):
         self.log_pi0 = -np.log(K) * np.ones(K)
@@ -19,7 +21,8 @@ class InitialStateDistribution(object):
     def params(self, value):
         self.log_pi0 = value[0]
 
-    def initialize(self, datas, inputs, masks, tags):
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
         pass
 
     def permute(self, perm):

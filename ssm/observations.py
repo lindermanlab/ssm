@@ -757,6 +757,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         super(AutoRegressiveObservations, self).permute(perm)
         self._sqrt_Sigmas = self._sqrt_Sigmas[perm]
 
+    @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None, localize=True):
         from sklearn.linear_model import LinearRegression
 
@@ -1030,6 +1031,7 @@ class IndependentAutoRegressiveObservations(_AutoRegressiveObservationsBase):
         self._log_sigmasq_init = self._log_sigmasq_init[perm]
         self._log_sigmasq = self._log_sigmasq[perm]
 
+    @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         # Initialize with linear regressions
         from sklearn.linear_model import LinearRegression

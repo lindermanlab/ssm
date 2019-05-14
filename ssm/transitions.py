@@ -8,7 +8,7 @@ from autograd.scipy.stats import dirichlet
 
 from ssm.util import one_hot, logistic, relu, rle, \
     fit_multiclass_logistic_regression, \
-    fit_negative_binomial_integer_r
+    fit_negative_binomial_integer_r, ensure_args_are_lists
 from ssm.stats import multivariate_normal_logpdf
 from ssm.optimizers import adam, bfgs, lbfgs, rmsprop, sgd
 
@@ -26,7 +26,8 @@ class Transitions(object):
     def params(self, value):
         raise NotImplementedError
 
-    def initialize(self, datas, inputs, masks, tags):
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
         pass
 
     def permute(self, perm):
@@ -307,7 +308,8 @@ class RBFRecurrentTransitions(InputDrivenTransitions):
     def Sigmas(self):
         return np.matmul(self._sqrt_Sigmas, np.swapaxes(self._sqrt_Sigmas, -1, -2))
 
-    def initialize(self, datas, inputs, masks, tags):
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
         # Fit a GMM to the data to set the means and covariances
         from sklearn.mixture import GaussianMixture
         gmm = GaussianMixture(self.K, covariance_type="full")
