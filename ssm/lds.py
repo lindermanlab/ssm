@@ -547,7 +547,8 @@ class SLDS(object):
 
     def _fit_laplace_em_continuous_state_update(
         self, discrete_expectations, variational_posterior,
-        datas, inputs=None, masks=None, tags=None):
+        datas, inputs, masks, tags,
+        newton_stepsize, newton_tolerance, newton_maxiter):
 
         # 2. Update the variational posterior q(x) for fixed q(z)
         #    - Use Newton's method to find the argmax of the expected log joint
@@ -600,7 +601,11 @@ class SLDS(object):
             obj = lambda x: neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
             grad_func = lambda x: grad_neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
             hess_func = lambda x: hessian_neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
-            x = newtons_method_block_tridiag_hessian(x0, obj, grad_func, hess_func, stepsize=0.75)
+            x = newtons_method_block_tridiag_hessian(
+                x0, obj, grad_func, hess_func,
+                stepsize=newton_stepsize, tolerance=newton_tolerance, maxiter=newton_maxiter)
+
+            # Evaluate the Hessian at the mode
             J_diag, J_lower_diag = hessian_neg_expected_log_joint(x, Ez, Ezzp1)
 
             # Compute the Hessian vector product h = J * x = -H * x
@@ -626,8 +631,8 @@ class SLDS(object):
 
     def _fit_laplace_em_params_update(
         self, discrete_expectations, continuous_expectations,
-        datas, inputs=None, masks=None, tags=None,
-        optimizer="lbfgs", num_optimizer_iters=50):
+        datas, inputs, masks, tags,
+        emission_optimizer, emission_optimizer_maxiter):
 
         # 3. Update the model parameters.  Replace the expectation wrt x with mean.
         xmasks = [np.ones_like(x, dtype=bool) for x in continuous_expectations]
@@ -636,7 +641,7 @@ class SLDS(object):
         self.dynamics.m_step(discrete_expectations, continuous_expectations, inputs, xmasks, tags)
 
         T = sum([data.shape[0] for data in datas])
-        def _objective(params, itr):
+        def _emission_objective(params, itr):
             self.emissions.params = params
             obj = 0
             for data, input, mask, tag, x, (Ez, _, _) in \
@@ -645,13 +650,22 @@ class SLDS(object):
             return -obj / T
 
         # Optimize emissions log-likelihood
-        optimizer = dict(bfgs=bfgs, lbfgs=lbfgs)[optimizer]
+        optimizer = dict(bfgs=bfgs, lbfgs=lbfgs)[emission_optimizer]
         self.emissions.params = \
-            optimizer(_objective, self.emissions.params, num_iters=num_optimizer_iters, full_output=False)
+            optimizer(_emission_objective,
+                      self.emissions.params,
+                      num_iters=emission_optimizer_maxiter,
+                      full_output=False)
 
     def _fit_laplace_em(self, variational_posterior, datas,
                         inputs=None, masks=None, tags=None,
-                        num_iters=100, num_samples=1,
+                        num_iters=100,
+                        num_samples=1,
+                        newton_stepsize=0.75,
+                        newton_tolerance=1e-4,
+                        newton_maxiter=100,
+                        emission_optimizer="lbfgs",
+                        emission_optimizer_maxiter=50,
                         learning=True):
         """
         Fit an approximate posterior p(z, x | y) \approx q(z) q(x).
@@ -671,13 +685,15 @@ class SLDS(object):
 
             # 2. Update the continuous state posterior q(x)
             self._fit_laplace_em_continuous_state_update(
-                discrete_expectations, variational_posterior, datas, inputs, masks, tags)
+                discrete_expectations, variational_posterior, datas, inputs, masks, tags,
+                newton_stepsize, newton_tolerance, newton_maxiter)
             continuous_expectations = variational_posterior.mean_continuous_states
 
             # 3. Update parameters
             if learning:
                 self._fit_laplace_em_params_update(
-                    discrete_expectations, continuous_expectations, datas, inputs, masks, tags)
+                    discrete_expectations, continuous_expectations, datas, inputs, masks, tags,
+                    emission_optimizer, emission_optimizer_maxiter)
 
             # 4. Compute ELBO
             elp = 0
