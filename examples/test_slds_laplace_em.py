@@ -13,7 +13,7 @@ from ssm.util import random_rotation, find_permutation
 T = 1000    # number of time bins
 K = 3     # number of discrete states
 D = 1       # number of latent dimensions
-N = 2      # number of observed dimensions
+N = 10      # number of observed dimensions
 
 # Make an SLDS with the true parameters
 true_slds = ssm.SLDS(N, K, D, emissions="gaussian")
@@ -34,7 +34,7 @@ from ssm.variational import SLDSStructuredMeanFieldVariationalPosterior
 q_laplace_em = SLDSStructuredMeanFieldVariationalPosterior(slds, y)
 # slds.dynamics.params = true_slds.dynamics.params
 # slds.emissions.params = true_slds.emissions.params
-slds.fit(q_laplace_em, y, num_block_iters=20, method="laplace_em", initialize=False, num_samples=10)
+slds.fit(q_laplace_em, y, num_iters=20, method="laplace_em", initialize=False, num_samples=1)
 # test Hessians
 # M = (slds.M,) if isinstance(slds.M, int) else slds.M
 # inputs = [np.zeros((yt.shape[0],)+M) for yt in [y]]

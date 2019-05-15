@@ -315,6 +315,44 @@ def vjp_solveh_banded_A(C, A_banded, b, lower=True, **kwargs):
 defvjp(solveh_banded, vjp_solveh_banded_A, vjp_solveh_banded_b)
 
 
+def blocks_to_full(J_diag, J_lower_diag):
+    T, D, _ = J_diag.shape
+    J = np.zeros((T*D, T*D))
+    for t in range(T):
+        J[t*D:(t+1)*D, t*D:(t+1)*D] = J_diag[t]
+    for t in range(T-1):
+        J[(t+1)*D:(t+2)*D, t*D:(t+1)*D] = J_lower_diag[t]
+        J[t*D:(t+1)*D, (t+1)*D:(t+2)*D] = J_lower_diag[t].T
+    return J
+
+
+# Solve and multiply symmetric block tridiagonal systems
+def solve_symm_block_tridiag(J_diag, J_lower_diag, v):
+    J_banded = blocks_to_bands(J_diag, J_lower_diag, lower=True)
+    x_flat = solveh_banded(J_banded, np.ravel(v), lower=True)
+    return np.reshape(x_flat, v.shape)
+
+
+def symm_block_tridiag_matmul(J_diag, J_lower_diag, v):
+    """
+    Compute matrix-vector product with a symmetric block
+    tridiagonal matrix J and vector v.
+    :param J_diag:          block diagonal terms of J
+    :param J_lower_diag:    lower block diagonal terms of J
+    :param v:               vector to multiply
+    :return:                J * v
+    """
+    T, D, _ = J_diag.shape
+    assert J_diag.ndim == 3 and J_diag.shape[2] == D
+    assert J_lower_diag.shape == (T-1, D, D)
+    assert v.shape == (T, D)
+
+    out = np.matmul(J_diag, v[:, :, None])[:, :, 0]
+    out[:-1] += np.matmul(np.swapaxes(J_lower_diag, -1, -2), v[1:][:, :, None])[:, :, 0]
+    out[1:] += np.matmul(J_lower_diag, v[:-1][:, :, None])[:, :, 0]
+    return out
+
+
 # LDS operations
 def convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts):
     """
@@ -372,9 +410,7 @@ def cholesky_lds(As, bs, Qi_sqrts, ms, Ri_sqrts):
 
 def solve_lds(As, bs, Qi_sqrts, ms, Ri_sqrts, v):
     J_diag, J_lower_diag, _ = convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts)
-    J_banded = blocks_to_bands(J_diag, J_lower_diag, lower=True)
-    x_flat = solveh_banded(J_banded, np.ravel(v), lower=True)
-    return np.reshape(x_flat, v.shape)
+    return solve_symm_block_tridiag(J_diag, J_lower_diag, v)
 
 
 def lds_log_probability(x, As, bs, Qi_sqrts, ms, Ri_sqrts):

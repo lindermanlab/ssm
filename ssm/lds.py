@@ -8,12 +8,12 @@ from autograd.tracer import getval
 from autograd.misc import flatten
 from autograd import value_and_grad, grad
 
-from .optimizers import adam_step, rmsprop_step, sgd_step, convex_combination
+from .optimizers import adam_step, rmsprop_step, sgd_step, lbfgs, bfgs, convex_combination
 from .primitives import hmm_normalizer, hmm_expected_states, hmm_filter, \
-    hmm_sample, viterbi, blocks_to_bands, solveh_banded
+    hmm_sample, viterbi, symm_block_tridiag_matmul
 from .util import ensure_args_are_lists, ensure_args_not_none, \
     ensure_slds_args_not_none, ensure_variational_args_are_lists, \
-    replicate, collapse
+    replicate, collapse, newtons_method_block_tridiag_hessian
 
 from . import observations as obs
 from . import transitions as trans
@@ -506,10 +506,153 @@ class SLDS(object):
         """
         raise NotImplementedError
 
-    def _fit_structured_meanfield(self, variational_posterior, datas,
-                                  inputs=None, masks=None, tags=None,
-                                  num_block_iters=10,num_samples=1,
-                                  learning=True):
+    def _fit_laplace_em_discrete_state_update(
+        self, variational_posterior, datas,
+        inputs=None, masks=None, tags=None,
+        num_samples=1):
+
+        # 0. Draw samples of q(x) for Monte Carlo approximating expectations
+        x_sampless = [variational_posterior.sample_continuous_states() for _ in range(num_samples)]
+        # Convert this to a list of length len(datas) where each entry
+        # is a tuple of length num_samples
+        x_sampless = list(zip(*x_sampless))
+
+        # 1. Update the variational posterior on q(z) for fixed q(x)
+        #    - Monte Carlo approximate the log transition matrices
+        #    - Compute the expected log likelihoods (i.e. log dynamics probs)
+        #    - If emissions depend on z, compute expected emission likelihoods
+        for prms, x_samples, data, input, mask, tag in \
+            zip(variational_posterior._params, x_sampless, datas, inputs, masks, tags):
+
+            # Make a mask for the continuous states
+            x_mask = np.ones_like(x_samples[0], dtype=bool)
+
+            # Compute expected log initial distribution, transition matrices, and likelihoods
+            prms["log_pi0"] = np.mean(
+                [self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
+                 for x in x_samples], axis=0)
+
+            prms["log_Ps"] = np.mean(
+                [self.transitions.log_transition_matrices(x, input, x_mask, tag)
+                 for x in x_samples], axis=0)
+
+            prms["log_likes"] = np.mean(
+                [self.dynamics.log_likelihoods(x, input, x_mask, tag)
+                 for x in x_samples], axis=0)
+
+            if not self.emissions.single_subspace:
+                prms["log_likes"] += np.mean(
+                    [self.emissions.log_likelihoods(data, input, mask, tag, x)
+                     for x in x_samples], axis=0)
+
+    def _fit_laplace_em_continuous_state_update(
+        self, discrete_expectations, variational_posterior,
+        datas, inputs=None, masks=None, tags=None):
+
+        # 2. Update the variational posterior q(x) for fixed q(z)
+        #    - Use Newton's method to find the argmax of the expected log joint
+        #       - Compute the gradient g(x) and block tridiagonal Hessian J(x)
+        #       - Newton update: x' = x + J(x)^{-1} g(x)
+        #       - Check for convergence of x'
+        #    - Evaluate the J(x*) at the optimal x*
+
+        # Compute the expected log joint
+        def neg_expected_log_joint(x, Ez, Ezzp1, scale=1):
+            # The "mask" for x is all ones
+            x_mask = np.ones_like(x, dtype=bool)
+            log_pi0 = self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
+            log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
+            log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
+            log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
+
+            # Compute the expected log probability
+            elp = np.sum(Ez[0] * log_pi0)
+            elp += np.sum(Ezzp1 * log_Ps)
+            elp += np.sum(Ez * log_likes)
+            return -1 * elp / scale
+
+        # We'll need the gradient of the expected log joint wrt x
+        grad_neg_expected_log_joint = grad(neg_expected_log_joint)
+
+        # We also need the hessian of the of the expected log joint                            # Compute the negative Hessian of the expected log joint, represented in blocks.
+        def hessian_neg_expected_log_joint(x, Ez, Ezzp1, scale=1):
+            T, D = np.shape(x)
+            x_mask = np.ones((T, D), dtype=bool)
+            hessian_diag, hessian_lower_diag = self.dynamics.hessian_expected_log_dynamics_prob(Ez, x, input, x_mask, tag)
+            hessian_diag[:-1] += self.transitions.hessian_expected_log_trans_prob(x, input, x_mask, tag, Ezzp1)
+            hessian_diag += self.emissions.hessian_log_emissions_prob(data, input, mask, tag, x)
+
+            # The Hessian of the log probability should be *negative* definite since we are *maximizing* it.
+            hessian_diag -= 1e-8 * np.eye(D)
+
+            # Return the scaled negative hessian, which is positive definite
+            return -1 * hessian_diag / scale, -1 * hessian_lower_diag / scale
+
+        # Run Newton's method for each data array to find a
+        # Laplace approximation for q(x)
+        x0s = variational_posterior.mean_continuous_states
+        for prms, (Ez, Ezzp1, _), x0, data, input, mask, tag in \
+            zip(variational_posterior._params, discrete_expectations, x0s,
+                datas, inputs, masks, tags):
+
+            # Run Newtons method
+            scale = x0.size
+            obj = lambda x: neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
+            grad_func = lambda x: grad_neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
+            hess_func = lambda x: hessian_neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
+            x = newtons_method_block_tridiag_hessian(x0, obj, grad_func, hess_func, stepsize=0.75)
+            J_diag, J_lower_diag = hessian_neg_expected_log_joint(x, Ez, Ezzp1)
+
+            # Compute the Hessian vector product h = J * x = -H * x
+            # We can do this without instantiating the full matrix
+            h = symm_block_tridiag_matmul(J_diag, J_lower_diag, x)
+
+            # DEBUG: Test the multiplication
+            # T, D = x0.shape
+            # J = np.zeros((T*D, T*D))
+            # for t in range(T):
+            #     J[t*D:(t+1)*D, t*D:(t+1)*D] = J_diag[t]
+            # for t in range(T-1):
+            #     J[(t+1)*D:(t+2)*D, t*D:(t+1)*D] = J_lower_diag[t]
+            #     J[t*D:(t+1)*D, (t+1)*D:(t+2)*D] = J_lower_diag[t].T
+            # h2 = J.dot(np.ravel(x)).reshape(x.shape)
+            # assert np.allclose(h, h2)
+
+            # update params
+            prms["J_diag"] = J_diag
+            prms["J_lower_diag"] = J_lower_diag
+            prms["h"] = h
+
+
+    def _fit_laplace_em_params_update(
+        self, discrete_expectations, continuous_expectations,
+        datas, inputs=None, masks=None, tags=None,
+        optimizer="lbfgs", num_optimizer_iters=50):
+
+        # 3. Update the model parameters.  Replace the expectation wrt x with mean.
+        xmasks = [np.ones_like(x, dtype=bool) for x in continuous_expectations]
+        self.init_state_distn.m_step(discrete_expectations, continuous_expectations, inputs, xmasks, tags)
+        self.transitions.m_step(discrete_expectations, continuous_expectations, inputs, xmasks, tags)
+        self.dynamics.m_step(discrete_expectations, continuous_expectations, inputs, xmasks, tags)
+
+        T = sum([data.shape[0] for data in datas])
+        def _objective(params, itr):
+            self.emissions.params = params
+            obj = 0
+            for data, input, mask, tag, x, (Ez, _, _) in \
+                zip(datas, inputs, masks, tags, continuous_expectations, discrete_expectations):
+                obj += np.sum(Ez * self.emissions.log_likelihoods(data, input, mask, tag, x))
+            return -obj / T
+
+        # Optimize emissions log-likelihood
+        optimizer = dict(bfgs=bfgs, lbfgs=lbfgs)[optimizer]
+        self.emissions.params = \
+            optimizer(_objective, self.emissions.params, num_iters=num_optimizer_iters, full_output=False)
+
+    def _fit_laplace_em(self, variational_posterior, datas,
+                        inputs=None, masks=None, tags=None,
+                        num_iters=100, num_samples=1,
+                        learning=True):
         """
         Fit an approximate posterior p(z, x | y) \approx q(z) q(x).
         Perform block coordinate ascent on q(z) followed by q(x).
@@ -517,179 +660,46 @@ class SLDS(object):
         and that we update q(x) via Laplace approximation.
         Assume q(z) is a chain-structured discrete graphical model.
         """
-        from scipy.linalg import block_diag
-
-        for iter in range(num_block_iters):
-            # 0. Draw samples of q(x) for Monte Carlo approximating expectations
-            x_sampless = [variational_posterior.sample_continuous_states() for _ in range(num_samples)]
-            # Convert this to a list of length len(datas) where each entry
-            # is a tuple of length num_samples
-            x_sampless = list(zip(*x_sampless))
-
-            # 1. Update the variational posterior on q(z) for fixed q(x)
-            #    - Monte Carlo approximate the log transition matrices
-            #    - Compute the expected log likelihoods (i.e. log dynamics probs)
-            #    - If emissions depend on z, compute expected emission likelihoods
-            for prms, x_samples, data, input, mask, tag in \
-                zip(variational_posterior._params, x_sampless, datas, inputs, masks, tags):
-
-                x_mask = np.ones_like(x_samples, dtype=bool)
-
-                # Compute expected log initial distribution, transition matrices, and likelihoods
-                prms["log_pi0"] = np.mean(
-                    [self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
-                     for x in x_samples], axis=0)
-
-                prms["log_Ps"] = np.mean(
-                    [self.transitions.log_transition_matrices(x, input, x_mask, tag)
-                     for x in x_samples], axis=0)
-
-                prms["log_likes"] = np.mean(
-                    [self.dynamics.log_likelihoods(x, input, x_mask, tag)
-                     for x in x_samples], axis=0)
-
-                if not self.emissions.single_subspace:
-                    prms["log_likes"] += np.mean(
-                        [self.emissions.log_likelihoods(data, input, mask, tag, x)
-                         for x in x_samples], axis=0)
-
-            # 2. Update the variational posterior q(x) for fixed q(z)
-            #    - Use Newton's method to find the argmax of the expected log joint
-            #       - Compute the gradient g(x) and block tridiagonal Hessian J(x)
-            #       - Newton update: x' = x + J(x)^{-1} g(x)
-            #       - Check for convergence of x'
-            #    - Evaluate the J(x*) at the optimal x*
+        elps = [-np.inf]
+        pbar = trange(num_iters)
+        pbar.set_description("E[LP]: {:.1f}".format(elps[-1]))
+        for itr in pbar:
+            # 1. Update the discrete state posterior q(z)
+            self._fit_laplace_em_discrete_state_update(
+                variational_posterior, datas, inputs, masks, tags, num_samples=num_samples)
             discrete_expectations = variational_posterior.mean_discrete_states
-            continuous_expectations = variational_posterior.mean_continuous_states # use these to initialize newton steps
-            xstars = []
 
-            for prms, (Ez, Ezzp1, _), Ex, data, input, mask, tag in \
-                zip(variational_posterior._params, discrete_expectations, continuous_expectations,
-                    datas, inputs, masks, tags):
+            # 2. Update the continuous state posterior q(x)
+            self._fit_laplace_em_continuous_state_update(
+                discrete_expectations, variational_posterior, datas, inputs, masks, tags)
+            continuous_expectations = variational_posterior.mean_continuous_states
 
-                # Run Newton's method
-                # Compute the expected log joint
-                def expected_log_joint(x):
-                    # The "mask" for x is all ones
-                    x_mask = np.ones_like(x, dtype=bool)
-                    log_pi0 = self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
-                    log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
-                    log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
-                    log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
-
-                    # Compute the expected log probability
-                    elp = 0
-                    elp += np.sum(Ez[0] * log_pi0)
-                    elp += np.sum(Ezzp1 * log_Ps)
-                    elp += np.sum(Ez * log_likes)
-
-                    return elp
-
-                # Compute the gradient of the expected log joint at a point x
-                grad_expected_log_joint = grad(expected_log_joint)
-
-                # Compute the expected Hessian, represented in blocks, return negated Hessian
-                def neg_hessian_blocks(x):
-
-                    # The "mask" for x is all ones
-                    x_mask = np.ones_like(x, dtype=bool)
-                    hessian_diag, hessian_lower_diag = self.dynamics.hessian_expected_log_dynamics_prob(Ez, x, input, x_mask, tag)
-
-                    # transition terms contribute on diagonal until the last block
-                    hessian_diag[:-1] += self.transitions.hessian_expected_log_trans_prob(x, input, x_mask, tag, Ezzp1)
-
-                    #TODO include Ez
-                    hessian_diag += self.emissions.hessian_log_emissions_prob(data, input, mask, tag, x)
-                    T, D = np.shape(x)
-                    hessian_diag += np.tile(1e-3*np.eye(D), (T, 1, 1))
-                    # return the blocks of the Hessian
-                    return -1.0 * hessian_diag, -1.0 * hessian_lower_diag
-
-                def newtons_method(x0, grad, neg_hessian_blocks):
-                    # TODO: damping, etc
-                    x = x0
-                    is_converged = False
-                    count = 0
-                    while not is_converged:
-                        hessian_diag, hessian_lower_diag = neg_hessian_blocks(x)
-                        J_banded = blocks_to_bands(hessian_diag, hessian_lower_diag, lower=True) # J is -Hessian
-                        dx = np.reshape(solveh_banded(J_banded, np.ravel(grad(x)), lower=True), x.shape)
-                        x = x + dx
-                        # is_converged = np.mean(np.abs(dx)) < 1e-8
-                        is_converged = np.mean(np.abs(dx)) < 1e-5
-                        count += 1
-                        if count > 10:
-                            is_converged = True, print("Stopping after 10 Newton steps")
-
-                    return x
-
-                xstar = newtons_method(Ex, grad_expected_log_joint, neg_hessian_blocks)
-                xstars.append(xstar)
-                Jstar_diag, Jstar_lower_diag = neg_hessian_blocks(xstar)
-
-                # Compute the Hessian vector product h = J * xstar
-                hstar = block_diag(*Jstar_diag) @ np.ravel(xstar)
-                Jstar_lower_diag_full = np.pad(block_diag(*Jstar_lower_diag), ((self.D,0),(0,self.D)), 'constant')
-                hstar += Jstar_lower_diag_full @ np.ravel(xstar)
-                hstar += Jstar_lower_diag_full.T @ np.ravel(xstar)
-                hstar = np.reshape(hstar, xstar.shape)
-
-                # update params
-                prms["J_diag"] = Jstar_diag
-                prms["J_lower_diag"] = Jstar_lower_diag
-                prms["h"] = hstar
-
-            # 3. Update the model parameters
-            print("Step 3. Update model parameters")
-            xstar_masks = [np.ones_like(xstar, dtype=bool) for xstar in xstars]
-            self.init_state_distn.m_step(discrete_expectations, xstars, inputs, xstar_masks, tags)
-            self.transitions.m_step(discrete_expectations, xstars, inputs, xstar_masks, tags)
-            self.dynamics.m_step(discrete_expectations, xstars, inputs, xstar_masks, tags)
-
-            T = sum([data.shape[0] for data in datas])
-            def _objective(params, itr):
-                self.emissions.params = params
-                obj = 0.0
-                for data, input, mask, tag, x in zip(datas, inputs, masks, tags, xstars):
-                    obj += self.emissions.log_likelihoods(data, input, mask, tag, x)
-                return -obj / T
-
-            # Optimize emissions log-likelihood
-            optimizer = "adam"
-            params = self.emissions.params
-            state = None
-            step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
-            num_iters = 50 # TODO: see if this works and if should set as input variable
-            for itr in range(num_iters):
-                params, val, g, state = step(value_and_grad(_objective), params, itr, state)
-
-            # set emissions parameters
-            self.emissions.params = params
+            # 3. Update parameters
+            if learning:
+                self._fit_laplace_em_params_update(
+                    discrete_expectations, continuous_expectations, datas, inputs, masks, tags)
 
             # 4. Compute ELBO
-            # elbo = 0
-            # for sample in range(n_samples):
-            #     # Sample x from the variational posterior
-            #     xs = variational_posterior.sample_continuous_states()
-            #     zs = variational_posterior.sample_discrete_states()
-            #
-            #     # log p(theta)
-            #     elbo += self.log_prior()
-            #
-            #     # log p(x, y, z| theta)
-            #     for x, z, data, input, mask, tag in zip(xs, zs, datas, inputs, masks, tags):
-            #
-            #         # The "mask" for x is all ones
-            #         x_mask = np.ones_like(x, dtype=bool)
-            #         log_pi0 = self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag) # grab z[0] of this?
-            #         log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag) # grab z-th log at each time?
-            #         log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag) # grab z-th log like at each time?
-            #         log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
-            #         elbo += hmm_normalizer(log_pi0, log_Ps, log_likes) # remove this, just keep log_pi0, log_P, log_likes
-            #
-            #     # -log q(x)
-            #     elbo -= variational_posterior.log_density(xs) # TODO implement this
-            #     assert np.isfinite(elbo)
+            elp = 0
+            for x, (Ez, Ezzp1, _), data, input, mask, tag in \
+                zip(continuous_expectations, discrete_expectations, datas, inputs, masks, tags):
+
+                # The "mask" for x is all ones
+                x_mask = np.ones_like(x, dtype=bool)
+                log_pi0 = self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
+                log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
+                log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
+                log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
+
+                # Compute the expected log probability
+                elp += np.sum(Ez[0] * log_pi0)
+                elp += np.sum(Ezzp1 * log_Ps)
+                elp += np.sum(Ez * log_likes)
+            elps.append(elp)
+
+            pbar.set_description("E[LP]: {:.1f}".format(elps[-1]))
+
+        return elps
 
     @ensure_variational_args_are_lists
     def fit(self, variational_posterior, datas,
@@ -736,7 +746,7 @@ class SLDS(object):
         _fitting_methods = dict(svi=self._fit_svi,
                                 bbvi=self._fit_svi,
                                 vem=self._fit_variational_em,
-                                laplace_em=self._fit_structured_meanfield)
+                                laplace_em=self._fit_laplace_em)
 
         # Deprecate "svi" as a method
         warnings.warn("SLDS fitting method 'svi' will be renamed 'bbvi' in future releases.",
@@ -757,7 +767,9 @@ class SLDS(object):
                               method="svi", **kwargs):
         # Specify fitting methods
         _fitting_methods = dict(svi=self._fit_svi,
-                                vem=self._fit_variational_em)
+                                bbvi=self._fit_svi,
+                                vem=self._fit_variational_em,
+                                laplace_em=self._fit_laplace_em)
 
         if method not in _fitting_methods:
             raise Exception("Invalid method: {}. Options are {}".\

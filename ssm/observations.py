@@ -857,8 +857,23 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             resid = y[None, :, :] - yhat
             sqerr += np.einsum('tk,kti,ktj->kij', Ez, resid, resid)
             weight += np.sum(Ez, axis=0)
+        Sigmas = sqerr / weight[:, None, None] + 1e-8 * np.eye(D)
 
-        self.Sigmas = sqerr / weight[:, None, None] + 1e-8 * np.eye(D)
+        # If any states are unused, set their parameters to a perturbation of a used state
+        usage = sum([Ez.sum(0) for Ez in Ezs])
+        unused = np.where(usage < 1)[0]
+        used = np.where(usage > 1)[0]
+        if len(unused) > 0:
+            import ipdb; ipdb.set_trace()
+            for k in unused:
+                i = npr.choice(used)
+                self.As[k] = self.As[i] + 0.01 * npr.randn(*self.As[i].shape)
+                self.Vs[k] = self.Vs[i] + 0.01 * npr.randn(*self.Vs[i].shape)
+                self.bs[k] = self.bs[i] + 0.01 * npr.randn(*self.bs[i].shape)
+                Sigmas[k] = Sigmas[i]
+
+        # Store the updated covariances
+        self.Sigmas = Sigmas
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, As, bs, Vs = self.D, self.As, self.bs, self.Vs
@@ -885,18 +900,26 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         D = self.D
 
         # diagonal blocks, size ((T, D, D))
-        # first part of diagonal blocks are inverse covariance matrices
-        inv_Sigmas = np.linalg.inv(self.Sigmas) # get inverse covariance matrices
-        diagonal_blocks = -1.0 * np.sum(Ez[:,:,None,None] * inv_Sigmas[None,:], axis=1)
+        diagonal_blocks = np.zeros((T, D, D))
+
+        # initial distribution contributes a Gaussian term to first diagonal block
+        diagonal_blocks[0] = -1 * np.sum(Ez[0, :, None, None] * np.linalg.inv(self.Sigmas_init), axis=0)
+
+        # first part is transition dynamics - goes to all terms except final one
+        # E_q(z) x_{t} A_{z_t+1}.T Sigma_{z_t+1}^{-1} A_{z_t+1} x_{t}
+        inv_Sigmas = np.linalg.inv(self.Sigmas)
+        dynamics_terms = np.array([A.T@inv_Sigma@A for A, inv_Sigma in zip(self.As, inv_Sigmas)]) # A^T Qinv A terms
+        diagonal_blocks[:-1] += -1 * np.sum(Ez[1:,:,None,None] * dynamics_terms[None,:], axis=1)
+
+        # second part of diagonal blocks are inverse covariance matrices - goes to all but first time bin
+        # E_q(z) x_{t+1} Sigma_{z_t+1}^{-1} x_{t+1}
+        diagonal_blocks[1:] += -1 * np.sum(Ez[1:,:,None,None] * inv_Sigmas[None,:], axis=1)
         # TODO use tensordot? diagonal_blocks = np.tensordot(Ez, inv_Sigmas, axes=1)
 
-        # second part is transition dynamics - goes to all terms except final one
-        dynamics_terms = np.array([A.T@inv_Sigma@A for A, inv_Sigma in zip(self.As, inv_Sigmas)]) # A^T Qinv A terms
-        diagonal_blocks[:T-1] -= np.sum(Ez[:T-1,:,None,None] * dynamics_terms[None,:], axis=1)
-
-        # lower diagonal blocks are (T-1,D,D)
+        # lower diagonal blocks are (T-1,D,D):
+        # E_q(z) x_{t+1} Sigma_{z_t+1}^{-1} A_{z_t+1} x_t
         off_diag_terms = np.array([inv_Sigma@A for A, inv_Sigma in zip(self.As, inv_Sigmas)])
-        lower_diagonal_blocks = np.sum(Ez[:T-1,:,None,None] * off_diag_terms[None,:], axis=1)
+        lower_diagonal_blocks = np.sum(Ez[1:,:,None,None] * off_diag_terms[None,:], axis=1)
 
         return diagonal_blocks, lower_diagonal_blocks
 
