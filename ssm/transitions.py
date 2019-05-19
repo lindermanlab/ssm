@@ -100,7 +100,8 @@ class StationaryTransitions(Transitions):
     def log_transition_matrices(self, data, input, mask, tag):
         T = data.shape[0]
         log_Ps = self.log_Ps - logsumexp(self.log_Ps, axis=1, keepdims=True)
-        return np.tile(log_Ps[None, :, :], (T-1, 1, 1))
+        # return np.tile(log_Ps[None, :, :], (T-1, 1, 1))
+        return log_Ps[None, :, :]
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         P = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations]) + 1e-16
