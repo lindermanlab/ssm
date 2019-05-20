@@ -864,7 +864,6 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         unused = np.where(usage < 1)[0]
         used = np.where(usage > 1)[0]
         if len(unused) > 0:
-            import ipdb; ipdb.set_trace()
             for k in unused:
                 i = npr.choice(used)
                 self.As[k] = self.As[i] + 0.01 * npr.randn(*self.As[i].shape)
