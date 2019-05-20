@@ -391,7 +391,7 @@ class MultivariateStudentsTObservations(Observations):
         # significant performance benefit if we call it with (TxD), (D,), (D,D), and (,)
         # arrays as inputs
         return np.column_stack([stats.multivariate_studentst_logpdf(data, mu, Sigma, nu)
-                               for mu, Sigma in zip(mus, Sigmas, nus)])
+                               for mu, Sigma, nu in zip(mus, Sigmas, nus)])
 
         # return stats.multivariate_studentst_logpdf(data[:, None, :], mus, Sigmas, nus)
 
@@ -1223,7 +1223,7 @@ class _RobustAutoRegressiveObservationsMixin(object):
 
     def log_likelihoods(self, data, input, mask, tag):
         assert np.all(mask), "Cannot compute likelihood of autoregressive obsevations with missing data."
-        mus = np.swapaxes(self._compute_mus(data, input, mask, tag), 0, 1)
+        mus = self._compute_mus(data, input, mask, tag)
 
         # Compute the likelihood of the initial data and remainder separately
         L = self.lags
@@ -1234,7 +1234,7 @@ class _RobustAutoRegressiveObservationsMixin(object):
         ll_init = np.column_stack([stats.multivariate_normal_logpdf(data[:L], mu[:L], Sigma)
                                for mu, Sigma in zip(mus, self.Sigmas_init)])
 
-        ll_ar = np.column_stack([stats.multivariate_studentst_logpdf(data[L:], mu[L:], Sigma)
+        ll_ar = np.column_stack([stats.multivariate_studentst_logpdf(data[L:], mu[L:], Sigma, nu)
                                for mu, Sigma, nu in zip(mus, self.Sigmas, self.nus)])
 
         return np.row_stack((ll_init, ll_ar))

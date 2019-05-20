@@ -37,7 +37,8 @@ observations = [
 ]
 
 # Fit with both SGD and EM
-methods = ["sgd", "em"]
+# methods = ["sgd", "em"]
+methods = ["em"]
 
 results = {}
 for obs in observations:
