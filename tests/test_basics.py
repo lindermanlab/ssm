@@ -1,3 +1,5 @@
+from time import time
+
 import autograd.numpy as np
 import autograd.numpy.random as npr
 
@@ -181,3 +183,55 @@ def test_viterbi(T=1000, K=20, D=2):
     z_star2 = hmm.most_likely_states(y)
 
     assert np.allclose(z_star, z_star2)
+
+
+def test_hmm_likelihood_perf(T=10000, K=50, D=20):
+    # Create a true HMM
+    A = npr.rand(K, K)
+    A /= A.sum(axis=1, keepdims=True)
+    A = 0.75 * np.eye(K) + 0.25 * A
+    C = npr.randn(K, D)
+    sigma = 0.01
+
+    # Sample from the true HMM
+    z = np.zeros(T, dtype=int)
+    y = np.zeros((T, D))
+    for t in range(T):
+        if t > 0:
+            z[t] = np.random.choice(K, p=A[z[t-1]])
+        y[t] = C[z[t]] + np.sqrt(sigma) * npr.randn(D)
+
+    # Compare to pyhsmm answer
+    from pyhsmm.models import HMM as OldHMM
+    from pybasicbayes.distributions import Gaussian
+    oldhmm = OldHMM([Gaussian(mu=C[k], sigma=sigma * np.eye(D)) for k in range(K)],
+                  trans_matrix=A,
+                  init_state_distn="uniform")
+
+    states = oldhmm.add_data(y)
+    tic = time()
+    true_lkhd = states.log_likelihood()
+    pyhsmm_dt = time() - tic
+    print("PyHSMM: ", pyhsmm_dt, "sec. Val: ", true_lkhd)
+
+    # Make an HMM with these parameters
+    hmm = ssm.HMM(K, D, observations="gaussian")
+    hmm.transitions.log_Ps = np.log(A)
+    hmm.observations.mus = C
+    hmm.observations._sqrt_Sigmas = np.sqrt(sigma) * np.array([np.eye(D) for k in range(K)])
+
+    tic = time()
+    test_lkhd = hmm.log_probability(y)
+    smm_dt = time() - tic
+    print("SMM HMM: ", smm_dt, "sec. Val: ", test_lkhd)
+
+    # Make an ARHMM with these parameters
+    arhmm = ssm.HMM(K, D, observations="ar")
+    tic = time()
+    arhmm.log_probability(y)
+    arhmm_dt = time() - tic
+    print("SSM ARHMM: ", arhmm_dt, "sec.")
+
+
+if __name__ == "__main__":
+    test_hmm_likelihood_perf()

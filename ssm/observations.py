@@ -113,7 +113,11 @@ class GaussianObservations(Observations):
                             "does not work with autograd because it writes to an array. "
                             "Use DiagonalGaussian instead if you need to support missing data.")
 
-        return stats.multivariate_normal_logpdf(data[:, None, :], mus, Sigmas)
+        # stats.multivariate_normal_logpdf supports broadcasting, but we get
+        # significant performance benefit if we call it with (TxD), (D,), and (D,D)
+        # arrays as inputs
+        return np.column_stack([stats.multivariate_normal_logpdf(data, mu, Sigma)
+                               for mu, Sigma in zip(mus, Sigmas)])
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, mus = self.D, self.mus
@@ -382,7 +386,14 @@ class MultivariateStudentsTObservations(Observations):
     def log_likelihoods(self, data, input, mask, tag):
         assert np.all(mask), "MultivariateStudentsTObservations does not support missing data"
         D, mus, Sigmas, nus = self.D, self.mus, self.Sigmas, self.nus
-        return stats.multivariate_studentst_logpdf(data[:, None, :], mus, Sigmas, nus)
+
+        # stats.multivariate_studentst_logpdf supports broadcasting, but we get
+        # significant performance benefit if we call it with (TxD), (D,), (D,D), and (,)
+        # arrays as inputs
+        return np.column_stack([stats.multivariate_studentst_logpdf(data, mu, Sigma, nu)
+                               for mu, Sigma in zip(mus, Sigmas, nus)])
+
+        # return stats.multivariate_studentst_logpdf(data[:, None, :], mus, Sigmas, nus)
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         """
@@ -667,26 +678,28 @@ class _AutoRegressiveObservationsBase(Observations):
         self.Vs = self.Vs[perm]
 
     def _compute_mus(self, data, input, mask, tag):
-        assert np.all(mask), "ARHMM cannot handle missing data"
+        # assert np.all(mask), "ARHMM cannot handle missing data"
+        K, M = self.K, self.M
         T, D = data.shape
-        As, bs, Vs = self.As, self.bs, self.Vs
+        As, bs, Vs, mu0s = self.As, self.bs, self.Vs, self.mu_init
 
         # Instantaneous inputs
-        mus = np.matmul(Vs[None, ...], input[self.lags:, None, :self.M, None])[:, :, :, 0]
+        mus = np.empty((K, T, D))
+        for k, (A, b, V, mu0) in enumerate(zip(As, bs, Vs, mu0s)):
+            # Initial condition
+            mus[k, :self.lags] = mu0
 
-        # Lagged data
-        for l in range(self.lags):
-            Als = As[None, :, :, l*D:(l+1)*D]
-            lagged_data = data[self.lags-l-1:-l-1, None, :, None]
-            mus = mus + np.matmul(Als, lagged_data)[:, :, :, 0]
+            # Inputs
+            mus[k, self.lags:] = np.dot(input[self.lags:, :M], V.T)
 
-        # Bias
-        mus = mus + bs
+            # Lagged data
+            for l in range(self.lags):
+                Al = A[:, l*D:(l + 1)*D]
+                mus[k, self.lags:] += np.dot(data[self.lags-l-1:-l-1], Al.T)
 
-        # Pad with the initial condition
-        mus = np.concatenate((self.mu_init * np.ones((self.lags, self.K, self.D)), mus))
+            # Bias
+            mus[k, self.lags:] += b
 
-        assert mus.shape == (T, self.K, D)
         return mus
 
     def smooth(self, expectations, data, input, tag):
@@ -696,7 +709,7 @@ class _AutoRegressiveObservationsBase(Observations):
         """
         T = expectations.shape[0]
         mask = np.ones((T, self.D), dtype=bool)
-        mus = self._compute_mus(data, input, mask, tag)
+        mus = np.swapaxes(self._compute_mus(data, input, mask, tag), 0, 1)
         return (expectations[:, :, None] * mus).sum(1)
 
 
@@ -797,8 +810,15 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         mus = self._compute_mus(data, input, mask, tag)
 
         # Compute the likelihood of the initial data and remainder separately
-        ll_init = stats.multivariate_normal_logpdf(data[:L, None, :], mus[:L], self.Sigmas_init)
-        ll_ar = stats.multivariate_normal_logpdf(data[L:, None, :], mus[L:], self.Sigmas)
+        # stats.multivariate_studentst_logpdf supports broadcasting, but we get
+        # significant performance benefit if we call it with (TxD), (D,), (D,D), and (,)
+        # arrays as inputs
+        ll_init = np.column_stack([stats.multivariate_normal_logpdf(data[:L], mu[:L], Sigma)
+                               for mu, Sigma in zip(mus, self.Sigmas_init)])
+
+        ll_ar = np.column_stack([stats.multivariate_normal_logpdf(data[L:], mu[L:], Sigma)
+                               for mu, Sigma in zip(mus, self.Sigmas)])
+
         return np.row_stack((ll_init, ll_ar))
 
     def m_step(self, expectations, datas, inputs, masks, tags, J0=None, h0=None):
@@ -978,7 +998,7 @@ class AutoRegressiveDiagonalNoiseObservations(AutoRegressiveObservations):
 
     def log_likelihoods(self, data, input, mask, tag):
         assert np.all(mask), "Cannot compute likelihood of autoregressive obsevations with missing data."
-        mus = self._compute_mus(data, input, mask, tag)
+        mus = np.swapaxes(self._compute_mus(data, input, mask, tag), 0, 1)
 
         # Compute the likelihood of the initial data and remainder separately
         L = self.lags
@@ -1203,12 +1223,20 @@ class _RobustAutoRegressiveObservationsMixin(object):
 
     def log_likelihoods(self, data, input, mask, tag):
         assert np.all(mask), "Cannot compute likelihood of autoregressive obsevations with missing data."
-        mus = self._compute_mus(data, input, mask, tag)
+        mus = np.swapaxes(self._compute_mus(data, input, mask, tag), 0, 1)
 
         # Compute the likelihood of the initial data and remainder separately
         L = self.lags
-        ll_init = stats.multivariate_normal_logpdf(data[:L, None, :], mus[:L], self.Sigmas_init)
-        ll_ar = stats.multivariate_studentst_logpdf(data[L:, None, :], mus[L:], self.Sigmas, self.nus)
+        # Compute the likelihood of the initial data and remainder separately
+        # stats.multivariate_studentst_logpdf supports broadcasting, but we get
+        # significant performance benefit if we call it with (TxD), (D,), (D,D), and (,)
+        # arrays as inputs
+        ll_init = np.column_stack([stats.multivariate_normal_logpdf(data[:L], mu[:L], Sigma)
+                               for mu, Sigma in zip(mus, self.Sigmas_init)])
+
+        ll_ar = np.column_stack([stats.multivariate_studentst_logpdf(data[L:], mu[L:], Sigma)
+                               for mu, Sigma, nu in zip(mus, self.Sigmas, self.nus)])
+
         return np.row_stack((ll_init, ll_ar))
 
     def m_step(self, expectations, datas, inputs, masks, tags, num_em_iters=1, J0=None, h0=None):
@@ -1301,10 +1329,12 @@ class _RobustAutoRegressiveObservationsMixin(object):
         E_logtaus = np.zeros(K)
         weights = np.zeros(K)
         for (Ez, _, _,), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
-            # nu: (K,)  mus: (K, D)  Sigmas: (K, D, D)  y: (T, D)  -> tau: (T, K)
-            mus = self._compute_mus(data, input, mask, tag)
+            # nu: (K,)  mus: (T, K, D)  Sigmas: (K, D, D)  y: (T, D)  -> tau: (T, K)
+            mus = np.swapaxes(self._compute_mus(data, input, mask, tag), 0, 1)
+
             alpha = self.nus/2 + D/2
             sqrt_Sigma = np.linalg.cholesky(self.Sigmas)
+            # TODO: Performance could be improved by iterating over K outside batch_mahalanobis
             beta = self.nus/2 + 1/2 * stats.batch_mahalanobis(sqrt_Sigma, data[L:, None, :] - mus[L:])
 
             E_taus += np.sum(Ez[L:, :] * alpha / beta, axis=0)
@@ -1419,7 +1449,7 @@ class AltRobustAutoRegressiveDiagonalNoiseObservations(AutoRegressiveDiagonalNoi
 
     def log_likelihoods(self, data, input, mask, tag):
         assert np.all(mask), "Cannot compute likelihood of autoregressive obsevations with missing data."
-        mus = self._compute_mus(data, input, mask, tag)
+        mus = np.swapaxes(self._compute_mus(data, input, mask, tag), 0, 1)
 
         # Compute the likelihood of the initial data and remainder separately
         L = self.lags
@@ -1493,8 +1523,9 @@ class AltRobustAutoRegressiveDiagonalNoiseObservations(AutoRegressiveDiagonalNoi
         E_logtaus = np.zeros((K, D))
         weights = np.zeros(K)
         for (Ez, _, _,), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
-            # nu: (K,D)  mus: (K, D)  sigmas: (K, D)  y: (T, D)  -> w: (T, K, D)
-            mus = self._compute_mus(data, input, mask, tag)
+            # nu: (K,D)  mus: (T, K, D)  sigmas: (K, D)  y: (T, D)  -> w: (T, K, D)
+            mus = np.swapaxes(self._compute_mus(data, input, mask, tag), 0, 1)
+
             alpha = self.nus/2 + 1/2
             beta = self.nus/2 + 1/2 * (data[L:, None, :] - mus[L:])**2 / self.sigmasq
 

@@ -1,6 +1,7 @@
 import autograd.numpy as np
 from autograd.scipy.special import gammaln
 from autograd.scipy.misc import logsumexp
+from autograd.scipy.linalg import solve_triangular
 
 from ssm.util import one_hot
 
@@ -54,14 +55,22 @@ def batch_mahalanobis(L, x):
     -------
     y : array_like (...,)
         squared Mahalanobis distance :math:`x^T (LL^T)^{-1} x`
+
+        x^T (LL^T)^{-1} x = x^T L^{-T} L^{-1} x
     """
+    # The most common shapes are x: (T, D) and L : (D, D)
+    # Special case that one
+    if x.ndim == 2 and L.ndim == 2:
+        xs = solve_triangular(L, x.T, lower=True)
+        return np.sum(xs**2, axis=0)
+
     # Flatten the Cholesky into a (-1, D, D) array
     flat_L = flatten_to_dim(L, 2)
     # Invert each of the K arrays and reshape like L
     L_inv = np.reshape(np.array([np.linalg.inv(Li.T) for Li in flat_L]), L.shape)
-    # Reshape x into (..., D, 1); dot with L_inv^T; square and sum.
-    return np.sum(np.sum(x[..., None] * L_inv, axis=-2)**2, axis=-1)
-
+    # dot with L_inv^T; square and sum.
+    xs = np.einsum('...i,...ij->...j', x, L_inv)
+    return np.sum(xs**2, axis=-1)
 
 def _multivariate_normal_logpdf(data, mus, Sigmas, Ls=None):
     """
