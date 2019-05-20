@@ -232,6 +232,13 @@ def test_hmm_likelihood_perf(T=10000, K=50, D=20):
     arhmm_dt = time() - tic
     print("SSM ARHMM: ", arhmm_dt, "sec.")
 
+    # Make an ARHMM with these parameters
+    arhmm = ssm.HMM(K, D, observations="ar")
+    tic = time()
+    arhmm.expected_states(y)
+    arhmm_dt = time() - tic
+    print("SSM ARHMM Expectations: ", arhmm_dt, "sec.")
+
 
 if __name__ == "__main__":
     test_hmm_likelihood_perf()

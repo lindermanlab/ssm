@@ -12,7 +12,9 @@ from ssm.cstats import _blocks_to_bands_lower, _blocks_to_bands_upper, \
                        _transpose_banded, vjp_cholesky_banded_lower, \
                        _vjp_solve_banded_A, _vjp_solveh_banded_A
 
-from ssm.messages import forward_pass, backward_pass, backward_sample, grad_hmm_normalizer
+from ssm.messages import forward_pass, backward_pass, \
+                         backward_sample, grad_hmm_normalizer, \
+                         compute_stationary_expected_joints
 
 to_c = lambda arr: np.copy(getval(arr), 'C') if not arr.flags['C_CONTIGUOUS'] else getval(arr)
 
@@ -94,21 +96,9 @@ def hmm_expected_states(log_pi0, log_Ps, ll, memlimit=2**31):
 
     else:
         # Compute the sum over time axis of the expected joints
-        # Limit ourselves to approximately 1GB of memory, assuming
-        # the entries are float64's (8 bytes)
-        batch_size = int(memlimit / (8 * K * K))
-        assert batch_size > 0
-
-        expected_joints = np.zeros((1, K, K))
-        for start in range(0, T-1, batch_size):
-            stop = min(T-1, start + batch_size)
-
-            # Compute expectations in this batch
-            tmp = alphas[start:stop,:,None] + betas[start+1:stop+1,None,:] + ll[start+1:stop+1,None,:] + log_Ps
-            tmp -= tmp.max((1,2))[:,None, None]
-            tmp = np.exp(tmp)
-            tmp /= tmp.sum((1,2))[:,None,None]
-            expected_joints += tmp.sum(axis=0)
+        expected_joints = np.zeros((K, K))
+        compute_stationary_expected_joints(alphas, betas, ll, log_Ps[0], expected_joints)
+        expected_joints = expected_joints[None, :, :]
 
     return expected_states, expected_joints, normalizer
 
