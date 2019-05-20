@@ -547,7 +547,7 @@ class SLDS(object):
 
     def _fit_laplace_em_continuous_state_update(
         self, discrete_expectations, variational_posterior,
-        datas, inputs=None, masks=None, tags=None):
+        datas, inputs=None, masks=None, tags=None, maxiter=100):
 
         # 2. Update the variational posterior q(x) for fixed q(z)
         #    - Use Newton's method to find the argmax of the expected log joint
@@ -600,7 +600,7 @@ class SLDS(object):
             obj = lambda x: neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
             grad_func = lambda x: grad_neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
             hess_func = lambda x: hessian_neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
-            x = newtons_method_block_tridiag_hessian(x0, obj, grad_func, hess_func, stepsize=0.75)
+            x = newtons_method_block_tridiag_hessian(x0, obj, grad_func, hess_func, stepsize=0.75, maxiter=maxiter)
             J_diag, J_lower_diag = hessian_neg_expected_log_joint(x, Ez, Ezzp1)
 
             # Compute the Hessian vector product h = J * x = -H * x
@@ -627,13 +627,15 @@ class SLDS(object):
     def _fit_laplace_em_params_update(
         self, discrete_expectations, continuous_expectations,
         datas, inputs=None, masks=None, tags=None,
-        optimizer="lbfgs", num_optimizer_iters=50):
+        optimizer="lbfgs", alpha=0.0, num_optimizer_iters=50):
 
-        # 3. Update the model parameters.  Replace the expectation wrt x with mean.
+        # 3. Update the model parameters.  Replace the expectation wrt x with sample from q(x).
+        # The parameter update is partial and depends on alpha.
         xmasks = [np.ones_like(x, dtype=bool) for x in continuous_expectations]
-        self.init_state_distn.m_step(discrete_expectations, continuous_expectations, inputs, xmasks, tags)
-        self.transitions.m_step(discrete_expectations, continuous_expectations, inputs, xmasks, tags)
-        self.dynamics.m_step(discrete_expectations, continuous_expectations, inputs, xmasks, tags)
+        for distn in [self.init_state_distn, self.transitions, self.dynamics]:
+            curr_prms = copy.deepcopy(distn.params)
+            distn.m_step(discrete_expectations, continuous_expectations, inputs, xmasks, tags)
+            distn.params = convex_combination(curr_prms, distn.params, alpha)
 
         T = sum([data.shape[0] for data in datas])
         def _objective(params, itr):
@@ -649,10 +651,68 @@ class SLDS(object):
         self.emissions.params = \
             optimizer(_objective, self.emissions.params, num_iters=num_optimizer_iters, full_output=False)
 
+
+    # def _fit_laplace_em_params_update(
+    #     self, variational_posterior, discrete_expectations, continuous_expectations,
+    #     datas, inputs=None, masks=None, tags=None,
+    #     optimizer="adam", num_optimizer_iters=25, alpha=0.0):
+    # #
+    # #     # 3. Update the model parameters.  Replace the expectation wrt x with mean.
+    #     xmasks = [np.ones_like(x, dtype=bool) for x in continuous_expectations]
+    #
+    #     T = sum([data.shape[0] for data in datas])
+    #     def _objective(params, itr):
+    #         self.params = params
+    #         obj = self.log_prior()
+    #         xs = variational_posterior.sample_continuous_states()
+    #         for data, input, mask, tag, x, (Ez, Ezzp1, _), x_mask in \
+    #             zip(datas, inputs, masks, tags, xs, discrete_expectations, xmasks):
+    #             obj += np.sum(Ez * self.emissions.log_likelihoods(data, input, mask, tag, x))
+    #             # Compute expected log likelihood E_q(z | x, y) [log p(z, x, y; theta)]
+    #             log_pi0 = self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
+    #             log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
+    #             log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
+    #             log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
+    #
+    #             obj += np.sum(Ez[0] * log_pi0)
+    #             obj += np.sum(Ezzp1 * log_Ps)
+    #             obj += np.sum(Ez * log_likes)
+    #
+    #         return -obj / T
+    #
+    #     # Optimize parameters
+    #     step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
+    #     state = None
+    #     params = self.params
+    #     for itr in range(num_optimizer_iters):
+    #         # Update the emission and variational posterior parameters
+    #         params, val, g, state = step(value_and_grad(_objective), params, itr, state)
+    #
+    #     self.params = params
+    #
+    #     # If any states are unused, set their parameters to a perturbation of a used state
+    #     Ezs = [Ez for (Ez, _, _) in discrete_expectations]
+    #     usage = sum([Ez.sum(0) for Ez in Ezs])
+    #     unused = np.where(usage < 1)[0]
+    #     used = np.where(usage > 1)[0]
+    #     Sigmas = self.dynamics.Sigmas
+    #     if len(unused) > 0:
+    #         # import ipdb; ipdb.set_trace()
+    #         for k in unused:
+    #             i = npr.choice(used)
+    #             self.dynamics.As[k] = self.As[i] + 0.01 * npr.randn(*self.dynamics.As[i].shape)
+    #             self.dynamics.Vs[k] = self.Vs[i] + 0.01 * npr.randn(*self.dynamics.Vs[i].shape)
+    #             self.dynamics.bs[k] = self.bs[i] + 0.01 * npr.randn(*self.dynamics.bs[i].shape)
+    #             Sigmas[k] = Sigmas[i]
+    #
+    #     # Store the updated covariances
+    #     self.dynamics.Sigmas = Sigmas
+
+
     def _fit_laplace_em(self, variational_posterior, datas,
                         inputs=None, masks=None, tags=None,
-                        num_iters=100, num_samples=1,
-                        learning=True):
+                        num_iters=100, num_samples=1, alpha=0.0,
+                        maxiter=100, num_optimizer_iters=50, learning=True):
         """
         Fit an approximate posterior p(z, x | y) \approx q(z) q(x).
         Perform block coordinate ascent on q(z) followed by q(x).
@@ -671,16 +731,18 @@ class SLDS(object):
 
             # 2. Update the continuous state posterior q(x)
             self._fit_laplace_em_continuous_state_update(
-                discrete_expectations, variational_posterior, datas, inputs, masks, tags)
-            continuous_expectations = variational_posterior.mean_continuous_states
+                discrete_expectations, variational_posterior, datas, inputs, masks, tags, maxiter=maxiter)
+            continuous_expectations = variational_posterior.sample_continuous_states()
 
             # 3. Update parameters
             if learning:
                 self._fit_laplace_em_params_update(
-                    discrete_expectations, continuous_expectations, datas, inputs, masks, tags)
+                    discrete_expectations, continuous_expectations, datas, inputs, masks, tags, alpha=alpha, num_optimizer_iters=num_optimizer_iters)
+                    # variational_posterior, discrete_expectations, continuous_expectations, datas, inputs, masks, tags, alpha=alpha, num_optimizer_iters=num_optimizer_iters)
 
-            # 4. Compute ELBO
-            elp = 0
+            # 4. Compute ELP
+            elp = self.log_prior()
+
             for x, (Ez, Ezzp1, _), data, input, mask, tag in \
                 zip(continuous_expectations, discrete_expectations, datas, inputs, masks, tags):
 

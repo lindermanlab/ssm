@@ -141,7 +141,7 @@ rslds.init_state_distn.params = true_rslds.init_state_distn.params
 
 from ssm.variational import SLDSStructuredMeanFieldVariationalPosterior
 q_laplace_em = SLDSStructuredMeanFieldVariationalPosterior(rslds, y)
-rslds.fit(q_laplace_em, y, num_block_iters=5, method="laplace_em", initialize=False, num_samples=10)
+elbos = rslds.fit(q_laplace_em, y, num_iters=100, method="laplace_em", initialize=False, num_samples=1)
 xhat = q_laplace_em.mean_continuous_states[0]
 zhat = rslds.most_likely_states(xhat, y)
 yhat = np.dot(xhat, rslds.emissions.Cs[0].T) + rslds.emissions.ds[0]#
@@ -166,11 +166,11 @@ yhat = np.dot(xhat, rslds.emissions.Cs[0].T) + rslds.emissions.ds[0]#
 # zhat = rslds.most_likely_states(xhat, y)
 
 # Plot some results
-# plt.figure()
-# plt.plot(elbos)
-# plt.legend()
-# plt.xlabel("Iteration")
-# plt.ylabel("ELBO")
+plt.figure()
+plt.plot(elbos)
+plt.legend()
+plt.xlabel("Iteration")
+plt.ylabel("ELBO")
 
 plt.figure()
 ax1 = plt.subplot(121)
@@ -179,7 +179,7 @@ plt.title("True")
 ax2 = plt.subplot(122)
 plot_trajectory(zhat, xhat, ax=ax2)
 plt.title("Inferred")
-# plt.savefig("~/Desktop/recurrent_example.png")
+
 plt.figure(figsize=(6,6))
 ax = plt.subplot(111)
 lim = abs(xhat).max(axis=0) + 1
@@ -187,3 +187,27 @@ plot_most_likely_dynamics(rslds, xlim=(-lim[0], lim[0]), ylim=(-lim[1], lim[1]),
 plt.title("Most Likely Dynamics")
 
 plt.show()
+
+
+# test transition hessian
+# M = (rslds.M,) if isinstance(rslds.M, int) else rslds.M
+# inputs = [np.zeros((yt.shape[0],)+M) for yt in [y]]
+# masks = [np.ones_like(yt, dtype=bool) for yt in [y]]
+# tags = [None] * len([y])
+# input = inputs[0]
+# mask = masks[0]
+# tag = tags[0]
+
+#
+# obj = lambda x, x1, E_zzp1, inputt: np.sum(E_zzp1 * np.squeeze(self.log_transition_matrices(np.vstack((x,x1)), inputt, mask, tag)))
+# hess = hessian(obj)
+# terms = np.array([hess(x[None,:], Ezzp1) for x, Ezzp1 in zip(data, expected_joints)])
+# terms = np.array([hess(data[t], data[t+1], expected_joints[t], input[t:t+2]) for t in range(T-1)])
+# obj = lambda x, x1, inputt: rslds.transitions.log_transition_matrices(np.vstack((x,x1)), inputt, mask, tag)
+#
+# R = rslds.transitions.Rs
+# r = rslds.transitions.r
+# W = rslds.transitions.Ws
+# v = R*x[0] + r
+# vsum = np.sum(np.exp(v))
+# -( 1.0 / vsum * R.T @ np.diag(np.exp(v)) @ R - 1.0 / (vsum**2) * R.T@np.outer(np.exp(v),np.exp(v))@R)

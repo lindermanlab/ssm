@@ -11,8 +11,8 @@ from ssm.util import random_rotation, find_permutation
 
 # Set the parameters of the HMM
 T = 1000    # number of time bins
-K = 3     # number of discrete states
-D = 1       # number of latent dimensions
+K = 2     # number of discrete states
+D = 3       # number of latent dimensions
 N = 10      # number of observed dimensions
 
 # Make an SLDS with the true parameters
@@ -28,21 +28,20 @@ z_test, x_test, y_test = true_slds.sample(T)
 print("Fitting SLDS with SVI using structured variational posterior")
 slds = ssm.SLDS(N, K, D, emissions="gaussian")
 slds.initialize(y)
-slds.init_state_distn.params = true_slds.init_state_distn.params
 
 from ssm.variational import SLDSStructuredMeanFieldVariationalPosterior
 q_laplace_em = SLDSStructuredMeanFieldVariationalPosterior(slds, y)
 # slds.dynamics.params = true_slds.dynamics.params
 # slds.emissions.params = true_slds.emissions.params
-slds.fit(q_laplace_em, y, num_iters=20, method="laplace_em", initialize=False, num_samples=1)
+elbos = slds.fit(q_laplace_em, y, num_iters=20, method="laplace_em", initialize=False, num_samples=1)
 # test Hessians
-# M = (slds.M,) if isinstance(slds.M, int) else slds.M
-# inputs = [np.zeros((yt.shape[0],)+M) for yt in [y]]
-# masks = [np.ones_like(yt, dtype=bool) for yt in [y]]
-# tags = [None] * len([y])
-# input = inputs[0]
-# mask = masks[0]
-# tag = tags[0]
+M = (slds.M,) if isinstance(slds.M, int) else slds.M
+inputs = [np.zeros((yt.shape[0],)+M) for yt in [y]]
+masks = [np.ones_like(yt, dtype=bool) for yt in [y]]
+tags = [None] * len([y])
+input = inputs[0]
+mask = masks[0]
+tag = tags[0]
 #
 # # test emissions
 # from autograd import hessian, grad
@@ -50,7 +49,7 @@ slds.fit(q_laplace_em, y, num_iters=20, method="laplace_em", initialize=False, n
 # g = grad(obj)
 # hess = hessian(obj)
 # hess_full = hess(x).reshape((T*D,T*D))
-# hess_blocks = true_slds.emissions.hessian_log_emissions_prob(y, input, mask, tags[0], x)
+hess_blocks = true_slds.emissions.hessian_log_emissions_prob(y, input, mask, tags[0], x)
 
 # plot results
 q_laplace_em_x = q_laplace_em.mean_continuous_states[0]

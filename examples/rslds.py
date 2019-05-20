@@ -16,7 +16,8 @@ sns.set_style("white")
 sns.set_context("talk")
 
 import ssm
-from ssm.variational import SLDSMeanFieldVariationalPosterior, SLDSTriDiagVariationalPosterior
+from ssm.variational import SLDSMeanFieldVariationalPosterior, SLDSTriDiagVariationalPosterior, \
+    SLDSStructuredMeanFieldVariationalPosterior
 from ssm.util import random_rotation
 
 # Global parameters
@@ -44,7 +45,7 @@ def plot_trajectory(z, x, ax=None, ls="-"):
 def plot_most_likely_dynamics(model,
     xlim=(-4, 4), ylim=(-3, 3), nxpts=30, nypts=30,
     alpha=0.8, ax=None, figsize=(3, 3)):
-    
+
     K = model.K
     assert model.D == 2
     x = np.linspace(*xlim, nxpts)
@@ -103,18 +104,18 @@ def make_nascar_model():
     w4, b4 = np.array([0.0, -1.0]), np.array([0.0])    # y < 0
     Rs = np.row_stack((100*w1, 100*w2, 10*w3,10*w4))
     r = np.concatenate((100*b1, 100*b2, 10*b3, 10*b4))
-    
-    true_rslds = SLDS(D_obs, K, D_latent, 
+
+    true_rslds = ssm.SLDS(D_obs, K, D_latent,
                       transitions="recurrent_only",
-                      dynamics="gaussian",
-                      emissions="gaussian",
+                      dynamics="diagonal_gaussian",
+                      emissions="gaussian_orthog",
                       single_subspace=True)
-    true_rslds.dynamics.mu_init = np.array([0, 1])
-    true_rslds.dynamics.inv_sigma_init = np.log(1e-4) * np.ones(2)
+    true_rslds.dynamics.mu_init = np.tile(np.array([[0, 1]]), (K, 1))
+    true_rslds.dynamics.sigmasq_init = 1e-4 * np.ones((K, D_latent))
     true_rslds.dynamics.As = np.array(As)
     true_rslds.dynamics.bs = np.array(bs)
-    true_rslds.dynamics.inv_sigmas = np.log(1e-4) * np.ones((K, D_latent))
-    
+    true_rslds.dynamics.sigmasq = 1e-4 * np.ones((K, D_latent))
+
     true_rslds.transitions.Rs = Rs
     true_rslds.transitions.r = r
 
@@ -126,28 +127,34 @@ true_rslds = make_nascar_model()
 z, x, y = true_rslds.sample(T=T)
 
 # Fit a robust rSLDS with its default initialization
-rslds = ssm.SLDS(D_obs, K, D_latent, 
+rslds = ssm.SLDS(D_obs, K, D_latent,
              transitions="recurrent_only",
-             dynamics="gaussian",
-             emissions="gaussian",
+             dynamics="diagonal_gaussian",
+             emissions="gaussian_orthog",
              single_subspace=True)
 
-# Initialize the model with the observed data.  It is important 
+# Initialize the model with the observed data.  It is important
 # to call this before constructing the variational posterior since
 # the posterior constructor initialization looks at the rSLDS parameters.
 rslds.initialize(y)
 
 # Uncomment this to fit with stochastic variational inference instead
-q_svi = SLDSTriDiagVariationalPosterior(rslds, y)
-elbos = rslds.fit(q_svi, y, method="svi", num_iters=1000, initialize=False)
-xhat = q_svi.mean[0]
-zhat = rslds.most_likely_states(xhat, y)
+# q_svi = SLDSTriDiagVariationalPosterior(rslds, y)
+# elbos = rslds.fit(q_svi, y, method="svi", num_iters=1000, initialize=False)
+# xhat = q_svi.mean[0]
+# zhat = rslds.most_likely_states(xhat, y)
 
-# Fit with variational EM
+# Uncomment this to fit with variational EM
 # q_vem = SLDSTriDiagVariationalPosterior(rslds, y)
 # elbos = rslds.fit(q_vem, y, method="vem", num_iters=500, initialize=False)
 # xhat = q_vem.mean[0]
 # zhat = rslds.most_likely_states(xhat, y)
+
+# Fit with Laplace EM
+q_lem = SLDSStructuredMeanFieldVariationalPosterior(rslds, y)
+elbos = rslds.fit(q_lem, y, num_iters=100, method="laplace_em", initialize=False, num_samples=1, maxiter=10)
+xhat = q_lem.mean_continuous_states[0]
+zhat = rslds.most_likely_states(xhat, y)
 
 # Plot some results
 plt.figure()

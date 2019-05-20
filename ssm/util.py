@@ -178,7 +178,7 @@ def logit(p):
 
 
 def softplus(x):
-    return np.log(1 + np.exp(x))
+    return np.log1p(np.exp(x))
 
 
 def inv_softplus(y):
@@ -455,9 +455,8 @@ def newtons_method_block_tridiag_hessian(
         if count > maxiter:
             break
 
-    if not is_converged:
-        warn("Newton's method failed to converge in {} iterations. "
-             "Final mean abs(dx): {}".format(maxiter, np.mean(np.abs(dx))))
+    # if not is_converged:
+        # warn("Newton's method failed to converge in {} iterations. "
+             # "Final mean abs(dx): {}".format(maxiter, np.mean(np.abs(dx))))
 
     return x
-
