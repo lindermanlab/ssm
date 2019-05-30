@@ -424,8 +424,15 @@ def lds_log_probability(x, As, bs, Qi_sqrts, ms, Ri_sqrts):
     assert ms.shape == (T, D)
     assert Ri_sqrts.shape == (T, D, D)
 
-    # Convert to block form
-    J_diag, J_lower_diag, h = convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts)
+    return block_tridiagonal_log_probability(x,
+            *convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts))
+
+def block_tridiagional_log_probability(x, J_diag, J_lower_diag, h):
+
+    T, D = x.shape
+    assert h.shape == (T, D)
+    assert J_diag.shape == (T, D, D)
+    assert J_lower_diag.shape == (T-1, D, D)
 
     # Convert blocks to banded form so we can capitalize on Lapack code
     J_banded = blocks_to_bands(J_diag, J_lower_diag, lower=True)

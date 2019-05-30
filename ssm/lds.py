@@ -217,7 +217,8 @@ class SLDS(object):
             z = np.zeros(T+1, dtype=int)
             x = np.zeros((T+1,) + D)
             data = np.zeros((T+1,) + D)
-            input = np.zeros((T+1,) + M) if input is None else input
+            # input = np.zeros((T+1,) + M) if input is None else input
+            input = np.zeros((T+1,) + M) if input is None else np.concatenate((np.zeros((1,) + M), input))
             xmask = np.ones((T+1,) + D, dtype=bool)
 
             # Sample the first state from the initial distribution
@@ -234,7 +235,8 @@ class SLDS(object):
 
             z = np.concatenate((zhist, np.zeros(T, dtype=int)))
             x = np.concatenate((xhist, np.zeros((T,) + D)))
-            input = np.zeros((T+pad,) + M) if input is None else input
+            # input = np.zeros((T+pad,) + M) if input is None else input
+            input = np.zeros((T+pad,) + M) if input is None else np.concatenate((np.zeros((pad,) + M), input))
             xmask = np.ones((T+pad,) + D, dtype=bool)
 
         # Sample z and x
@@ -522,7 +524,7 @@ class SLDS(object):
         #    - Compute the expected log likelihoods (i.e. log dynamics probs)
         #    - If emissions depend on z, compute expected emission likelihoods
         for prms, x_samples, data, input, mask, tag in \
-            zip(variational_posterior._params, x_sampless, datas, inputs, masks, tags):
+            zip(variational_posterior.params, x_sampless, datas, inputs, masks, tags):
 
             # Make a mask for the continuous states
             x_mask = np.ones_like(x_samples[0], dtype=bool)
@@ -547,7 +549,7 @@ class SLDS(object):
 
     def _fit_laplace_em_continuous_state_update(
         self, discrete_expectations, variational_posterior,
-        datas, inputs=None, masks=None, tags=None, maxiter=100):
+        datas, inputs=None, masks=None, tags=None, maxiter=100, stepsize=0.05):
 
         # 2. Update the variational posterior q(x) for fixed q(z)
         #    - Use Newton's method to find the argmax of the expected log joint
@@ -569,6 +571,8 @@ class SLDS(object):
             elp = np.sum(Ez[0] * log_pi0)
             elp += np.sum(Ezzp1 * log_Ps)
             elp += np.sum(Ez * log_likes)
+            # assert np.all(np.isfinite(elp))
+
             return -1 * elp / scale
 
         # We'll need the gradient of the expected log joint wrt x
@@ -592,7 +596,7 @@ class SLDS(object):
         # Laplace approximation for q(x)
         x0s = variational_posterior.mean_continuous_states
         for prms, (Ez, Ezzp1, _), x0, data, input, mask, tag in \
-            zip(variational_posterior._params, discrete_expectations, x0s,
+            zip(variational_posterior.params, discrete_expectations, x0s,
                 datas, inputs, masks, tags):
 
             # Run Newtons method
@@ -600,8 +604,9 @@ class SLDS(object):
             obj = lambda x: neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
             grad_func = lambda x: grad_neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
             hess_func = lambda x: hessian_neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
-            x = newtons_method_block_tridiag_hessian(x0, obj, grad_func, hess_func, stepsize=0.75, maxiter=maxiter)
+            x = newtons_method_block_tridiag_hessian(x0, obj, grad_func, hess_func, stepsize=stepsize, maxiter=maxiter)
             J_diag, J_lower_diag = hessian_neg_expected_log_joint(x, Ez, Ezzp1)
+            assert np.all(np.isfinite(obj(x)))
 
             # Compute the Hessian vector product h = J * x = -H * x
             # We can do this without instantiating the full matrix
@@ -627,13 +632,14 @@ class SLDS(object):
     def _fit_laplace_em_params_update(
         self, discrete_expectations, continuous_expectations,
         datas, inputs=None, masks=None, tags=None,
-        optimizer="lbfgs", alpha=0.0, num_optimizer_iters=50):
+        optimizer="lbfgs", alpha=0.5, num_optimizer_iters=50):
 
         # 3. Update the model parameters.  Replace the expectation wrt x with sample from q(x).
         # The parameter update is partial and depends on alpha.
         xmasks = [np.ones_like(x, dtype=bool) for x in continuous_expectations]
         for distn in [self.init_state_distn, self.transitions, self.dynamics]:
             curr_prms = copy.deepcopy(distn.params)
+            if curr_prms == tuple(): continue
             distn.m_step(discrete_expectations, continuous_expectations, inputs, xmasks, tags)
             distn.params = convex_combination(curr_prms, distn.params, alpha)
 
@@ -689,30 +695,31 @@ class SLDS(object):
     #         params, val, g, state = step(value_and_grad(_objective), params, itr, state)
     #
     #     self.params = params
-    #
-    #     # If any states are unused, set their parameters to a perturbation of a used state
-    #     Ezs = [Ez for (Ez, _, _) in discrete_expectations]
-    #     usage = sum([Ez.sum(0) for Ez in Ezs])
-    #     unused = np.where(usage < 1)[0]
-    #     used = np.where(usage > 1)[0]
-    #     Sigmas = self.dynamics.Sigmas
-    #     if len(unused) > 0:
-    #         # import ipdb; ipdb.set_trace()
-    #         for k in unused:
-    #             i = npr.choice(used)
-    #             self.dynamics.As[k] = self.As[i] + 0.01 * npr.randn(*self.dynamics.As[i].shape)
-    #             self.dynamics.Vs[k] = self.Vs[i] + 0.01 * npr.randn(*self.dynamics.Vs[i].shape)
-    #             self.dynamics.bs[k] = self.bs[i] + 0.01 * npr.randn(*self.dynamics.bs[i].shape)
-    #             Sigmas[k] = Sigmas[i]
-    #
-    #     # Store the updated covariances
-    #     self.dynamics.Sigmas = Sigmas
+
+        # If any states are unused, set their parameters to a perturbation of a used state
+        # Ezs = [Ez for (Ez, _, _) in discrete_expectations]
+        # usage = sum([Ez.sum(0) for Ez in Ezs])
+        # unused = np.where(usage < 1)[0]
+        # used = np.where(usage > 1)[0]
+        # Sigmas = self.dynamics.Sigmas
+        # if len(unused) > 0:
+        #     # import ipdb; ipdb.set_trace()
+        #     for k in unused:
+        #         i = npr.choice(used)
+        #         self.dynamics.As[k] = self.As[i] + 0.01 * npr.randn(*self.dynamics.As[i].shape)
+        #         self.dynamics.Vs[k] = self.Vs[i] + 0.01 * npr.randn(*self.dynamics.Vs[i].shape)
+        #         self.dynamics.bs[k] = self.bs[i] + 0.01 * npr.randn(*self.dynamics.bs[i].shape)
+        #         Sigmas[k] = Sigmas[i]
+        #
+        # # Store the updated covariances
+        # self.dynamics.Sigmas = Sigmas
 
 
     def _fit_laplace_em(self, variational_posterior, datas,
                         inputs=None, masks=None, tags=None,
                         num_iters=100, num_samples=1, alpha=0.0,
-                        maxiter=100, num_optimizer_iters=50, learning=True):
+                        maxiter=100, num_optimizer_iters=50,
+                        stepsize=0.05, learning=True):
         """
         Fit an approximate posterior p(z, x | y) \approx q(z) q(x).
         Perform block coordinate ascent on q(z) followed by q(x).
@@ -731,7 +738,7 @@ class SLDS(object):
 
             # 2. Update the continuous state posterior q(x)
             self._fit_laplace_em_continuous_state_update(
-                discrete_expectations, variational_posterior, datas, inputs, masks, tags, maxiter=maxiter)
+                discrete_expectations, variational_posterior, datas, inputs, masks, tags, maxiter=maxiter, stepsize=stepsize)
             continuous_expectations = variational_posterior.sample_continuous_states()
 
             # 3. Update parameters
@@ -742,7 +749,6 @@ class SLDS(object):
 
             # 4. Compute ELP
             elp = self.log_prior()
-
             for x, (Ez, Ezzp1, _), data, input, mask, tag in \
                 zip(continuous_expectations, discrete_expectations, datas, inputs, masks, tags):
 
@@ -757,8 +763,10 @@ class SLDS(object):
                 elp += np.sum(Ez[0] * log_pi0)
                 elp += np.sum(Ezzp1 * log_Ps)
                 elp += np.sum(Ez * log_likes)
-            elps.append(elp)
 
+            # subtract log density (TODO: implement E_q[q(z)])
+            elp -= variational_posterior.log_density(continuous_expectations)
+            elps.append(elp)
             pbar.set_description("E[LP]: {:.1f}".format(elps[-1]))
 
         return elps

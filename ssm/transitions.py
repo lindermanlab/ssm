@@ -290,10 +290,10 @@ class RecurrentOnlyTransitions(Transitions):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
         T, D = data.shape
         v = [self.Rs @ data[t] + self.Ws @ input[t+1] + self.r for t in range(T-1)]
-        vsum = [np.sum(np.exp(vt)) for vt in v]
-        terms = np.array([ -1.0 / vsumt * self.Rs.T @ np.diag(np.exp(vt)) @ self.Rs
-                           + 1.0 / (vsumt**2) * self.Rs.T@ np.outer(np.exp(vt),np.exp(vt)) @ self.Rs
-                          for vt, vsumt in zip(v, vsum)])
+        vtilde = [np.exp(vt - np.max(vt)) / np.sum(np.exp(vt - np.max(vt))) for vt in v]
+        terms = np.array([-1.0 * self.Rs.T @ np.diag(vt) @ self.Rs
+                           + self.Rs.T@ np.outer(vt,vt) @ self.Rs
+                          for vt in vtilde])
         return terms
 
 class RBFRecurrentTransitions(InputDrivenTransitions):

@@ -538,16 +538,17 @@ class _PoissonEmissionsMixin(object):
     def __init__(self, N, K, D, M=0, single_subspace=True, link="log", bin_size=1.0, **kwargs):
         super(_PoissonEmissionsMixin, self).__init__(N, K, D, M, single_subspace=single_subspace, **kwargs)
 
+        self.bin_size = bin_size
         self.link_name = link
         mean_functions = dict(
             log=lambda x: np.exp(x),
-            softplus= lambda x: softplus(x) * bin_size
+            softplus= lambda x: softplus(x) * self.bin_size
             )
         self.mean = mean_functions[link]
 
         link_functions = dict(
             log=lambda rate: np.log(rate),
-            softplus=lambda rate: inv_softplus(rate / bin_size)
+            softplus=lambda rate: inv_softplus(rate / self.bin_size)
             )
         self.link = link_functions[link]
 
@@ -601,9 +602,9 @@ class PoissonEmissions(_PoissonEmissionsMixin, _LinearEmissions):
 
         elif self.link_name == "softplus":
             assert self.single_subspace
-            lambdas = self.mean(self.forward(x, input, tag))[:, 0, :]
-            expterms = np.exp(-np.dot(x,self.Cs[0].T)-self.ds[0])
-            diags = (data / lambdas * (expterms - 1.0 / lambdas) - expterms) / (1.0+expterms)**2
+            lambdas = np.log1p(np.exp(np.dot(x,self.Cs[0].T)+np.dot(input,self.Fs[0].T)+self.ds[0]))
+            expterms = np.exp(-np.dot(x,self.Cs[0].T)-np.dot(input,self.Fs[0].T)-self.ds[0])
+            diags = (data / lambdas * (expterms - 1.0 / lambdas) - expterms * self.bin_size) / (1.0+expterms)**2
             return np.einsum('tn, ni, nj ->tij', diags, self.Cs[0], self.Cs[0])
 
 
@@ -631,8 +632,8 @@ class PoissonOrthogonalEmissions(_PoissonEmissionsMixin, _OrthogonalLinearEmissi
         elif self.link_name == "softplus":
             assert self.single_subspace
             lambdas = self.mean(self.forward(x, input, tag))[:, 0, :]
-            expterms = np.exp(-np.dot(x,self.Cs[0].T)-self.ds[0])
-            diags = (data / lambdas * (expterms - 1.0 / lambdas) - expterms) / (1.0+expterms)**2
+            expterms = np.exp(-np.dot(x,self.Cs[0].T)-np.dot(input,self.Fs[0].T)-self.ds[0])
+            diags = (data / lambdas * (expterms - 1.0 / lambdas) - expterms * self.bin_size) / (1.0+expterms)**2
             return np.einsum('tn, ni, nj ->tij', diags, self.Cs[0], self.Cs[0])
 
 class PoissonIdentityEmissions(_PoissonEmissionsMixin, _IdentityEmissions):
