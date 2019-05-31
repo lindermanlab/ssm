@@ -427,7 +427,7 @@ def lds_log_probability(x, As, bs, Qi_sqrts, ms, Ri_sqrts):
     return block_tridiagonal_log_probability(x,
             *convert_lds_to_block_tridiag(As, bs, Qi_sqrts, ms, Ri_sqrts))
 
-def block_tridiagional_log_probability(x, J_diag, J_lower_diag, h):
+def block_tridiagonal_log_probability(x, J_diag, J_lower_diag, h):
 
     T, D = x.shape
     assert h.shape == (T, D)

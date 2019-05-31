@@ -464,12 +464,13 @@ def backtracking_line_search(x0, dx, obj, g, stepsize = 1.0, min_stepsize=1e-8,
                              alpha=0.2, beta=0.7):
     """
     A backtracking line search for the step size in Newton's method.
-    (Boyd & Vandenberghe, 2004)
+    Chapter 9, Boyd & Vandenberghe, 2004.
+    - dx is the descent direction
     - g is the gradient evaluated at x0
     """
     x = x0
 
-    # criterion: stop when f(x + dx) < f(x) + \alpha * stepsize * f'(x)^T dx
+    # criterion: stop when f(x + stepsize * dx) < f(x) + \alpha * stepsize * f'(x)^T dx
     f_term = obj(x)
     grad_term = alpha * np.dot(g.ravel(), dx.ravel())
 
