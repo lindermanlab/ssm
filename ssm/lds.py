@@ -643,6 +643,8 @@ class SLDS(object):
             distn.m_step(discrete_expectations, continuous_expectations, inputs, xmasks, tags)
             distn.params = convex_combination(curr_prms, distn.params, alpha)
 
+        # keep around old emissions params
+        curr_prms = copy.deepcopy(self.emissions.params)
         T = sum([data.shape[0] for data in datas])
         def _objective(params, itr):
             self.emissions.params = params
@@ -657,6 +659,8 @@ class SLDS(object):
         self.emissions.params = \
             optimizer(_objective, self.emissions.params, num_iters=num_optimizer_iters, full_output=False)
 
+        # update via convex combination
+        self.emissions.params = convex_combination(curr_prms, self.emissions.params, alpha)
 
     # def _fit_laplace_em_params_update(
     #     self, variational_posterior, discrete_expectations, continuous_expectations,
@@ -748,7 +752,9 @@ class SLDS(object):
                     # variational_posterior, discrete_expectations, continuous_expectations, datas, inputs, masks, tags, alpha=alpha, num_optimizer_iters=num_optimizer_iters)
 
             # 4. Compute ELP
-            elp = self.log_prior()
+            elp = 0.0
+            elp += self.log_prior()
+
             for x, (Ez, Ezzp1, _), data, input, mask, tag in \
                 zip(continuous_expectations, discrete_expectations, datas, inputs, masks, tags):
 
