@@ -297,7 +297,7 @@ class _NeuralNetworkEmissions(Emissions):
 class _GaussianEmissionsMixin(object):
     def __init__(self, N, K, D, M=0, single_subspace=True, **kwargs):
         super(_GaussianEmissionsMixin, self).__init__(N, K, D, M=M, single_subspace=single_subspace, **kwargs)
-        self.inv_etas = -1 + npr.randn(1, N) if single_subspace else npr.randn(K, N)
+        self.inv_etas = -4 + npr.randn(1, N) if single_subspace else npr.randn(K, N)
 
     @property
     def params(self):
