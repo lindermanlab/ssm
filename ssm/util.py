@@ -434,7 +434,7 @@ def fit_negative_binomial_integer_r(xs, r_min=1, r_max=20):
 
 def newtons_method_block_tridiag_hessian(
     x0, obj, grad_func, hess_func,
-    stepsize=0.95, tolerance=1e-4, maxiter=100, backtracking=True):
+    stepsize=0.75, tolerance=1e-4, maxiter=100, backtracking=True):
     """
     Newton's method to minimize a positive definite function with a
     block tridiagonal Hessian matrix.

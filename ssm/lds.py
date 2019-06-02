@@ -510,8 +510,8 @@ class SLDS(object):
 
     def _fit_laplace_em_discrete_state_update(
         self, variational_posterior, datas,
-        inputs=None, masks=None, tags=None,
-        num_samples=1):
+        inputs, masks, tags,
+        num_samples):
 
         # 0. Draw samples of q(x) for Monte Carlo approximating expectations
         x_sampless = [variational_posterior.sample_continuous_states() for _ in range(num_samples)]
@@ -549,7 +549,8 @@ class SLDS(object):
 
     def _fit_laplace_em_continuous_state_update(
         self, discrete_expectations, variational_posterior,
-        datas, inputs=None, masks=None, tags=None, maxiter=100, stepsize=0.05):
+        datas, inputs, masks, tags,
+        newton_stepsize, newton_tolerance, newton_maxiter):
 
         # 2. Update the variational posterior q(x) for fixed q(z)
         #    - Use Newton's method to find the argmax of the expected log joint
@@ -578,7 +579,7 @@ class SLDS(object):
         # We'll need the gradient of the expected log joint wrt x
         grad_neg_expected_log_joint = grad(neg_expected_log_joint)
 
-        # We also need the hessian of the of the expected log joint                            # Compute the negative Hessian of the expected log joint, represented in blocks.
+        # We also need the hessian of the of the expected log joint
         def hessian_neg_expected_log_joint(x, Ez, Ezzp1, scale=1):
             T, D = np.shape(x)
             x_mask = np.ones((T, D), dtype=bool)
@@ -587,7 +588,7 @@ class SLDS(object):
             hessian_diag += self.emissions.hessian_log_emissions_prob(data, input, mask, tag, x)
 
             # The Hessian of the log probability should be *negative* definite since we are *maximizing* it.
-            hessian_diag -= 1e-8 * np.eye(D)
+            hessian_diag -= 1e-8 * np.eye(D) # could remove this...
 
             # Return the scaled negative hessian, which is positive definite
             return -1 * hessian_diag / scale, -1 * hessian_lower_diag / scale
@@ -604,9 +605,13 @@ class SLDS(object):
             obj = lambda x: neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
             grad_func = lambda x: grad_neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
             hess_func = lambda x: hessian_neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
-            x = newtons_method_block_tridiag_hessian(x0, obj, grad_func, hess_func, stepsize=stepsize, maxiter=maxiter)
-            J_diag, J_lower_diag = hessian_neg_expected_log_joint(x, Ez, Ezzp1)
+            x = newtons_method_block_tridiag_hessian(
+                x0, obj, grad_func, hess_func,
+                stepsize=newton_stepsize, tolerance=newton_tolerance, maxiter=newton_maxiter)
             assert np.all(np.isfinite(obj(x)))
+
+            # Evaluate the Hessian at the mode
+            J_diag, J_lower_diag = hessian_neg_expected_log_joint(x, Ez, Ezzp1)
 
             # Compute the Hessian vector product h = J * x = -H * x
             # We can do this without instantiating the full matrix
@@ -631,8 +636,9 @@ class SLDS(object):
 
     def _fit_laplace_em_params_update(
         self, discrete_expectations, continuous_expectations,
-        datas, inputs=None, masks=None, tags=None,
-        optimizer="lbfgs", alpha=0.5, num_optimizer_iters=50):
+        datas, inputs, masks, tags,
+        emission_optimizer, emission_optimizer_maxiter, alpha):
+        # alpha is convex combination parameter
 
         # 3. Update the model parameters.  Replace the expectation wrt x with sample from q(x).
         # The parameter update is partial and depends on alpha.
@@ -646,18 +652,23 @@ class SLDS(object):
         # keep around old emissions params
         curr_prms = copy.deepcopy(self.emissions.params)
         T = sum([data.shape[0] for data in datas])
-        def _objective(params, itr):
+
+        def _emission_objective(params, itr):
             self.emissions.params = params
             obj = 0
+            obj += self.emissions.log_prior()
             for data, input, mask, tag, x, (Ez, _, _) in \
                 zip(datas, inputs, masks, tags, continuous_expectations, discrete_expectations):
                 obj += np.sum(Ez * self.emissions.log_likelihoods(data, input, mask, tag, x))
             return -obj / T
 
         # Optimize emissions log-likelihood
-        optimizer = dict(bfgs=bfgs, lbfgs=lbfgs)[optimizer]
+        optimizer = dict(bfgs=bfgs, lbfgs=lbfgs)[emission_optimizer]
         self.emissions.params = \
-            optimizer(_objective, self.emissions.params, num_iters=num_optimizer_iters, full_output=False)
+            optimizer(_emission_objective,
+                      self.emissions.params,
+                      num_iters=emission_optimizer_maxiter,
+                      full_output=False)
 
         # update via convex combination
         self.emissions.params = convex_combination(curr_prms, self.emissions.params, alpha)
@@ -718,12 +729,17 @@ class SLDS(object):
         # # Store the updated covariances
         # self.dynamics.Sigmas = Sigmas
 
-
     def _fit_laplace_em(self, variational_posterior, datas,
                         inputs=None, masks=None, tags=None,
-                        num_iters=100, num_samples=1, alpha=0.0,
-                        maxiter=100, num_optimizer_iters=50,
-                        stepsize=0.05, learning=True):
+                        num_iters=100,
+                        num_samples=1,
+                        newton_stepsize=0.75,
+                        newton_tolerance=1e-4,
+                        newton_maxiter=100,
+                        emission_optimizer="lbfgs",
+                        emission_optimizer_maxiter=50,
+                        alpha=0.5,
+                        learning=True):
         """
         Fit an approximate posterior p(z, x | y) \approx q(z) q(x).
         Perform block coordinate ascent on q(z) followed by q(x).
@@ -737,19 +753,20 @@ class SLDS(object):
         for itr in pbar:
             # 1. Update the discrete state posterior q(z)
             self._fit_laplace_em_discrete_state_update(
-                variational_posterior, datas, inputs, masks, tags, num_samples=num_samples)
+                variational_posterior, datas, inputs, masks, tags, num_samples)
             discrete_expectations = variational_posterior.mean_discrete_states
 
             # 2. Update the continuous state posterior q(x)
             self._fit_laplace_em_continuous_state_update(
-                discrete_expectations, variational_posterior, datas, inputs, masks, tags, maxiter=maxiter, stepsize=stepsize)
+                discrete_expectations, variational_posterior, datas, inputs, masks, tags,
+                newton_stepsize, newton_tolerance, newton_maxiter)
             continuous_expectations = variational_posterior.sample_continuous_states()
 
             # 3. Update parameters
             if learning:
                 self._fit_laplace_em_params_update(
-                    discrete_expectations, continuous_expectations, datas, inputs, masks, tags, alpha=alpha, num_optimizer_iters=num_optimizer_iters)
-                    # variational_posterior, discrete_expectations, continuous_expectations, datas, inputs, masks, tags, alpha=alpha, num_optimizer_iters=num_optimizer_iters)
+                    discrete_expectations, continuous_expectations, datas, inputs, masks, tags,
+                    emission_optimizer, emission_optimizer_maxiter, alpha)
 
             # 4. Compute ELP
             elp = 0.0
@@ -813,9 +830,9 @@ class SLDS(object):
            approximate update (e.g. a Laplace approximation) if we have a
            nonconjugate model.
 
-        5. Gibbs sampling: As above, if we have a conjugate emission and dynamics
-           model we can do block Gibbs sampling of the discrete and continuous
-           states.
+        5. Gibbs sampling: As above, if we have a conjugate emission and
+           dynamics model we can do block Gibbs sampling of the discrete and
+           continuous states.
         """
 
         # Specify fitting methods

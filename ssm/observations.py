@@ -10,7 +10,7 @@ from ssm.util import random_rotation, ensure_args_are_lists, \
     logistic, logit, one_hot, generalized_newton_studentst_dof, fit_linear_regression
 from ssm.preprocessing import interpolate_data
 from ssm.cstats import robust_ar_statistics
-from ssm.optimizers import adam, bfgs, rmsprop, sgd
+from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
 import ssm.stats as stats
 
 
@@ -48,7 +48,7 @@ class Observations(object):
         """
         If M-step cannot be done in closed form for the transitions, default to SGD.
         """
-        optimizer = dict(adam=adam, bfgs=bfgs, rmsprop=rmsprop, sgd=sgd)[optimizer]
+        optimizer = dict(adam=adam, bfgs=bfgs, lbfgs=lbfgs, rmsprop=rmsprop, sgd=sgd)[optimizer]
 
         # expected log joint
         def _expected_log_joint(expectations):

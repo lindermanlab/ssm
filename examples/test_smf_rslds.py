@@ -137,27 +137,26 @@ rslds = ssm.SLDS(D_obs, K, D_latent,
 # to call this before constructing the variational posterior since
 # the posterior constructor initialization looks at the rSLDS parameters.
 rslds.initialize(y)
-rslds.init_state_distn.params = true_rslds.init_state_distn.params
 
 from ssm.variational import SLDSStructuredMeanFieldVariationalPosterior
 q_laplace_em = SLDSStructuredMeanFieldVariationalPosterior(rslds, y)
-elbos = rslds.fit(q_laplace_em, y, num_iters=100, method="laplace_em", initialize=False, num_samples=1)
+elbos = rslds.fit(q_laplace_em, y, num_iters=100, method="laplace_em", initialize=False, num_samples=1, alpha=0.0)
 xhat = q_laplace_em.mean_continuous_states[0]
 zhat = rslds.most_likely_states(xhat, y)
 yhat = np.dot(xhat, rslds.emissions.Cs[0].T) + rslds.emissions.ds[0]#
 
 # Uncomment this to fit with stochastic variational inference instead
-# rslds_svi = ssm.SLDS(D_obs, K, D_latent,
-#              transitions="recurrent_only",
-#              dynamics="gaussian",
-#              emissions="gaussian_orthog",
-#              single_subspace=True)
-# rslds_svi.initialize(y)
-# rslds_svi.init_state_distn.params = true_rslds.init_state_distn.params
-# q_svi = SLDSTriDiagVariationalPosterior(rslds_svi, y)
-# elbos = rslds_svi.fit(q_svi, y, method="svi", num_iters=1000, initialize=False)
-# xhat_svi = q_svi.mean[0]
-# zhat_svi = rslds_svi.most_likely_states(xhat_svi, y)
+rslds_svi = ssm.SLDS(D_obs, K, D_latent,
+             transitions="recurrent_only",
+             dynamics="gaussian",
+             emissions="gaussian_orthog",
+             single_subspace=True)
+rslds_svi.initialize(y)
+
+q_svi = SLDSTriDiagVariationalPosterior(rslds_svi, y)
+elbos = rslds_svi.fit(q_svi, y, method="svi", num_iters=1000, initialize=False, step_size=0.05)
+xhat_svi = q_svi.mean[0]
+zhat_svi = rslds_svi.most_likely_states(xhat_svi, y)
 
 # Uncomment this to fit with variational EM
 # q_vem = SLDSTriDiagVariationalPosterior(rslds, y)
@@ -173,11 +172,14 @@ plt.xlabel("Iteration")
 plt.ylabel("ELBO")
 
 plt.figure()
-ax1 = plt.subplot(121)
+ax1 = plt.subplot(131)
 plot_trajectory(z, x, ax=ax1)
 plt.title("True")
-ax2 = plt.subplot(122)
+ax2 = plt.subplot(132)
 plot_trajectory(zhat, xhat, ax=ax2)
+plt.title("Inferred")
+ax2 = plt.subplot(133)
+plot_trajectory(zhat_svi, xhat_svi, ax=ax2)
 plt.title("Inferred")
 
 plt.figure(figsize=(6,6))
