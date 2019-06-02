@@ -510,8 +510,13 @@ class SLDS(object):
 
     def _fit_laplace_em_discrete_state_update(
         self, variational_posterior, datas,
+<<<<<<< HEAD
         inputs, masks, tags,
         num_samples):
+=======
+        inputs=None, masks=None, tags=None,
+        num_samples=1):
+>>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
 
         # 0. Draw samples of q(x) for Monte Carlo approximating expectations
         x_sampless = [variational_posterior.sample_continuous_states() for _ in range(num_samples)]
@@ -524,7 +529,11 @@ class SLDS(object):
         #    - Compute the expected log likelihoods (i.e. log dynamics probs)
         #    - If emissions depend on z, compute expected emission likelihoods
         for prms, x_samples, data, input, mask, tag in \
+<<<<<<< HEAD
             zip(variational_posterior.params, x_sampless, datas, inputs, masks, tags):
+=======
+            zip(variational_posterior._params, x_sampless, datas, inputs, masks, tags):
+>>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
 
             # Make a mask for the continuous states
             x_mask = np.ones_like(x_samples[0], dtype=bool)
@@ -572,14 +581,21 @@ class SLDS(object):
             elp = np.sum(Ez[0] * log_pi0)
             elp += np.sum(Ezzp1 * log_Ps)
             elp += np.sum(Ez * log_likes)
+<<<<<<< HEAD
             # assert np.all(np.isfinite(elp))
 
+=======
+>>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
             return -1 * elp / scale
 
         # We'll need the gradient of the expected log joint wrt x
         grad_neg_expected_log_joint = grad(neg_expected_log_joint)
 
+<<<<<<< HEAD
         # We also need the hessian of the of the expected log joint
+=======
+        # We also need the hessian of the of the expected log joint                            # Compute the negative Hessian of the expected log joint, represented in blocks.
+>>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
         def hessian_neg_expected_log_joint(x, Ez, Ezzp1, scale=1):
             T, D = np.shape(x)
             x_mask = np.ones((T, D), dtype=bool)
@@ -588,7 +604,11 @@ class SLDS(object):
             hessian_diag += self.emissions.hessian_log_emissions_prob(data, input, mask, tag, x)
 
             # The Hessian of the log probability should be *negative* definite since we are *maximizing* it.
+<<<<<<< HEAD
             hessian_diag -= 1e-8 * np.eye(D) # could remove this...
+=======
+            hessian_diag -= 1e-8 * np.eye(D)
+>>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
 
             # Return the scaled negative hessian, which is positive definite
             return -1 * hessian_diag / scale, -1 * hessian_lower_diag / scale
@@ -597,7 +617,11 @@ class SLDS(object):
         # Laplace approximation for q(x)
         x0s = variational_posterior.mean_continuous_states
         for prms, (Ez, Ezzp1, _), x0, data, input, mask, tag in \
+<<<<<<< HEAD
             zip(variational_posterior.params, discrete_expectations, x0s,
+=======
+            zip(variational_posterior._params, discrete_expectations, x0s,
+>>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
                 datas, inputs, masks, tags):
 
             # Run Newtons method
@@ -608,7 +632,10 @@ class SLDS(object):
             x = newtons_method_block_tridiag_hessian(
                 x0, obj, grad_func, hess_func,
                 stepsize=newton_stepsize, tolerance=newton_tolerance, maxiter=newton_maxiter)
+<<<<<<< HEAD
             assert np.all(np.isfinite(obj(x)))
+=======
+>>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
 
             # Evaluate the Hessian at the mode
             J_diag, J_lower_diag = hessian_neg_expected_log_joint(x, Ez, Ezzp1)
@@ -637,6 +664,7 @@ class SLDS(object):
     def _fit_laplace_em_params_update(
         self, discrete_expectations, continuous_expectations,
         datas, inputs, masks, tags,
+<<<<<<< HEAD
         emission_optimizer, emission_optimizer_maxiter, alpha):
         # alpha is convex combination parameter
 
@@ -657,6 +685,20 @@ class SLDS(object):
             self.emissions.params = params
             obj = 0
             obj += self.emissions.log_prior()
+=======
+        emission_optimizer, emission_optimizer_maxiter):
+
+        # 3. Update the model parameters.  Replace the expectation wrt x with mean.
+        xmasks = [np.ones_like(x, dtype=bool) for x in continuous_expectations]
+        self.init_state_distn.m_step(discrete_expectations, continuous_expectations, inputs, xmasks, tags)
+        self.transitions.m_step(discrete_expectations, continuous_expectations, inputs, xmasks, tags)
+        self.dynamics.m_step(discrete_expectations, continuous_expectations, inputs, xmasks, tags)
+
+        T = sum([data.shape[0] for data in datas])
+        def _emission_objective(params, itr):
+            self.emissions.params = params
+            obj = 0
+>>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
             for data, input, mask, tag, x, (Ez, _, _) in \
                 zip(datas, inputs, masks, tags, continuous_expectations, discrete_expectations):
                 obj += np.sum(Ez * self.emissions.log_likelihoods(data, input, mask, tag, x))
@@ -670,6 +712,7 @@ class SLDS(object):
                       num_iters=emission_optimizer_maxiter,
                       full_output=False)
 
+<<<<<<< HEAD
         # update via convex combination
         self.emissions.params = convex_combination(curr_prms, self.emissions.params, alpha)
 
@@ -729,6 +772,8 @@ class SLDS(object):
         # # Store the updated covariances
         # self.dynamics.Sigmas = Sigmas
 
+=======
+>>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
     def _fit_laplace_em(self, variational_posterior, datas,
                         inputs=None, masks=None, tags=None,
                         num_iters=100,
@@ -738,7 +783,10 @@ class SLDS(object):
                         newton_maxiter=100,
                         emission_optimizer="lbfgs",
                         emission_optimizer_maxiter=50,
+<<<<<<< HEAD
                         alpha=0.5,
+=======
+>>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
                         learning=True):
         """
         Fit an approximate posterior p(z, x | y) \approx q(z) q(x).
@@ -753,6 +801,7 @@ class SLDS(object):
         for itr in pbar:
             # 1. Update the discrete state posterior q(z)
             self._fit_laplace_em_discrete_state_update(
+<<<<<<< HEAD
                 variational_posterior, datas, inputs, masks, tags, num_samples)
             discrete_expectations = variational_posterior.mean_discrete_states
 
@@ -772,6 +821,25 @@ class SLDS(object):
             elp = 0.0
             elp += self.log_prior()
 
+=======
+                variational_posterior, datas, inputs, masks, tags, num_samples=num_samples)
+            discrete_expectations = variational_posterior.mean_discrete_states
+
+            # 2. Update the continuous state posterior q(x)
+            self._fit_laplace_em_continuous_state_update(
+                discrete_expectations, variational_posterior, datas, inputs, masks, tags,
+                newton_stepsize, newton_tolerance, newton_maxiter)
+            continuous_expectations = variational_posterior.mean_continuous_states
+
+            # 3. Update parameters
+            if learning:
+                self._fit_laplace_em_params_update(
+                    discrete_expectations, continuous_expectations, datas, inputs, masks, tags,
+                    emission_optimizer, emission_optimizer_maxiter)
+
+            # 4. Compute ELBO
+            elp = 0
+>>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
             for x, (Ez, Ezzp1, _), data, input, mask, tag in \
                 zip(continuous_expectations, discrete_expectations, datas, inputs, masks, tags):
 
@@ -786,10 +854,15 @@ class SLDS(object):
                 elp += np.sum(Ez[0] * log_pi0)
                 elp += np.sum(Ezzp1 * log_Ps)
                 elp += np.sum(Ez * log_likes)
+<<<<<<< HEAD
 
             # subtract log density (TODO: implement E_q[q(z)])
             elp -= variational_posterior.log_density(continuous_expectations)
             elps.append(elp)
+=======
+            elps.append(elp)
+
+>>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
             pbar.set_description("E[LP]: {:.1f}".format(elps[-1]))
 
         return elps

@@ -12,7 +12,11 @@ from ssm.util import random_rotation, find_permutation
 
 # Set the parameters of the HMM
 T = 10000   # number of time bins
+<<<<<<< HEAD
 K = 5      # number of discrete states
+=======
+K = 5       # number of discrete states
+>>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
 D = 2       # number of latent dimensions
 N = 50      # number of observed dimensions
 
@@ -56,7 +60,11 @@ slds.initialize(y)
 # q_struct_z = slds.most_likely_states(q_struct_x, y)
 
 q_laplace_em = SLDSStructuredMeanFieldVariationalPosterior(slds, y)
+<<<<<<< HEAD
 q_lem_elbos = slds.fit(q_laplace_em, y, method="laplace_em", num_iters=10, initialize=False, num_samples=1)
+=======
+q_lem_elbos = slds.fit(q_laplace_em, y, method="laplace_em", num_iters=100, initialize=False)
+>>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
 q_lem_Ez, q_lem_x = q_laplace_em.mean[0]
 q_lem_y = slds.smooth(q_lem_x, y)
 
