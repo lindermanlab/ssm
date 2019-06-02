@@ -432,48 +432,28 @@ def fit_negative_binomial_integer_r(xs, r_min=1, r_max=20):
 
     return r_star, p_star(r_star)
 
-<<<<<<< HEAD
 def newtons_method_block_tridiag_hessian(
     x0, obj, grad_func, hess_func,
     stepsize=0.75, tolerance=1e-4, maxiter=100, backtracking=True):
-=======
-
-def newtons_method_block_tridiag_hessian(
-    x0, obj, grad_func, hess_func,
-    stepsize=0.95, tolerance=1e-4, maxiter=100):
->>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
     """
     Newton's method to minimize a positive definite function with a
     block tridiagonal Hessian matrix.
     """
-<<<<<<< HEAD
-=======
-    from ssm.primitives import blocks_to_full
->>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
     x = x0
     is_converged = False
     count = 0
     while not is_converged:
-<<<<<<< HEAD
         H_diag, H_lower_diag = hess_func(x)
         g = grad_func(x)
         dx = -1.0 * solve_symm_block_tridiag(H_diag, H_lower_diag, g)
         if backtracking:
             stepsize = backtracking_line_search(x, dx, obj, g)
         x = x + stepsize * dx
-=======
-        # print("Objective: ", obj(x))
-        H_diag, H_lower_diag = hess_func(x)
-        g = grad_func(x)
-        dx = solve_symm_block_tridiag(H_diag, H_lower_diag, g)
-        x = x - stepsize * dx
->>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
         is_converged = np.mean(np.abs(dx)) < tolerance
         count += 1
         if count > maxiter:
             break
 
-<<<<<<< HEAD
     # if not is_converged:
         # warn("Newton's method failed to converge in {} iterations. "
              # "Final mean abs(dx): {}".format(maxiter, np.mean(np.abs(dx))))
@@ -504,11 +484,3 @@ def backtracking_line_search(x0, dx, obj, g, stepsize = 1.0, min_stepsize=1e-8,
             break
 
     return stepsize
-=======
-    if not is_converged:
-        warn("Newton's method failed to converge in {} iterations. "
-             "Final mean abs(dx): {}".format(maxiter, np.mean(np.abs(dx))))
-
-    return x
-
->>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257

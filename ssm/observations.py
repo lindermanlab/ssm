@@ -864,10 +864,6 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         unused = np.where(usage < 1)[0]
         used = np.where(usage > 1)[0]
         if len(unused) > 0:
-<<<<<<< HEAD
-            # import ipdb; ipdb.set_trace()
-=======
->>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
             for k in unused:
                 i = npr.choice(used)
                 self.As[k] = self.As[i] + 0.01 * npr.randn(*self.As[i].shape)
@@ -917,10 +913,6 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         # second part of diagonal blocks are inverse covariance matrices - goes to all but first time bin
         # E_q(z) x_{t+1} Sigma_{z_t+1}^{-1} x_{t+1}
         diagonal_blocks[1:] += -1 * np.sum(Ez[1:,:,None,None] * inv_Sigmas[None,:], axis=1)
-<<<<<<< HEAD
-=======
-        # TODO use tensordot? diagonal_blocks = np.tensordot(Ez, inv_Sigmas, axes=1)
->>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
 
         # lower diagonal blocks are (T-1,D,D):
         # E_q(z) x_{t+1} Sigma_{z_t+1}^{-1} A_{z_t+1} x_t

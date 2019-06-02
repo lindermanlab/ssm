@@ -551,10 +551,7 @@ class _PoissonEmissionsMixin(object):
     def __init__(self, N, K, D, M=0, single_subspace=True, link="log", bin_size=1.0, **kwargs):
         super(_PoissonEmissionsMixin, self).__init__(N, K, D, M, single_subspace=single_subspace, **kwargs)
 
-<<<<<<< HEAD
         self.bin_size = bin_size
-=======
->>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
         self.link_name = link
         mean_functions = dict(
             log=lambda x: np.exp(x),
@@ -617,16 +614,12 @@ class PoissonEmissions(_PoissonEmissionsMixin, _LinearEmissions):
             return np.einsum('tn, ni, nj ->tij', -lambdas[:, 0, :], self.Cs[0], self.Cs[0])
 
         elif self.link_name == "softplus":
-<<<<<<< HEAD
             assert self.single_subspace
             lambdas = np.log1p(np.exp(np.dot(x,self.Cs[0].T)+np.dot(input,self.Fs[0].T)+self.ds[0]))
             expterms = np.exp(-np.dot(x,self.Cs[0].T)-np.dot(input,self.Fs[0].T)-self.ds[0])
             diags = (data / lambdas * (expterms - 1.0 / lambdas) - expterms * self.bin_size) / (1.0+expterms)**2
             return np.einsum('tn, ni, nj ->tij', diags, self.Cs[0], self.Cs[0])
 
-=======
-            raise NotImplementedError
->>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
 
 class PoissonOrthogonalEmissions(_PoissonEmissionsMixin, _OrthogonalLinearEmissions):
     @ensure_args_are_lists
@@ -650,16 +643,11 @@ class PoissonOrthogonalEmissions(_PoissonEmissionsMixin, _OrthogonalLinearEmissi
             return np.einsum('tn, ni, nj ->tij', -lambdas[:, 0, :], self.Cs[0], self.Cs[0])
 
         elif self.link_name == "softplus":
-<<<<<<< HEAD
             assert self.single_subspace
             lambdas = self.mean(self.forward(x, input, tag))[:, 0, :]
             expterms = np.exp(-np.dot(x,self.Cs[0].T)-np.dot(input,self.Fs[0].T)-self.ds[0])
             diags = (data / lambdas * (expterms - 1.0 / lambdas) - expterms * self.bin_size) / (1.0+expterms)**2
             return np.einsum('tn, ni, nj ->tij', diags, self.Cs[0], self.Cs[0])
-=======
-            raise NotImplementedError
-
->>>>>>> 2d9b6634affe20a6cfab733a65d7e337915f8257
 
 class PoissonIdentityEmissions(_PoissonEmissionsMixin, _IdentityEmissions):
     pass
