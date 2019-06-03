@@ -11,7 +11,7 @@ from ssm.variational import SLDSMeanFieldVariationalPosterior, SLDSTriDiagVariat
 from ssm.util import random_rotation, find_permutation
 
 # Set the parameters of the HMM
-T = 100   # number of time bins
+T = 10000   # number of time bins
 K = 5       # number of discrete states
 D = 2       # number of latent dimensions
 N = 50      # number of observed dimensions
@@ -29,7 +29,7 @@ z_test, x_test, y_test = true_slds.sample(T)
 
 # Fit an SLDS with mean field posterior
 print("Fitting SLDS with SVI using structured variational posterior")
-slds = ssm.SLDS(N, K, D, emissions="bernoulli_orthog")
+slds = ssm.SLDS(N, K, D, emissions="bernoulli")
 slds.initialize(y)
 
 # q_mf = SLDSMeanFieldVariationalPosterior(slds, y_masked, masks=mask)
@@ -56,7 +56,7 @@ slds.initialize(y)
 # q_struct_z = slds.most_likely_states(q_struct_x, y)
 
 q_laplace_em = SLDSStructuredMeanFieldVariationalPosterior(slds, y)
-q_lem_elbos = slds.fit(q_laplace_em, y, method="laplace_em", num_iters=10, initialize=False)
+q_lem_elbos = slds.fit(q_laplace_em, y, method="laplace_em", num_iters=50, initialize=False)
 q_lem_Ez, q_lem_x = q_laplace_em.mean[0]
 q_lem_y = slds.smooth(q_lem_x, y)
 
