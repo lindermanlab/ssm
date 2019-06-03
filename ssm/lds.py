@@ -588,7 +588,7 @@ class SLDS(object):
             hessian_diag += self.emissions.hessian_log_emissions_prob(data, input, mask, tag, x)
 
             # The Hessian of the log probability should be *negative* definite since we are *maximizing* it.
-            hessian_diag -= 1e-8 * np.eye(D) # could remove this...
+            hessian_diag -= 1e-8 * np.eye(D)
 
             # Return the scaled negative hessian, which is positive definite
             return -1 * hessian_diag / scale, -1 * hessian_lower_diag / scale
@@ -617,28 +617,15 @@ class SLDS(object):
             # We can do this without instantiating the full matrix
             h = symm_block_tridiag_matmul(J_diag, J_lower_diag, x)
 
-            # DEBUG: Test the multiplication
-            # T, D = x0.shape
-            # J = np.zeros((T*D, T*D))
-            # for t in range(T):
-            #     J[t*D:(t+1)*D, t*D:(t+1)*D] = J_diag[t]
-            # for t in range(T-1):
-            #     J[(t+1)*D:(t+2)*D, t*D:(t+1)*D] = J_lower_diag[t]
-            #     J[t*D:(t+1)*D, (t+1)*D:(t+2)*D] = J_lower_diag[t].T
-            # h2 = J.dot(np.ravel(x)).reshape(x.shape)
-            # assert np.allclose(h, h2)
-
             # update params
             prms["J_diag"] = J_diag
             prms["J_lower_diag"] = J_lower_diag
             prms["h"] = h
 
-
     def _fit_laplace_em_params_update(
         self, discrete_expectations, continuous_expectations,
         datas, inputs, masks, tags,
         emission_optimizer, emission_optimizer_maxiter, alpha):
-        # alpha is convex combination parameter
 
         # 3. Update the model parameters.  Replace the expectation wrt x with sample from q(x).
         # The parameter update is partial and depends on alpha.
@@ -673,61 +660,33 @@ class SLDS(object):
         # update via convex combination
         self.emissions.params = convex_combination(curr_prms, self.emissions.params, alpha)
 
-    # def _fit_laplace_em_params_update(
-    #     self, variational_posterior, discrete_expectations, continuous_expectations,
-    #     datas, inputs=None, masks=None, tags=None,
-    #     optimizer="adam", num_optimizer_iters=25, alpha=0.0):
-    # #
-    # #     # 3. Update the model parameters.  Replace the expectation wrt x with mean.
-    #     xmasks = [np.ones_like(x, dtype=bool) for x in continuous_expectations]
-    #
-    #     T = sum([data.shape[0] for data in datas])
-    #     def _objective(params, itr):
-    #         self.params = params
-    #         obj = self.log_prior()
-    #         xs = variational_posterior.sample_continuous_states()
-    #         for data, input, mask, tag, x, (Ez, Ezzp1, _), x_mask in \
-    #             zip(datas, inputs, masks, tags, xs, discrete_expectations, xmasks):
-    #             obj += np.sum(Ez * self.emissions.log_likelihoods(data, input, mask, tag, x))
-    #             # Compute expected log likelihood E_q(z | x, y) [log p(z, x, y; theta)]
-    #             log_pi0 = self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
-    #             log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
-    #             log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
-    #             log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
-    #
-    #             obj += np.sum(Ez[0] * log_pi0)
-    #             obj += np.sum(Ezzp1 * log_Ps)
-    #             obj += np.sum(Ez * log_likes)
-    #
-    #         return -obj / T
-    #
-    #     # Optimize parameters
-    #     step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
-    #     state = None
-    #     params = self.params
-    #     for itr in range(num_optimizer_iters):
-    #         # Update the emission and variational posterior parameters
-    #         params, val, g, state = step(value_and_grad(_objective), params, itr, state)
-    #
-    #     self.params = params
+    def _laplace_em_elbo(self, variational_posterior, datas, inputs, masks, tags):
 
-        # If any states are unused, set their parameters to a perturbation of a used state
-        # Ezs = [Ez for (Ez, _, _) in discrete_expectations]
-        # usage = sum([Ez.sum(0) for Ez in Ezs])
-        # unused = np.where(usage < 1)[0]
-        # used = np.where(usage > 1)[0]
-        # Sigmas = self.dynamics.Sigmas
-        # if len(unused) > 0:
-        #     # import ipdb; ipdb.set_trace()
-        #     for k in unused:
-        #         i = npr.choice(used)
-        #         self.dynamics.As[k] = self.As[i] + 0.01 * npr.randn(*self.dynamics.As[i].shape)
-        #         self.dynamics.Vs[k] = self.Vs[i] + 0.01 * npr.randn(*self.dynamics.Vs[i].shape)
-        #         self.dynamics.bs[k] = self.bs[i] + 0.01 * npr.randn(*self.dynamics.bs[i].shape)
-        #         Sigmas[k] = Sigmas[i]
-        #
-        # # Store the updated covariances
-        # self.dynamics.Sigmas = Sigmas
+        continuous_expectations = variational_posterior.sample_continuous_states()
+        discrete_expectations = variational_posterior.mean_discrete_states
+
+        elbo = 0.0
+        elbo += self.log_prior()
+
+        for x, (Ez, Ezzp1, _), data, input, mask, tag in \
+            zip(continuous_expectations, discrete_expectations, datas, inputs, masks, tags):
+
+            # The "mask" for x is all ones
+            x_mask = np.ones_like(x, dtype=bool)
+            log_pi0 = self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
+            log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
+            log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
+            log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
+
+            # Compute the expected log probability
+            elbo += np.sum(Ez[0] * log_pi0)
+            elbo += np.sum(Ezzp1 * log_Ps)
+            elbo += np.sum(Ez * log_likes)
+
+        # subtract log density
+        elbo -= variational_posterior.log_density(continuous_expectations)
+
+        return elbo
 
     def _fit_laplace_em(self, variational_posterior, datas,
                         inputs=None, masks=None, tags=None,
@@ -747,9 +706,9 @@ class SLDS(object):
         and that we update q(x) via Laplace approximation.
         Assume q(z) is a chain-structured discrete graphical model.
         """
-        elps = [-np.inf]
+        elbos = [self._laplace_em_elbo(variational_posterior, datas, inputs, masks, tags)]
         pbar = trange(num_iters)
-        pbar.set_description("E[LP]: {:.1f}".format(elps[-1]))
+        pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
         for itr in pbar:
             # 1. Update the discrete state posterior q(z)
             self._fit_laplace_em_discrete_state_update(
@@ -768,31 +727,12 @@ class SLDS(object):
                     discrete_expectations, continuous_expectations, datas, inputs, masks, tags,
                     emission_optimizer, emission_optimizer_maxiter, alpha)
 
-            # 4. Compute ELP
-            elp = 0.0
-            elp += self.log_prior()
+            # 4. Compute ELBO
+            elbo = self._laplace_em_elbo(variational_posterior, datas, inputs, masks, tags)
+            elbos.append(elbo)
+            pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
 
-            for x, (Ez, Ezzp1, _), data, input, mask, tag in \
-                zip(continuous_expectations, discrete_expectations, datas, inputs, masks, tags):
-
-                # The "mask" for x is all ones
-                x_mask = np.ones_like(x, dtype=bool)
-                log_pi0 = self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
-                log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
-                log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
-                log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
-
-                # Compute the expected log probability
-                elp += np.sum(Ez[0] * log_pi0)
-                elp += np.sum(Ezzp1 * log_Ps)
-                elp += np.sum(Ez * log_likes)
-
-            # subtract log density (TODO: implement E_q[q(z)])
-            elp -= variational_posterior.log_density(continuous_expectations)
-            elps.append(elp)
-            pbar.set_description("E[LP]: {:.1f}".format(elps[-1]))
-
-        return elps
+        return elbos
 
     @ensure_variational_args_are_lists
     def fit(self, variational_posterior, datas,

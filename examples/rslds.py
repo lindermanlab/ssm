@@ -16,8 +16,8 @@ sns.set_style("white")
 sns.set_context("talk")
 
 import ssm
-from ssm.variational import SLDSMeanFieldVariationalPosterior, SLDSTriDiagVariationalPosterior, \
-    SLDSStructuredMeanFieldVariationalPosterior
+from ssm.variational import SLDSMeanFieldVariationalPosterior, \
+    SLDSTriDiagVariationalPosterior, SLDSStructuredMeanFieldVariationalPosterior
 from ssm.util import random_rotation
 
 # Global parameters
@@ -127,7 +127,7 @@ true_rslds = make_nascar_model()
 z, x, y = true_rslds.sample(T=T)
 
 # Fit a robust rSLDS with its default initialization
-rslds = ssm.SLDS(D_obs, K, D_latent,
+rslds_svi = ssm.SLDS(D_obs, K, D_latent,
              transitions="recurrent_only",
              dynamics="diagonal_gaussian",
              emissions="gaussian_orthog",
@@ -136,13 +136,13 @@ rslds = ssm.SLDS(D_obs, K, D_latent,
 # Initialize the model with the observed data.  It is important
 # to call this before constructing the variational posterior since
 # the posterior constructor initialization looks at the rSLDS parameters.
-rslds.initialize(y)
+rslds_svi.initialize(y)
 
 # Uncomment this to fit with stochastic variational inference instead
-# q_svi = SLDSTriDiagVariationalPosterior(rslds, y)
-# elbos = rslds.fit(q_svi, y, method="svi", num_iters=1000, initialize=False)
-# xhat = q_svi.mean[0]
-# zhat = rslds.most_likely_states(xhat, y)
+q_svi = SLDSTriDiagVariationalPosterior(rslds_svi, y)
+q_elbos_svi = rslds_svi.fit(q_svi, y, method="svi", num_iters=1000, initialize=False)
+xhat_svi = q_svi.mean[0]
+zhat_svi = rslds_svi.most_likely_states(xhat_svi, y)
 
 # Uncomment this to fit with variational EM
 # q_vem = SLDSTriDiagVariationalPosterior(rslds, y)
@@ -151,30 +151,48 @@ rslds.initialize(y)
 # zhat = rslds.most_likely_states(xhat, y)
 
 # Fit with Laplace EM
-q_lem = SLDSStructuredMeanFieldVariationalPosterior(rslds, y)
-elbos = rslds.fit(q_lem, y, num_iters=100, method="laplace_em", initialize=False, num_samples=1, maxiter=10)
-xhat = q_lem.mean_continuous_states[0]
-zhat = rslds.most_likely_states(xhat, y)
+rslds_lem = ssm.SLDS(D_obs, K, D_latent,
+             transitions="recurrent_only",
+             dynamics="diagonal_gaussian",
+             emissions="gaussian_orthog",
+             single_subspace=True)
+rslds_lem.initialize(y)
+q_lem = SLDSStructuredMeanFieldVariationalPosterior(rslds_lem, y)
+q_lem_elbos = rslds_lem.fit(q_lem, y, method="laplace_em", initialize=False,
+                  num_iters=100, alpha=0)
+xhat_lem = q_lem.mean_continuous_states[0]
+zhat_lem = rslds_lem.most_likely_states(xhat_lem, y)
 
 # Plot some results
-plt.figure()
-plt.plot(elbos)
+plt.figure(figsize=[8,4])
+plt.subplot(121)
+plt.plot(q_elbos_svi, label="SVI")
 plt.legend()
 plt.xlabel("Iteration")
 plt.ylabel("ELBO")
+plt.subplot(122)
+plt.plot(q_lem_elbos[1:], label="Laplace-EM")
+plt.legend()
+plt.xlabel("Iteration")
+plt.ylabel("ELBO")
+plt.tight_layout()
 
-plt.figure()
-ax1 = plt.subplot(121)
+plt.figure(figsize=[10,4])
+ax1 = plt.subplot(131)
 plot_trajectory(z, x, ax=ax1)
 plt.title("True")
-ax2 = plt.subplot(122)
-plot_trajectory(zhat, xhat, ax=ax2)
-plt.title("Inferred")
+ax2 = plt.subplot(132)
+plot_trajectory(zhat_svi, xhat_svi, ax=ax2)
+plt.title("Inferred, SVI")
+ax3 = plt.subplot(133)
+plot_trajectory(zhat_lem, xhat_lem, ax=ax3)
+plt.title("Inferred, Laplace-EM")
+plt.tight_layout()
 
 plt.figure(figsize=(6,6))
 ax = plt.subplot(111)
-lim = abs(xhat).max(axis=0) + 1
-plot_most_likely_dynamics(rslds, xlim=(-lim[0], lim[0]), ylim=(-lim[1], lim[1]), ax=ax)
-plt.title("Most Likely Dynamics")
+lim = abs(xhat_lem).max(axis=0) + 1
+plot_most_likely_dynamics(rslds_lem, xlim=(-lim[0], lim[0]), ylim=(-lim[1], lim[1]), ax=ax)
+plt.title("Most Likely Dynamics, Laplace-EM")
 
 plt.show()
