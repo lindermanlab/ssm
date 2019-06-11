@@ -56,7 +56,7 @@ slds.initialize(y)
 # q_struct_z = slds.most_likely_states(q_struct_x, y)
 
 q_laplace_em = SLDSStructuredMeanFieldVariationalPosterior(slds, y)
-q_lem_elbos = slds.fit(q_laplace_em, y, method="laplace_em", num_iters=100, initialize=False)
+q_lem_elbos = slds.fit(q_laplace_em, y, method="laplace_em", num_iters=50, initialize=False)
 q_lem_Ez, q_lem_x = q_laplace_em.mean[0]
 q_lem_y = slds.smooth(q_lem_x, y)
 
@@ -72,7 +72,7 @@ q_lem_x_trans = lr.predict(q_lem_x)
 
 # Plot the ELBOS
 plt.figure()
-plt.plot(q_lem_elbos, label="MF")
+plt.plot(q_lem_elbos, label="Laplace EM")
 # plt.plot(q_struct_elbos, label="LDS")
 plt.xlabel("Iteration")
 plt.ylabel("ELBO")

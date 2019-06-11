@@ -178,7 +178,7 @@ def logit(p):
 
 
 def softplus(x):
-    return np.log(1 + np.exp(x))
+    return np.log1p(np.exp(x))
 
 
 def inv_softplus(y):
@@ -432,32 +432,55 @@ def fit_negative_binomial_integer_r(xs, r_min=1, r_max=20):
 
     return r_star, p_star(r_star)
 
-
 def newtons_method_block_tridiag_hessian(
     x0, obj, grad_func, hess_func,
-    stepsize=0.95, tolerance=1e-4, maxiter=100):
+    stepsize=0.75, tolerance=1e-4, maxiter=100, backtracking=True):
     """
     Newton's method to minimize a positive definite function with a
     block tridiagonal Hessian matrix.
     """
-    from ssm.primitives import blocks_to_full
     x = x0
     is_converged = False
     count = 0
     while not is_converged:
-        # print("Objective: ", obj(x))
         H_diag, H_lower_diag = hess_func(x)
         g = grad_func(x)
-        dx = solve_symm_block_tridiag(H_diag, H_lower_diag, g)
-        x = x - stepsize * dx
+        dx = -1.0 * solve_symm_block_tridiag(H_diag, H_lower_diag, g)
+        if backtracking:
+            stepsize = backtracking_line_search(x, dx, obj, g)
+        x = x + stepsize * dx
         is_converged = np.mean(np.abs(dx)) < tolerance
         count += 1
         if count > maxiter:
             break
 
-    if not is_converged:
-        warn("Newton's method failed to converge in {} iterations. "
-             "Final mean abs(dx): {}".format(maxiter, np.mean(np.abs(dx))))
+    # if not is_converged:
+        # warn("Newton's method failed to converge in {} iterations. "
+             # "Final mean abs(dx): {}".format(maxiter, np.mean(np.abs(dx))))
 
     return x
 
+def backtracking_line_search(x0, dx, obj, g, stepsize = 1.0, min_stepsize=1e-8,
+                             alpha=0.2, beta=0.7):
+    """
+    A backtracking line search for the step size in Newton's method.
+    Chapter 9, Boyd & Vandenberghe, 2004.
+    - dx is the descent direction
+    - g is the gradient evaluated at x0
+    """
+    x = x0
+
+    # criterion: stop when f(x + stepsize * dx) < f(x) + \alpha * stepsize * f'(x)^T dx
+    f_term = obj(x)
+    grad_term = alpha * np.dot(g.ravel(), dx.ravel())
+
+    # decrease stepsize until criterion is met
+    # or stop at minimum step size
+    while stepsize > min_stepsize:
+        fx = obj(x+ stepsize*dx)
+        if np.isnan(fx) or fx > f_term + grad_term*stepsize:
+            stepsize *= beta
+        else:
+            break
+
+    return stepsize

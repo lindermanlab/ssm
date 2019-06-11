@@ -510,7 +510,7 @@ class BernoulliOrthogonalEmissions(_BernoulliEmissionsMixin, _OrthogonalLinearEm
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
         yhats = [self.link(np.clip(d, .1, .9)) for d in datas]
-        self._initialize_with_pca(logits, inputs=inputs, masks=masks, tags=tags)
+        self._initialize_with_pca(yhats, inputs=inputs, masks=masks, tags=tags)
 
     def hessian_log_emissions_prob(self, data, input, mask, tag, x):
         """
@@ -520,7 +520,7 @@ class BernoulliOrthogonalEmissions(_BernoulliEmissionsMixin, _OrthogonalLinearEm
         """
         assert self.single_subspace
         assert self.link_name == "logit"
-        psi =  self.forward(x, input, tag)
+        psi =  self.forward(x, input, tag)[:, 0, :]
         p = self.mean(psi)
         dp_dpsi = p * (1 - p)
         return np.einsum('tn, ni, nj ->tij', -dp_dpsi, self.Cs[0], self.Cs[0])
@@ -535,19 +535,20 @@ class BernoulliNeuralNetworkEmissions(_BernoulliEmissionsMixin, _NeuralNetworkEm
 
 
 class _PoissonEmissionsMixin(object):
-    def __init__(self, N, K, D, M=0, single_subspace=True, link="log", **kwargs):
+    def __init__(self, N, K, D, M=0, single_subspace=True, link="log", bin_size=1.0, **kwargs):
         super(_PoissonEmissionsMixin, self).__init__(N, K, D, M, single_subspace=single_subspace, **kwargs)
 
         self.link_name = link
+        self.bin_size = bin_size
         mean_functions = dict(
-            log=lambda x: np.exp(x),
-            softplus=softplus
+            log=lambda x: np.exp(x) * self.bin_size,
+            softplus= lambda x: softplus(x) * self.bin_size
             )
         self.mean = mean_functions[link]
 
         link_functions = dict(
-            log=lambda rate: np.log(rate),
-            softplus=inv_softplus
+            log=lambda rate: np.log(rate) - np.log(self.bin_size),
+            softplus=lambda rate: inv_softplus(rate / self.bin_size)
             )
         self.link = link_functions[link]
 
@@ -600,7 +601,12 @@ class PoissonEmissions(_PoissonEmissionsMixin, _LinearEmissions):
             return np.einsum('tn, ni, nj ->tij', -lambdas[:, 0, :], self.Cs[0], self.Cs[0])
 
         elif self.link_name == "softplus":
-            raise NotImplementedError
+            assert self.single_subspace
+            lambdas = self.mean(self.forward(x, input, tag))[:, 0, :] / self.bin_size
+            expterms = np.exp(-np.dot(x,self.Cs[0].T)-np.dot(input,self.Fs[0].T)-self.ds[0])
+            diags = (data / lambdas * (expterms - 1.0 / lambdas) - expterms * self.bin_size) / (1.0+expterms)**2
+            return np.einsum('tn, ni, nj ->tij', diags, self.Cs[0], self.Cs[0])
+
 
 class PoissonOrthogonalEmissions(_PoissonEmissionsMixin, _OrthogonalLinearEmissions):
     @ensure_args_are_lists
@@ -624,8 +630,11 @@ class PoissonOrthogonalEmissions(_PoissonEmissionsMixin, _OrthogonalLinearEmissi
             return np.einsum('tn, ni, nj ->tij', -lambdas[:, 0, :], self.Cs[0], self.Cs[0])
 
         elif self.link_name == "softplus":
-            raise NotImplementedError
-
+            assert self.single_subspace
+            lambdas = self.mean(self.forward(x, input, tag))[:, 0, :] / self.bin_size
+            expterms = np.exp(-np.dot(x,self.Cs[0].T)-np.dot(input,self.Fs[0].T)-self.ds[0])
+            diags = (data / lambdas * (expterms - 1.0 / lambdas) - expterms * self.bin_size) / (1.0+expterms)**2
+            return np.einsum('tn, ni, nj ->tij', diags, self.Cs[0], self.Cs[0])
 
 class PoissonIdentityEmissions(_PoissonEmissionsMixin, _IdentityEmissions):
     pass

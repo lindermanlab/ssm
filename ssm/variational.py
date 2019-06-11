@@ -6,7 +6,7 @@ from ssm.emissions import _LinearEmissions
 from ssm.preprocessing import interpolate_data
 from ssm.primitives import lds_log_probability, lds_sample, lds_mean, \
                            block_tridiagonal_sample, hmm_expected_states, \
-                           hmm_sample, block_tridiagonal_mean
+                           hmm_sample, block_tridiagonal_mean, block_tridiagonal_log_probability
 
 from ssm.util import ensure_variational_args_are_lists
 
@@ -267,13 +267,17 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
                     J_lower_diag=J_lower_diag,
                     h=h)
 
+    @property
+    def params(self):
+        return self._params
+
     def sample_discrete_states(self):
         return [hmm_sample(prms["log_pi0"], prms["log_Ps"], prms["log_likes"])
-                for prms in self._params]
+                for prms in self.params]
 
     def sample_continuous_states(self):
         return [block_tridiagonal_sample(prms["J_diag"], prms["J_lower_diag"], prms["h"])
-                for prms in self._params]
+                for prms in self.params]
 
     def sample(self):
         return list(zip(self.sample_discrete_states(), self.sample_continuous_states()))
@@ -282,17 +286,34 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
     def mean_discrete_states(self):
         # Now compute the posterior expectations of z under q(z)
         return [hmm_expected_states(prms["log_pi0"], prms["log_Ps"], prms["log_likes"])
-                for prms in self._params]
+                for prms in self.params]
 
     @property
     def mean_continuous_states(self):
         # Now compute the posterior expectations of z under q(z)
         return [block_tridiagonal_mean(prms["J_diag"], prms["J_lower_diag"], prms["h"], lower=True).reshape(np.shape(prms["h"]))
-                for prms in self._params]
+                for prms in self.params]
 
     @property
     def mean(self):
         return list(zip(self.mean_discrete_states, self.mean_continuous_states))
 
     def log_density(self, sample):
-        raise NotImplementedError
+        # This should compute the log density q(x) and q(z).
+        # Given a sample \hat{x} from q(x), this returns the log probability
+        # of that sample. It also returns the entropy of q(z).
+
+        logq = 0
+        for s, prms in zip(sample, self.params):
+
+            # 1. Compute log q(x) of samples of x
+            logq += block_tridiagonal_log_probability(s, prms["J_diag"], prms["J_lower_diag"], prms["h"])
+
+            # 2. Compute E_{q(z)}[ log q(z) ]
+            (Ez, Ezzp1, normalizer) = hmm_expected_states(prms["log_pi0"], prms["log_Ps"], prms["log_likes"])
+            logq -= normalizer # -log Z
+            logq += np.sum(Ez[0] * prms["log_pi0"]) # initial factor
+            logq += np.sum(Ez * prms["log_likes"]) # unitary factors
+            logq += np.sum(Ezzp1 * prms["log_Ps"]) # pairwise factors
+
+        return logq
