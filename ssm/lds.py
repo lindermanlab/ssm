@@ -22,6 +22,8 @@ from . import hierarchical as hier
 from . import emissions as emssn
 from . import hmm
 
+from scipy.optimize import minimize
+
 __all__ = ['SLDS', 'LDS']
 
 class SLDS(object):
@@ -550,14 +552,17 @@ class SLDS(object):
     def _fit_laplace_em_continuous_state_update(
         self, discrete_expectations, variational_posterior,
         datas, inputs, masks, tags,
-        newton_stepsize, newton_tolerance, newton_maxiter):
+        continuous_optimizer, continuous_tolerance, continuous_maxiter):
 
         # 2. Update the variational posterior q(x) for fixed q(z)
-        #    - Use Newton's method to find the argmax of the expected log joint
+        #    - Use Newton's method or LBFGS to find the argmax of the expected log joint
         #       - Compute the gradient g(x) and block tridiagonal Hessian J(x)
         #       - Newton update: x' = x + J(x)^{-1} g(x)
         #       - Check for convergence of x'
         #    - Evaluate the J(x*) at the optimal x*
+
+        # allow for using Newton's method or LBFGS to find x*
+        optimizer = dict(newton="newton", lbfgs="lbfgs")[continuous_optimizer]
 
         # Compute the expected log joint
         def neg_expected_log_joint(x, Ez, Ezzp1, scale=1):
@@ -600,15 +605,28 @@ class SLDS(object):
             zip(variational_posterior.params, discrete_expectations, x0s,
                 datas, inputs, masks, tags):
 
-            # Run Newtons method
+            # Use Newton's method or LBFGS to find the argmax of the expected log joint
             scale = x0.size
-            obj = lambda x: neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
-            grad_func = lambda x: grad_neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
-            hess_func = lambda x: hessian_neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
-            x = newtons_method_block_tridiag_hessian(
-                x0, obj, grad_func, hess_func,
-                stepsize=newton_stepsize, tolerance=newton_tolerance, maxiter=newton_maxiter)
-            assert np.all(np.isfinite(obj(x)))
+            if optimizer == "newton":
+                # Run Newtons method
+                obj = lambda x: neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
+                grad_func = lambda x: grad_neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
+                hess_func = lambda x: hessian_neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
+                x = newtons_method_block_tridiag_hessian(
+                    x0, obj, grad_func, hess_func,
+                    tolerance=continuous_tolerance, maxiter=continuous_maxiter)
+                assert np.all(np.isfinite(obj(x)))
+
+            elif optimizer == "lbfgs":
+                # use LBFGS
+                T, D = x0.shape
+                obj_v = lambda x: neg_expected_log_joint(x.reshape((T,D)), Ez, Ezzp1, scale=scale)
+                grad_func_v = lambda x: grad_neg_expected_log_joint(x.reshape((T,D)), Ez, Ezzp1, scale=scale).ravel()
+                x = minimize(
+                      obj_v, x0.ravel(), method='L-BFGS-B', jac = grad_func_v,
+                      options={'ftol': continuous_tolerance, 'maxiter': continuous_maxiter}).x
+                assert np.all(np.isfinite(obj_v(x)))
+                x = x.reshape((T,D))
 
             # Evaluate the Hessian at the mode
             J_diag, J_lower_diag = hessian_neg_expected_log_joint(x, Ez, Ezzp1)
@@ -662,14 +680,14 @@ class SLDS(object):
 
     def _laplace_em_elbo(self, variational_posterior, datas, inputs, masks, tags):
 
-        continuous_expectations = variational_posterior.sample_continuous_states()
+        continuous_samples = variational_posterior.sample_continuous_states()
         discrete_expectations = variational_posterior.mean_discrete_states
 
         elbo = 0.0
         elbo += self.log_prior()
 
         for x, (Ez, Ezzp1, _), data, input, mask, tag in \
-            zip(continuous_expectations, discrete_expectations, datas, inputs, masks, tags):
+            zip(continuous_samples, discrete_expectations, datas, inputs, masks, tags):
 
             # The "mask" for x is all ones
             x_mask = np.ones_like(x, dtype=bool)
@@ -683,8 +701,9 @@ class SLDS(object):
             elbo += np.sum(Ezzp1 * log_Ps)
             elbo += np.sum(Ez * log_likes)
 
-        # subtract log density
-        elbo -= variational_posterior.log_density(continuous_expectations)
+        # subtract log density of continuous samples and discrete entropy
+        elbo -= variational_posterior.log_density(continuous_samples)
+        elbo -= variational_posterior.entropy_discrete()
 
         return elbo
 
@@ -692,9 +711,9 @@ class SLDS(object):
                         inputs=None, masks=None, tags=None,
                         num_iters=100,
                         num_samples=1,
-                        newton_stepsize=0.75,
-                        newton_tolerance=1e-4,
-                        newton_maxiter=100,
+                        continuous_optimizer="newton",
+                        continuous_tolerance=1e-4,
+                        continuous_maxiter=100,
                         emission_optimizer="lbfgs",
                         emission_optimizer_maxiter=50,
                         alpha=0.5,
@@ -718,7 +737,7 @@ class SLDS(object):
             # 2. Update the continuous state posterior q(x)
             self._fit_laplace_em_continuous_state_update(
                 discrete_expectations, variational_posterior, datas, inputs, masks, tags,
-                newton_stepsize, newton_tolerance, newton_maxiter)
+                continuous_optimizer, continuous_tolerance, continuous_maxiter)
             continuous_expectations = variational_posterior.sample_continuous_states()
 
             # 3. Update parameters

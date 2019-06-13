@@ -289,12 +289,12 @@ class RecurrentOnlyTransitions(Transitions):
     def hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
         T, D = data.shape
-        v = [self.Rs @ data[t] + self.Ws @ input[t+1] + self.r for t in range(T-1)]
-        vtilde = [np.exp(vt - np.max(vt)) / np.sum(np.exp(vt - np.max(vt))) for vt in v]
-        terms = np.array([-1.0 * self.Rs.T @ np.diag(vt) @ self.Rs
-                           + self.Rs.T@ np.outer(vt,vt) @ self.Rs
-                          for vt in vtilde])
-        return terms
+        v = np.dot(input[1:], self.Ws.T) + np.dot(data[:-1], self.Rs.T) + self.r
+        shifted_exp = np.exp(v - np.max(v,axis=1,keepdims=True))
+        vtilde = shifted_exp / np.sum(shifted_exp,axis=1,keepdims=True)
+        Rv = vtilde@self.Rs
+        return np.einsum('tn, ni, nj ->tij', -vtilde, self.Rs, self.Rs) \
+               + np.einsum('ti, tj -> tij', Rv, Rv)
 
 class RBFRecurrentTransitions(InputDrivenTransitions):
     """

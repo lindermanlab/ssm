@@ -299,21 +299,20 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         return list(zip(self.mean_discrete_states, self.mean_continuous_states))
 
     def log_density(self, sample):
-        # This should compute the log density q(x) and q(z).
-        # Given a sample \hat{x} from q(x), this returns the log probability
-        # of that sample. It also returns the entropy of q(z).
+        assert isinstance(sample, list) and len(sample) == len(self.datas)
 
         logq = 0
         for s, prms in zip(sample, self.params):
-
-            # 1. Compute log q(x) of samples of x
             logq += block_tridiagonal_log_probability(s, prms["J_diag"], prms["J_lower_diag"], prms["h"])
-
-            # 2. Compute E_{q(z)}[ log q(z) ]
-            (Ez, Ezzp1, normalizer) = hmm_expected_states(prms["log_pi0"], prms["log_Ps"], prms["log_likes"])
-            logq -= normalizer # -log Z
-            logq += np.sum(Ez[0] * prms["log_pi0"]) # initial factor
-            logq += np.sum(Ez * prms["log_likes"]) # unitary factors
-            logq += np.sum(Ezzp1 * prms["log_Ps"]) # pairwise factors
-
         return logq
+
+    def entropy_discrete(self):
+        # Compute E_{q(z)}[ log q(z) ]
+        Elogq = 0
+        for prms in self.params:
+            (Ez, Ezzp1, normalizer) = hmm_expected_states(prms["log_pi0"], prms["log_Ps"], prms["log_likes"])
+            Elogq -= normalizer # -log Z
+            Elogq += np.sum(Ez[0] * prms["log_pi0"]) # initial factor
+            Elogq += np.sum(Ez * prms["log_likes"]) # unitary factors
+            Elogq += np.sum(Ezzp1 * prms["log_Ps"]) # pairwise factors
+        return Elogq
