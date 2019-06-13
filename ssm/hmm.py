@@ -489,7 +489,7 @@ class HSMM(HMM):
 
         # Make the transition model
         transition_classes = dict(
-            nb=NegativeBinomialSemiMarkovTransitions,
+            nb=trans.NegativeBinomialSemiMarkovTransitions,
             )
         if isinstance(transitions, str):
             if transitions not in transition_classes:
@@ -538,9 +538,9 @@ class HSMM(HMM):
             raise TypeError("'observations' must be a subclass of"
                             " ssm.observations.Observations")
 
-        super().__init__(K, D, M=M, transitions=transition_distn, 
+        super().__init__(K, D, M=M, transitions=transitions,
                         transition_kwargs=transition_kwargs,
-                        observations=observation_distn,
+                        observations=observations,
                         observation_kwargs=observation_kwargs,
                         **kwargs)
     
