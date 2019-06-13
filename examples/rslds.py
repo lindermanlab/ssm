@@ -136,13 +136,13 @@ rslds_svi = ssm.SLDS(D_obs, K, D_latent,
 # Initialize the model with the observed data.  It is important
 # to call this before constructing the variational posterior since
 # the posterior constructor initialization looks at the rSLDS parameters.
-# rslds_svi.initialize(y)
+rslds_svi.initialize(y)
 
 # Fit with stochastic variational inference
-# q_svi = SLDSTriDiagVariationalPosterior(rslds_svi, y)
-# q_elbos_svi = rslds_svi.fit(q_svi, y, method="svi", num_iters=1000, initialize=False)
-# xhat_svi = q_svi.mean[0]
-# zhat_svi = rslds_svi.most_likely_states(xhat_svi, y)
+q_svi = SLDSTriDiagVariationalPosterior(rslds_svi, y)
+q_elbos_svi = rslds_svi.fit(q_svi, y, method="svi", num_iters=1000, initialize=False)
+xhat_svi = q_svi.mean[0]
+zhat_svi = rslds_svi.most_likely_states(xhat_svi, y)
 
 # Uncomment this to fit with variational EM
 # q_vem = SLDSTriDiagVariationalPosterior(rslds, y)
@@ -163,24 +163,10 @@ q_lem_elbos = rslds_lem.fit(q_lem, y, method="laplace_em", initialize=False,
 xhat_lem = q_lem.mean_continuous_states[0]
 zhat_lem = rslds_lem.most_likely_states(xhat_lem, y)
 
-plt.figure(figsize=[12,4])
-plt.subplot(131)
-plt.plot(q_lem_elbos_temp[1:], label="Laplace-EM")
-plt.legend()
-plt.xlabel("Iteration")
-plt.ylabel("ELBO")
-ax1 = plt.subplot(132)
-plot_trajectory(z, x, ax=ax1)
-plt.title("True")
-ax3 = plt.subplot(133)
-plot_trajectory(zhat_lem, xhat_lem, ax=ax3)
-plt.title("Inferred, Laplace-EM")
-plt.tight_layout()
-
 # Plot some results
 plt.figure(figsize=[8,4])
 plt.subplot(121)
-# plt.plot(q_elbos_svi, label="SVI")
+plt.plot(q_elbos_svi, label="SVI")
 plt.legend()
 plt.xlabel("Iteration")
 plt.ylabel("ELBO")
@@ -195,9 +181,9 @@ plt.figure(figsize=[10,4])
 ax1 = plt.subplot(131)
 plot_trajectory(z, x, ax=ax1)
 plt.title("True")
-# ax2 = plt.subplot(132)
-# plot_trajectory(zhat_svi, xhat_svi, ax=ax2)
-# plt.title("Inferred, SVI")
+ax2 = plt.subplot(132)
+plot_trajectory(zhat_svi, xhat_svi, ax=ax2)
+plt.title("Inferred, SVI")
 ax3 = plt.subplot(133)
 plot_trajectory(zhat_lem, xhat_lem, ax=ax3)
 plt.title("Inferred, Laplace-EM")
