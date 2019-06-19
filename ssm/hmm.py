@@ -115,7 +115,7 @@ class HMM(object):
         if not isinstance(observations, obs.Observations):
             raise TypeError("'observations' must be a subclass of"
                             " ssm.observations.Observations")
-        
+
         self.K, self.D, self.M = K, D, M
         self.init_state_distn = init_state_distn
         self.transitions = transitions
@@ -301,27 +301,41 @@ class HMM(object):
     def log_probability(self, datas, inputs=None, masks=None, tags=None):
         return self.log_likelihood(datas, inputs, masks, tags) + self.log_prior()
 
-    def expected_log_probability(self, expectations, datas, inputs=None, masks=None, tags=None):
+    def expected_log_likelihood(
+            self, expectations, datas, inputs=None, masks=None, tags=None):
         """
-        Compute the log probability of the data under the current
-        model parameters.
+        Compute log-likelihood given current model parameters.
 
         :param datas: single array or list of arrays of data.
         :return total log probability of the data.
         """
-        elp = self.log_prior()
-        for (Ez, Ezzp1, _), data, input, mask, tag in \
-            zip(expectations, datas, inputs, masks, tags):
-            log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
-            log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
-            log_likes = self.observations.log_likelihoods(data, input, mask, tag)
+        ell = 0.0
+        for (Ez, Ezzp1, _), data, inp, mask, tag in \
+                zip(expectations, datas, inputs, masks, tags):
 
-            # Compute the expected log probability
-            elp += np.sum(Ez[0] * log_pi0)
-            elp += np.sum(Ezzp1 * log_Ps)
-            elp += np.sum(Ez * log_likes)
-            assert np.isfinite(elp)
-        return elp
+            log_pi0 = self.init_state_distn.log_initial_state_distn(
+                data, inp, mask, tag)
+            log_Ps = self.transitions.log_transition_matrices(
+                data, inp, mask, tag)
+            log_likes = self.observations.log_likelihoods(
+                data, inp, mask, tag)
+
+            ell += np.sum(Ez[0] * log_pi0)
+            ell += np.sum(Ezzp1 * log_Ps)
+            ell += np.sum(Ez * log_likes)
+            assert np.isfinite(ell)
+
+        return ell
+
+    def expected_log_probability(
+            self, expectations, datas, inputs=None, masks=None, tags=None):
+        """
+        Compute the log-probability of the data given current
+        model parameters.
+        """
+        ell = self.expected_log_likelihood(
+            expectations, datas, inputs=inputs, masks=masks, tags=tags)
+        return ell + self.log_prior()
 
     # Model fitting
     def _fit_sgd(self, optimizer, datas, inputs, masks, tags, num_iters=1000, **kwargs):
@@ -543,7 +557,7 @@ class HSMM(HMM):
                         observations=observation_distn,
                         observation_kwargs=observation_kwargs,
                         **kwargs)
-    
+
     @property
     def state_map(self):
         return self.transitions.state_map

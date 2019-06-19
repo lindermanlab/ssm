@@ -69,6 +69,11 @@ def cross_val_scores(
         # Fit model.
         model.fit(data, inputs=inputs, masks=train_mask)
 
+        # Compute expectaations.
+        expectations = [model.expected_states(x, inp, m, tg)
+                        for x, inp, m, tg
+                        in zip(data, inputs, train_mask, tags)]
+
         # Evaluate loss on training data.
         train_scores[r] = model.log_likelihood(
             data, inputs=inputs, masks=train_mask)
