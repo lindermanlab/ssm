@@ -19,6 +19,7 @@ import ssm.emissions as emssn
 
 __all__ = ['HMM', 'HSMM']
 
+
 class HMM(object):
     """
     Base class for hidden Markov models.

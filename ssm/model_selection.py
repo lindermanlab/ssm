@@ -6,8 +6,8 @@ import autograd.numpy.random as npr
 
 
 def cross_val_scores(
-        model, data, inputs=None, masks=None, heldout_frac=0.1,
-        n_repeats=3, normalize_scores=True):
+        model, data, inputs=None, masks=None, tags=None,
+        heldout_frac=0.1, n_repeats=3, normalize_scores=True):
     """
     Evaluate HMM log-likelihood scores on heldout data.
 
@@ -24,6 +24,8 @@ def cross_val_scores(
         If applicable, binary matrix specifying censored or
         unobserved entries in data. Entries of one correspond
         to observed data. Has shape (n_obs, n_out).
+    tags : ???
+        ???
     heldout_frac : float
         Number between zero and one specifying how much data
         to hold out on each cross-validation run.
@@ -43,18 +45,30 @@ def cross_val_scores(
         Has shape (n_repeats,).
     """
 
+    # Initialize mask for missing data. By default all data
+    # is observed.
     if masks is None:
         masks = np.ones_like(data, dtype=bool)
     else:
         masks = np.asarray(masks, dtype=bool)
 
+    # Total number of observations and indices of observed data.
     total_obs = np.sum(masks)
     obs_ind = np.argwhere(masks)
 
+    # Determine number of observations to holdout.
     heldout_num = int(total_obs * heldout_frac)
 
+    # Allocate space for train and test log-likelihoods.
     test_scores = np.empty(n_repeats)
     train_scores = np.empty(n_repeats)
+
+    # Ensure inputs and tags are compatible with iteration.
+    M = (model.M,) if isinstance(model.M, int) else model.M
+    if inputs is None:
+        inputs = np.zeros((data.shape[0],) + M)
+    if tags is None:
+        tags = [None]
 
     for r in range(n_repeats):
 
@@ -69,19 +83,19 @@ def cross_val_scores(
         # Fit model.
         model.fit(data, inputs=inputs, masks=train_mask)
 
-        # Compute expectaations.
+        # Compute expectations of hidden states.
         expectations = [model.expected_states(x, inp, m, tg)
                         for x, inp, m, tg
-                        in zip(data, inputs, train_mask, tags)]
+                        in zip([data], inputs, train_mask, tags)]
 
         # Evaluate loss on training data.
-        train_scores[r] = model.log_likelihood(
-            data, inputs=inputs, masks=train_mask)
+        train_scores[r] = model.expected_log_likelihood(
+            expectations, data, inputs=inputs, masks=train_mask, tags=tags)
 
         # Compute log-likelihood on test data.
         test_mask = ~train_mask & masks
         test_scores[r] = model.log_likelihood(
-            data, inputs=inputs, masks=test_mask)
+            expectations, data, inputs=inputs, masks=test_mask, tags=tags)
 
     # Normalize log-likelihoods per observation.
     if normalize_scores:
