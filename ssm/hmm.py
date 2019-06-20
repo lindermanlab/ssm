@@ -115,7 +115,7 @@ class HMM(object):
         if not isinstance(observations, obs.Observations):
             raise TypeError("'observations' must be a subclass of"
                             " ssm.observations.Observations")
-        
+
         self.K, self.D, self.M = K, D, M
         self.init_state_distn = init_state_distn
         self.transitions = transitions
@@ -457,7 +457,7 @@ class HMM(object):
                  )
 
         if method not in _fitting_methods:
-            raise Exception("Invalid method: {}. Options are {}".\
+            raise Exception("Invalid method: {}. Options are {}".
                             format(method, _fitting_methods.keys()))
 
         if initialize:
@@ -538,12 +538,12 @@ class HSMM(HMM):
             raise TypeError("'observations' must be a subclass of"
                             " ssm.observations.Observations")
 
-        super().__init__(K, D, M=M, transitions=transition_distn, 
+        super().__init__(K, D, M=M, transitions=transition_distn,
                         transition_kwargs=transition_kwargs,
                         observations=observation_distn,
                         observation_kwargs=observation_kwargs,
                         **kwargs)
-    
+
     @property
     def state_map(self):
         return self.transitions.state_map

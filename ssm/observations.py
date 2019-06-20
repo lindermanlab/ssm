@@ -113,7 +113,7 @@ class GaussianObservations(Observations):
                             "does not work with autograd because it writes to an array. "
                             "Use DiagonalGaussian instead if you need to support missing data.")
 
-        return stats.multivariate_normal_logpdf(data[:, None, :], mus, Sigmas)
+        return stats.multivariate_normal_logpdf(data[:, None, :], mus, Sigmas, mask=mask[:, None, :])
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, mus = self.D, self.mus
@@ -198,9 +198,9 @@ class DiagonalGaussianObservations(Observations):
         x = np.concatenate(datas)
         weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
-            self.mus[k] = np.average(x, axis=0, weights=weights[:,k])
+            self.mus[k] = np.average(x, axis=0, weights=weights[:, k])
             sqerr = (x - self.mus[k])**2
-            self._log_sigmasq[k] = np.log(np.average(sqerr, weights=weights[:,k], axis=0))
+            self._log_sigmasq[k] = np.log(np.average(sqerr, weights=weights[:, k], axis=0))
 
     def smooth(self, expectations, data, input, tag):
         """

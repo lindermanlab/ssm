@@ -106,7 +106,6 @@ class _LinearEmissions(Emissions):
         """
         assert self.single_subspace, "Can only invert with a single emission model"
 
-        T = data.shape[0]
         C, F, d = self.Cs[0], self.Fs[0], self.ds[0]
         C_pseudoinv = np.linalg.solve(C.T.dot(C), C.T).T
 
@@ -126,8 +125,8 @@ class _LinearEmissions(Emissions):
 
     def forward(self, x, input, tag):
         return np.matmul(self.Cs[None, ...], x[:, None, :, None])[:, :, :, 0] \
-             + np.matmul(self.Fs[None, ...], input[:, None, :, None])[:, :, :, 0] \
-             + self.ds
+            + np.matmul(self.Fs[None, ...], input[:, None, :, None])[:, :, :, 0] \
+            self.ds
 
     @ensure_args_are_lists
     def _initialize_with_pca(self, datas, inputs=None, masks=None, tags=None, num_iters=20):
