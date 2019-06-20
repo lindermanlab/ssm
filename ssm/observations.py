@@ -113,11 +113,7 @@ class GaussianObservations(Observations):
                             "does not work with autograd because it writes to an array. "
                             "Use DiagonalGaussian instead if you need to support missing data.")
 
-<<<<<<< HEAD
         return stats.multivariate_normal_logpdf(data[:, None, :], mus, Sigmas, mask=mask[:, None, :])
-=======
-        return stats.multivariate_normal_logpdf(data[:, None, :], mus, Sigmas, mask[:, None, :])
->>>>>>> 9843c5a288ee696d7edec76ec2b6b7ea345367fa
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, mus = self.D, self.mus

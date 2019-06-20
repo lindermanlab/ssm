@@ -78,7 +78,7 @@ def random_rotation(n, theta=None):
 
     rot = np.array([[np.cos(theta), -np.sin(theta)],
                     [np.sin(theta), np.cos(theta)]])
-    out = np.zeros((n, n))
+    out = np.eye(n)
     out[:2, :2] = rot
     q = np.linalg.qr(np.random.randn(n, n))[0]
     return q.dot(out).dot(q.T)
