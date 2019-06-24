@@ -126,7 +126,7 @@ class _LinearEmissions(Emissions):
     def forward(self, x, input, tag):
         return np.matmul(self.Cs[None, ...], x[:, None, :, None])[:, :, :, 0] \
             + np.matmul(self.Fs[None, ...], input[:, None, :, None])[:, :, :, 0] \
-            self.ds
+            + self.ds
 
     @ensure_args_are_lists
     def _initialize_with_pca(self, datas, inputs=None, masks=None, tags=None, num_iters=20):

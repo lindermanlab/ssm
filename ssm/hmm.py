@@ -32,7 +32,7 @@ class HMM(object):
     In the code we will sometimes refer to the discrete
     latent state sequence as z and the data as x.
     """
-    def __init__(self, K, D, *, M=0, init_state_distn=None,
+    def __init__(self, K, D, M=0, init_state_distn=None,
                  transitions='standard',
                  transition_kwargs=None,
                  hierarchical_transition_tags=None,
