@@ -254,11 +254,13 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
 
         # Initialize q(x) = = N(J, h) where J is block tridiagonal precision
         # and h is the linear potential.  The mapping to mean parameters is
-        # mu = J^{-1} h and Sigma = J^{-1}.  Initialize J to be identity so
-        # that h is the mean.
-        J_diag = np.tile(self.initial_variance * np.eye(D)[None, :, :], (T, 1, 1))
+        # mu = J^{-1} h and Sigma = J^{-1}.  Initialize J to inverse of
+        # initial variance and scale h accordingly, so the mean is the output
+        # of the emissions invert function.
+        J_diag = np.tile(1.0 / self.initial_variance * np.eye(D)[None, :, :], (T, 1, 1))
         J_lower_diag = np.zeros((T-1, D, D))
-        h = self.model.emissions.invert(data, input=input, mask=mask, tag=tag)
+        h = (1.0 / self.initial_variance) \
+            * self.model.emissions.invert(data, input=input, mask=mask, tag=tag)
 
         return dict(log_pi0=log_pi0,
                     log_Ps=log_Ps,

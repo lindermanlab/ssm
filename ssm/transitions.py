@@ -243,7 +243,21 @@ class RecurrentTransitions(InputDrivenTransitions):
         Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
     def hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
-        Transitions.hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints)
+        # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
+        T, D = data.shape
+        hess = np.zeros((T-1,D,D))
+        vtildes = np.exp(self.log_transition_matrices(data, input, mask, tag)) # normalized probabilities
+        Ez = np.sum(expected_joints, axis=2) # marginal over z from T=1 to T-1
+        # import ipdb
+        # ipdb.set_trace()
+        for k in range(self.K):
+            vtilde = vtildes[:,k,:] # normalized probabilities given state k
+            Rv = vtilde@self.Rs
+            hess += Ez[:,k][:,None,None] * \
+                    ( np.einsum('tn, ni, nj ->tij', -vtilde, self.Rs, self.Rs) \
+                    + np.einsum('ti, tj -> tij', Rv, Rv))
+        return hess
+        # return Transitions.hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints)
 
 class RecurrentOnlyTransitions(Transitions):
     """
@@ -291,7 +305,7 @@ class RecurrentOnlyTransitions(Transitions):
         T, D = data.shape
         v = np.dot(input[1:], self.Ws.T) + np.dot(data[:-1], self.Rs.T) + self.r
         shifted_exp = np.exp(v - np.max(v,axis=1,keepdims=True))
-        vtilde = shifted_exp / np.sum(shifted_exp,axis=1,keepdims=True)
+        vtilde = shifted_exp / np.sum(shifted_exp,axis=1,keepdims=True) # normalized probabilities
         Rv = vtilde@self.Rs
         return np.einsum('tn, ni, nj ->tij', -vtilde, self.Rs, self.Rs) \
                + np.einsum('ti, tj -> tij', Rv, Rv)

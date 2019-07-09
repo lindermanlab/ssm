@@ -6,6 +6,7 @@ from autograd import hessian
 from ssm.util import ensure_args_are_lists, \
     logistic, logit, softplus, inv_softplus
 from ssm.preprocessing import interpolate_data, pca_with_imputation
+from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
 
 
 # Observation models for SLDS
@@ -64,6 +65,31 @@ class Emissions(object):
         terms = np.array([np.squeeze(hess(xt, datat, inputt, maskt))
                           for xt, datat, inputt, maskt in zip(x, data, input, mask)])
         return terms
+
+    def m_step(self, discrete_expectations, continuous_expectations,
+               datas, inputs, masks, tags,
+               optimizer="bfgs", maxiter=100, **kwargs):
+        """
+        If M-step in Laplace-EM cannot be done in closed form for the emissions, default to SGD.
+        """
+        optimizer = dict(adam=adam, bfgs=bfgs, lbfgs=lbfgs, rmsprop=rmsprop, sgd=sgd)[optimizer]
+
+        # expected log likelihood
+        T = sum([data.shape[0] for data in datas])
+        def _objective(params, itr):
+            self.params = params
+            obj = 0
+            obj += self.log_prior()
+            for data, input, mask, tag, x, (Ez, _, _) in \
+                zip(datas, inputs, masks, tags, continuous_expectations, discrete_expectations):
+                obj += np.sum(Ez * self.log_likelihoods(data, input, mask, tag, x))
+            return -obj / T
+
+        # Optimize emissions log-likelihood
+        self.params = optimizer(_objective, self.params,
+                                num_iters=maxiter,
+                                warn_output=True,
+                                **kwargs)
 
 
 # Many emissions models start with a linear layer

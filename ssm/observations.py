@@ -46,7 +46,7 @@ class Observations(object):
     def m_step(self, expectations, datas, inputs, masks, tags,
                optimizer="bfgs", **kwargs):
         """
-        If M-step cannot be done in closed form for the transitions, default to SGD.
+        If M-step cannot be done in closed form for the observations, default to SGD.
         """
         optimizer = dict(adam=adam, bfgs=bfgs, lbfgs=lbfgs, rmsprop=rmsprop, sgd=sgd)[optimizer]
 

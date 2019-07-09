@@ -9,6 +9,7 @@ from autograd.misc import flatten
 from autograd import value_and_grad, grad
 
 from .optimizers import adam_step, rmsprop_step, sgd_step, lbfgs, bfgs, convex_combination
+from .optimizers import adam, sgd, rmsprop
 from .primitives import hmm_normalizer, hmm_expected_states, hmm_filter, \
     hmm_sample, viterbi, symm_block_tridiag_matmul
 from .util import ensure_args_are_lists, ensure_args_not_none, \
@@ -654,29 +655,35 @@ class SLDS(object):
             distn.m_step(discrete_expectations, continuous_expectations, inputs, xmasks, tags)
             distn.params = convex_combination(curr_prms, distn.params, alpha)
 
-        # keep around old emissions params
+        # update emissions params
         curr_prms = copy.deepcopy(self.emissions.params)
-        T = sum([data.shape[0] for data in datas])
+        self.emissions.m_step(discrete_expectations, continuous_expectations,
+                              datas, inputs, masks, tags,
+                              optimizer=emission_optimizer,
+                              maxiter=emission_optimizer_maxiter)
+        self.emissions.params = convex_combination(curr_prms, self.emissions.params, alpha)
 
-        def _emission_objective(params, itr):
-            self.emissions.params = params
-            obj = 0
-            obj += self.emissions.log_prior()
-            for data, input, mask, tag, x, (Ez, _, _) in \
-                zip(datas, inputs, masks, tags, continuous_expectations, discrete_expectations):
-                obj += np.sum(Ez * self.emissions.log_likelihoods(data, input, mask, tag, x))
+    def _fit_laplace_em_params_update_sgd(
+        self, variational_posterior, datas, inputs, masks, tags,
+        emission_optimizer="adam", emission_optimizer_maxiter=20):
+
+        # 3. Update the model parameters.
+        continuous_expectations = variational_posterior.mean_continuous_states
+        xmasks = [np.ones_like(x, dtype=bool) for x in continuous_expectations]
+
+        T = sum([data.shape[0] for data in datas])
+        def _objective(params, itr):
+            self.params = params
+            obj = self._laplace_em_elbo(variational_posterior, datas, inputs, masks, tags)
             return -obj / T
 
-        # Optimize emissions log-likelihood
-        optimizer = dict(bfgs=bfgs, lbfgs=lbfgs)[emission_optimizer]
-        self.emissions.params = \
-            optimizer(_emission_objective,
-                      self.emissions.params,
-                      num_iters=emission_optimizer_maxiter,
-                      full_output=False)
+        # Optimize parameters
+        optimizer = dict(sgd=sgd, adam=adam, rmsprop=rmsprop, bfgs=bfgs, lbfgs=lbfgs)[emission_optimizer]
+        optimizer_state = self.p_optimizer_state if hasattr(self, "p_optimizer_state") else None
+        self.params, self.p_optimizer_state = \
+            optimizer(_objective, self.params, num_iters=emission_optimizer_maxiter,
+                      state=optimizer_state, full_output=True)
 
-        # update via convex combination
-        self.emissions.params = convex_combination(curr_prms, self.emissions.params, alpha)
 
     def _laplace_em_elbo(self, variational_posterior, datas, inputs, masks, tags):
 
@@ -715,7 +722,8 @@ class SLDS(object):
                         continuous_tolerance=1e-4,
                         continuous_maxiter=100,
                         emission_optimizer="lbfgs",
-                        emission_optimizer_maxiter=50,
+                        emission_optimizer_maxiter=100,
+                        parameters_update="mstep",
                         alpha=0.5,
                         learning=True):
         """
@@ -741,10 +749,17 @@ class SLDS(object):
             continuous_expectations = variational_posterior.sample_continuous_states()
 
             # 3. Update parameters
-            if learning:
+            # Default is partial M-step given a sample from q(x)
+            if learning and parameters_update=="mstep":
                 self._fit_laplace_em_params_update(
                     discrete_expectations, continuous_expectations, datas, inputs, masks, tags,
                     emission_optimizer, emission_optimizer_maxiter, alpha)
+            # Alternative is SGD on all parameters with samples from q(x)
+            elif learning and parameters_update=="sgd":
+                self._fit_laplace_em_params_update_sgd(
+                    variational_posterior, datas, inputs, masks, tags,
+                    emission_optimizer="adam",
+                    emission_optimizer_maxiter=emission_optimizer_maxiter)
 
             # 4. Compute ELBO
             elbo = self._laplace_em_elbo(variational_posterior, datas, inputs, masks, tags)

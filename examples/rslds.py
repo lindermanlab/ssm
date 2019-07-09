@@ -159,7 +159,7 @@ rslds_lem = ssm.SLDS(D_obs, K, D_latent,
 rslds_lem.initialize(y)
 q_lem = SLDSStructuredMeanFieldVariationalPosterior(rslds_lem, y)
 q_lem_elbos = rslds_lem.fit(q_lem, y, method="laplace_em", initialize=False,
-                num_iters=100, alpha=0)
+                num_iters=100, alpha=0.0)
 xhat_lem = q_lem.mean_continuous_states[0]
 zhat_lem = rslds_lem.most_likely_states(xhat_lem, y)
 
