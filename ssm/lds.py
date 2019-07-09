@@ -737,9 +737,10 @@ class SLDS(object):
         pbar = trange(num_iters)
         pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
         for itr in pbar:
-            # 1. Update the discrete state posterior q(z)
-            self._fit_laplace_em_discrete_state_update(
-                variational_posterior, datas, inputs, masks, tags, num_samples)
+            # 1. Update the discrete state posterior q(z) if K>1
+            if self.K > 1:
+                self._fit_laplace_em_discrete_state_update(
+                    variational_posterior, datas, inputs, masks, tags, num_samples)
             discrete_expectations = variational_posterior.mean_discrete_states
 
             # 2. Update the continuous state posterior q(x)
