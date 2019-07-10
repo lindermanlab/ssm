@@ -376,6 +376,29 @@ class GaussianEmissions(_GaussianEmissionsMixin, _LinearEmissions):
         hess = -1.0 * self.Cs[0].T@np.diag( 1.0 / np.exp(self.inv_etas[0]) )@self.Cs[0]
         return np.tile(hess[None,:,:], (T, 1, 1))
 
+    def m_step(self, discrete_expectations, continuous_expectations,
+               datas, inputs, masks, tags,
+               optimizer="bfgs", maxiter=100, **kwargs):
+        assert self.single_subspace, "Only implemented for a single emission model"
+        # Return exact m-step updates for C, F, d, and inv_etas
+        # stack across all datas
+        x = np.concatenate(continuous_expectations,axis=0)
+        T, D = np.shape(x)
+        if self.M == 0:
+            xb = np.hstack((np.ones((T,1)),x))
+        elif self.M > 0:
+            u = np.concatenate(inputs,axis=0)
+            xb = np.hstack((np.ones((T,1)),x,u))
+        y = np.concatenate(datas,axis=0)
+        params = (np.linalg.lstsq(xb.T@xb, xb.T@y, rcond=None)[0]).T
+        self.ds = params[:,0].reshape((1,self.N))
+        self.Cs = params[:,1:D+1].reshape((1,self.N,self.D))
+        if self.M > 0:
+            self.Fs = params[:,D+1:].reshape((1,self.N,self.M))
+        mu = np.dot(xb, params.T)
+        Sigma = (y-mu).T@(y-mu) / T
+        self.inv_etas = np.log(np.diag(Sigma)).reshape((1,self.N))
+
 
 class GaussianOrthogonalEmissions(_GaussianEmissionsMixin, _OrthogonalLinearEmissions):
 
