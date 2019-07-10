@@ -382,15 +382,12 @@ class GaussianEmissions(_GaussianEmissionsMixin, _LinearEmissions):
         assert self.single_subspace, "Only implemented for a single emission model"
         # Return exact m-step updates for C, F, d, and inv_etas
         # stack across all datas
-        x = np.concatenate(continuous_expectations,axis=0)
+        x = np.vstack(continuous_expectations)
+        u = np.vstack(inputs)
+        y = np.vstack(datas)
         T, D = np.shape(x)
-        if self.M == 0:
-            xb = np.hstack((np.ones((T,1)),x))
-        elif self.M > 0:
-            u = np.concatenate(inputs,axis=0)
-            xb = np.hstack((np.ones((T,1)),x,u))
-        y = np.concatenate(datas,axis=0)
-        params = (np.linalg.lstsq(xb.T@xb, xb.T@y, rcond=None)[0]).T
+        xb = np.hstack((np.ones((T,1)),x,u)) # design matrix
+        params = np.linalg.lstsq(xb.T@xb, xb.T@y, rcond=None)[0].T
         self.ds = params[:,0].reshape((1,self.N))
         self.Cs = params[:,1:D+1].reshape((1,self.N,self.D))
         if self.M > 0:
