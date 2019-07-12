@@ -22,6 +22,7 @@ from . import init_state_distns as isd
 from . import hierarchical as hier
 from . import emissions as emssn
 from . import hmm
+from . import variational as varinf
 
 from scipy.optimize import minimize
 
@@ -608,28 +609,24 @@ class SLDS(object):
 
             # Use Newton's method or LBFGS to find the argmax of the expected log joint
             scale = x0.size
+            obj = lambda x: neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
             if optimizer == "newton":
                 # Run Newtons method
-                obj = lambda x: neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
                 grad_func = lambda x: grad_neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
                 hess_func = lambda x: hessian_neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
                 x = newtons_method_block_tridiag_hessian(
                     x0, obj, grad_func, hess_func,
                     tolerance=continuous_tolerance, maxiter=continuous_maxiter)
-                assert np.all(np.isfinite(obj(x)))
-
             elif optimizer == "lbfgs":
                 # use LBFGS
-                T, D = x0.shape
-                obj_v = lambda x: neg_expected_log_joint(x.reshape((T,D)), Ez, Ezzp1, scale=scale)
-                grad_func_v = lambda x: grad_neg_expected_log_joint(x.reshape((T,D)), Ez, Ezzp1, scale=scale).ravel()
-                x = minimize(
-                      obj_v, x0.ravel(), method='L-BFGS-B', jac = grad_func_v,
-                      options={'ftol': continuous_tolerance, 'maxiter': continuous_maxiter}).x
-                assert np.all(np.isfinite(obj_v(x)))
-                x = x.reshape((T,D))
+                def _objective(params, itr):
+                    x = params
+                    return neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
+                x = lbfgs(_objective, x0, num_iters=continuous_maxiter,
+                          tol=continuous_tolerance)
 
             # Evaluate the Hessian at the mode
+            assert np.all(np.isfinite(obj(x)))
             J_diag, J_lower_diag = hessian_neg_expected_log_joint(x, Ez, Ezzp1)
 
             # Compute the Hessian vector product h = J * x = -H * x
@@ -708,9 +705,8 @@ class SLDS(object):
             elbo += np.sum(Ezzp1 * log_Ps)
             elbo += np.sum(Ez * log_likes)
 
-        # subtract log density of continuous samples and discrete entropy
-        elbo -= variational_posterior.log_density(continuous_samples)
-        elbo -= variational_posterior.entropy_discrete()
+        # add entropy of variational posterior
+        elbo += variational_posterior.entropy(continuous_samples)
 
         return elbo
 
@@ -769,9 +765,44 @@ class SLDS(object):
 
         return elbos
 
-    @ensure_variational_args_are_lists
-    def fit(self, variational_posterior, datas,
-            inputs=None, masks=None, tags=None, method="svi",
+    def _make_variational_posterior(self, variational_posterior, datas, inputs, masks, tags, method):
+        # Initialize the variational posterior
+        if isinstance(variational_posterior, str):
+            # Make a posterior of the specified type
+            _var_posteriors = dict(
+                meanfield=varinf.SLDSMeanFieldVariationalPosterior,
+                mf=varinf.SLDSMeanFieldVariationalPosterior,
+                lds=varinf.SLDSTriDiagVariationalPosterior,
+                tridiag=varinf.SLDSTriDiagVariationalPosterior,
+                structured_meanfield=varinf.SLDSStructuredMeanFieldVariationalPosterior
+                )
+
+            if variational_posterior not in _var_posteriors:
+                raise Exception("Invalid posterior: {}. Options are {}.".\
+                                format(variational_posterior, _var_posteriors.keys()))
+            posterior = _var_posteriors[variational_posterior](self, datas, inputs, masks, tags)
+
+        else:
+            # Check validity of given posterior
+            posterior = variational_posterior
+            assert isinstance(posterior, varinf.VariationalPosterior), \
+            "Given posterior must be an instance of ssm.variational.VariationalPosterior"
+
+        # Check that the posterior type works with the fitting method
+        if method in ["svi", "bbvi"]:
+            assert isinstance(posterior,
+                (varinf.SLDSMeanFieldVariationalPosterior, varinf.SLDSTriDiagVariationalPosterior)),\
+            "BBVI only supports 'meanfield' or 'lds' posteriors."
+
+        elif method in ["laplace_em"]:
+            assert isinstance(posterior, varinf.SLDSStructuredMeanFieldVariationalPosterior),\
+            "Laplace EM only supports 'structured' posterior."
+
+        return posterior
+
+    @ensure_args_are_lists
+    def fit(self, datas, inputs=None, masks=None, tags=None,
+            method="laplace_em", variational_posterior="structured_meanfield",
             initialize=True, **kwargs):
 
         """
@@ -784,13 +815,10 @@ class SLDS(object):
            Pros: simple and broadly applicable.  easy to implement.
            Cons: doesn't leverage model structure.  slow to converge.
 
-        2. Variational expectation maximization (vem): variational posterior
-           on the continuous states q(x) and a discrete Markov chain
-           posterior on the discrete states q(z). We use samples of q(x)
-           to approximate the log transition matrix (pairwise potentials)
-           and the log transition bias (unary potentials) for q(z).  From
-           these we can derive the necessary expectations wrt q(z) for
-           updating the model parameters theta.
+        2. Structured mean field: Maintain variational factors q(z) and q(x).
+           Update them using block mean field coordinate ascent, if we have a
+           Gaussian emission model and linear Gaussian dynamics, or using
+           a Laplace approximation for nonconjugate models.
 
         In the future, we could also consider some other possibilities, like:
 
@@ -799,13 +827,7 @@ class SLDS(object):
            use its weighted trajectories to get the discrete states and perform
            a Monte Carlo M-step.
 
-        4. Structured mean field: Maintain variational factors q(z) and q(x).
-           Update them using block mean field coordinate ascent, if we have a
-           Gaussian emission model and linear Gaussian dynamics, or using an
-           approximate update (e.g. a Laplace approximation) if we have a
-           nonconjugate model.
-
-        5. Gibbs sampling: As above, if we have a conjugate emission and
+        4. Gibbs sampling: As above, if we have a conjugate emission and
            dynamics model we can do block Gibbs sampling of the discrete and
            continuous states.
         """
@@ -813,26 +835,30 @@ class SLDS(object):
         # Specify fitting methods
         _fitting_methods = dict(svi=self._fit_svi,
                                 bbvi=self._fit_svi,
-                                vem=self._fit_variational_em,
                                 laplace_em=self._fit_laplace_em)
 
         # Deprecate "svi" as a method
-        warnings.warn("SLDS fitting method 'svi' will be renamed 'bbvi' in future releases.",
-                      category=DeprecationWarning)
+        if method == "svi":
+            warnings.warn("SLDS fitting method 'svi' will be renamed 'bbvi' in future releases.",
+                          category=DeprecationWarning)
 
         if method not in _fitting_methods:
             raise Exception("Invalid method: {}. Options are {}".\
                             format(method, _fitting_methods.keys()))
 
+        # Initialize the model parameters
         if initialize:
             self.initialize(datas, inputs, masks, tags)
 
-        return _fitting_methods[method](variational_posterior, datas, inputs, masks, tags,
-            learning=True, **kwargs)
+        # Initialize the variational posterior
+        posterior = self._make_variational_posterior(variational_posterior, datas, inputs, masks, tags, method)
+        elbos = _fitting_methods[method](posterior, datas, inputs, masks, tags, learning=True, **kwargs)
+        return elbos, posterior
 
-    @ensure_variational_args_are_lists
-    def approximate_posterior(self, variational_posterior, datas, inputs=None, masks=None, tags=None,
-                              method="svi", **kwargs):
+    @ensure_args_are_lists
+    def approximate_posterior(self, datas, inputs=None, masks=None, tags=None,
+                              method="laplace_em", variational_posterior="structured_meanfield",
+                              **kwargs):
         # Specify fitting methods
         _fitting_methods = dict(svi=self._fit_svi,
                                 bbvi=self._fit_svi,
@@ -843,8 +869,9 @@ class SLDS(object):
             raise Exception("Invalid method: {}. Options are {}".\
                             format(method, _fitting_methods.keys()))
 
-        return _fitting_methods[method](variational_posterior, datas, inputs, masks, tags,
-            learning=False, **kwargs)
+        # Initialize the variational posterior
+        posterior = self._make_variational_posterior(variational_posterior, datas, inputs, masks, tags, method)
+        return _fitting_methods[method](posterior, datas, inputs, masks, tags, learning=False, **kwargs)
 
 
 class LDS(SLDS):

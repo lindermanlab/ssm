@@ -55,20 +55,17 @@ print("Fitting LDS with SVI")
 # Create the model and initialize its parameters
 lds = ssm.LDS(N, D, emissions="gaussian")
 lds.initialize(y)
-# Create a variational posterior
-q_mf = SLDSMeanFieldVariationalPosterior(lds, y)
-q_mf_elbos = lds.fit(q_mf, y, num_iters=2000, initialize=False)
+q_mf_elbos, q_mf = lds.fit(y, method="bbvi", variational_posterior="mf", num_iters=5000, stepsize=0.1, initialize=False)
 # Get the posterior mean of the continuous states
 q_mf_x = q_mf.mean[0]
 # Smooth the data under the variational posterior
 q_mf_y = lds.smooth(q_mf_x, y)
 
 
-# print("Fitting LDS with SVI using structured variational posterior")
+print("Fitting LDS with SVI using structured variational posterior")
 lds = ssm.LDS(N, D, emissions="gaussian")
 lds.initialize(y)
-q_struct = SLDSTriDiagVariationalPosterior(lds, y)
-q_struct_elbos = lds.fit(q_struct, y, num_iters=2000, initialize=False)
+q_struct_elbos, q_struct = lds.fit(y, method="bbvi", variational_posterior="lds", num_iters=2000, stepsize=0.1, initialize=False)
 # Get the posterior mean of the continuous states
 q_struct_x = q_struct.mean[0]
 # Smooth the data under the variational posterior
@@ -77,8 +74,8 @@ q_struct_y = lds.smooth(q_struct_x, y)
 print("Fitting LDS with Laplace EM")
 lds = ssm.LDS(N, D, emissions="gaussian")
 lds.initialize(y)
-q_lem = SLDSStructuredMeanFieldVariationalPosterior(lds, y)
-q_lem_elbos = lds.fit(q_lem, y, num_iters=20, method="laplace_em", initialize=False)
+q_lem_elbos, q_lem = lds.fit(y, method="laplace_em", variational_posterior="structured_meanfield",
+                             num_iters=10, initialize=False)
 # Get the posterior mean of the continuous states
 q_lem_x = q_lem.mean_continuous_states[0]
 # Smooth the data under the variational posterior

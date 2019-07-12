@@ -70,6 +70,9 @@ class Transitions(object):
 
     def hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
+        warn("Analytical Hessian is not implemented for this transition class. \
+              Optimization via Laplace-EM may be slow. Consider using an \
+              alternative posterior and inference method.")
         T, D = data.shape
         obj = lambda x, E_zzp1: np.sum(E_zzp1 * self.log_transition_matrices(x, input, mask, tag))
         hess = hessian(obj)
@@ -248,8 +251,6 @@ class RecurrentTransitions(InputDrivenTransitions):
         hess = np.zeros((T-1,D,D))
         vtildes = np.exp(self.log_transition_matrices(data, input, mask, tag)) # normalized probabilities
         Ez = np.sum(expected_joints, axis=2) # marginal over z from T=1 to T-1
-        # import ipdb
-        # ipdb.set_trace()
         for k in range(self.K):
             vtilde = vtildes[:,k,:] # normalized probabilities given state k
             Rv = vtilde@self.Rs
@@ -257,7 +258,6 @@ class RecurrentTransitions(InputDrivenTransitions):
                     ( np.einsum('tn, ni, nj ->tij', -vtilde, self.Rs, self.Rs) \
                     + np.einsum('ti, tj -> tij', Rv, Rv))
         return hess
-        # return Transitions.hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints)
 
 class RecurrentOnlyTransitions(Transitions):
     """

@@ -71,6 +71,11 @@ class Observations(object):
     def smooth(self, expectations, data, input, tag):
         raise NotImplementedError
 
+    def hessian_expected_log_dynamics_prob(self, Ez, data, input, mask, tag=None):
+        # warnings.warn("Analytical Hessian is not implemented for this dynamics class. \
+        #                Optimization via Laplace-EM may be slow. Consider using an \
+        #                alternative posterior and inference method. ")
+        raise NotImplementedError
 
 class GaussianObservations(Observations):
     def __init__(self, K, D, M=0):
