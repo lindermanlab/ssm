@@ -28,6 +28,7 @@ color_names = ["windows blue",
 colors = sns.xkcd_palette(color_names)
 
 from ssm import LDS
+from ssm.util import random_rotation
 
 # Set the parameters of the HMM
 T = 1000   # number of time bins
