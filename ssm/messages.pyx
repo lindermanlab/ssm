@@ -155,7 +155,8 @@ cpdef grad_hmm_normalizer(double[:,:,::1] log_Ps,
 
     T = alphas.shape[0]
     K = alphas.shape[1]
-    assert log_Ps.shape[0] == d_log_Ps.shape[0] == T-1
+    assert (log_Ps.shape[0] == T-1) or (log_Ps.shape[0] == 1)
+    assert d_log_Ps.shape[0] == log_Ps.shape[0]
     assert log_Ps.shape[1] == d_log_Ps.shape[1] == K
     assert log_Ps.shape[2] == d_log_Ps.shape[2] == K
     assert d_log_pi0.shape[0] == K
@@ -166,6 +167,9 @@ cpdef grad_hmm_normalizer(double[:,:,::1] log_Ps,
     cdef double[::1] tmp1 = np.zeros((K,))
     cdef double[:, ::1] tmp2 = np.zeros((K, K))
 
+    # Trick for handling time-varying transition matrices
+    cdef int hetero = (log_Ps.shape[0] == T-1)
+
     dlse(alphas[T-1], d_log_likes[T-1])
     for t in range(T-1, 0, -1):
         # tmp2 = dLSE_da(alphas[t-1], log_Ps[t-1])
@@ -173,7 +177,7 @@ cpdef grad_hmm_normalizer(double[:,:,::1] log_Ps,
         #      = [dlse(alphas[t-1] + log_Ps[t-1, :, k]) for k in range(K)]
         for k in range(K):
             for j in range(K):
-                tmp1[j] = alphas[t-1, j] + log_Ps[t-1, j, k]
+                tmp1[j] = alphas[t-1, j] + log_Ps[(t-1) * hetero, j, k]
             dlse(tmp1, tmp2[k])
 
 
@@ -185,7 +189,7 @@ cpdef grad_hmm_normalizer(double[:,:,::1] log_Ps,
         #                     = d_log_likes[t, k] * tmp2[k, j]
         for j in range(K):
             for k in range(K):
-                d_log_Ps[t-1, j, k] = d_log_likes[t, k] * tmp2[k, j]
+                d_log_Ps[(t-1) * hetero, j, k] += d_log_likes[t, k] * tmp2[k, j]
 
         # d_log_likes[t-1] = d_log_likes[t].dot(dLSE_da(alphas[t-1], log_Ps[t-1]))
         #                  = d_log_likes[t].dot(tmp2)
@@ -197,3 +201,44 @@ cpdef grad_hmm_normalizer(double[:,:,::1] log_Ps,
     # d_log_pi0 = d_log_likes[0]
     for k in range(K):
         d_log_pi0[k] = d_log_likes[0, k]
+
+
+cpdef compute_stationary_expected_joints(
+    double[:,::1] alphas,
+    double[:,::1] betas,
+    double[:,::1] lls,
+    double[:,::1] log_P,
+    double[:,::1] E_zzp1):
+
+    cdef int T = alphas.shape[0]
+    cdef int K = alphas.shape[1]
+    assert betas.shape[0] == T and betas.shape[1] == K
+    assert lls.shape[0] == T and lls.shape[1] == K
+    assert log_P.shape[0] == K and log_P.shape[1] == K
+    assert E_zzp1.shape[0] == K and E_zzp1.shape[1] == K
+
+    cdef int i, j, t
+    cdef double maxv, tmpsum
+    cdef double[:, ::1] tmp = np.zeros((K, K))
+
+    # Compute the sum over time axis of the expected joints
+    for t in range(T-1):
+        maxv = -INFINITY
+        for i in range(K):
+            for j in range(K):
+                # Compute expectations in this batch
+                tmp[i, j] = alphas[t,i] + betas[t+1,j] + lls[t+1,j] + log_P[i, j]
+                if tmp[i, j] > maxv:
+                    maxv = tmp[i, j]
+
+        # safe exponentiate
+        tmpsum = 0.0
+        for i in range(K):
+            for j in range(K):
+                tmp[i, j] = exp(tmp[i, j] - maxv)
+                tmpsum += tmp[i, j]
+
+        # Add to expected joints
+        for i in range(K):
+            for j in range(K):
+                E_zzp1[i, j] += tmp[i, j] / (tmpsum + 1e-16)
