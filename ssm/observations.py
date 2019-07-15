@@ -10,7 +10,7 @@ from ssm.util import random_rotation, ensure_args_are_lists, \
     logistic, logit, one_hot, generalized_newton_studentst_dof, fit_linear_regression
 from ssm.preprocessing import interpolate_data
 from ssm.cstats import robust_ar_statistics
-from ssm.optimizers import adam, bfgs, rmsprop, sgd
+from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
 import ssm.stats as stats
 
 
@@ -46,9 +46,9 @@ class Observations(object):
     def m_step(self, expectations, datas, inputs, masks, tags,
                optimizer="bfgs", **kwargs):
         """
-        If M-step cannot be done in closed form for the transitions, default to SGD.
+        If M-step cannot be done in closed form for the observations, default to SGD.
         """
-        optimizer = dict(adam=adam, bfgs=bfgs, rmsprop=rmsprop, sgd=sgd)[optimizer]
+        optimizer = dict(adam=adam, bfgs=bfgs, lbfgs=lbfgs, rmsprop=rmsprop, sgd=sgd)[optimizer]
 
         # expected log joint
         def _expected_log_joint(expectations):
@@ -71,6 +71,11 @@ class Observations(object):
     def smooth(self, expectations, data, input, tag):
         raise NotImplementedError
 
+    def hessian_expected_log_dynamics_prob(self, Ez, data, input, mask, tag=None):
+        # warnings.warn("Analytical Hessian is not implemented for this dynamics class. \
+        #                Optimization via Laplace-EM may be slow. Consider using an \
+        #                alternative posterior and inference method. ")
+        raise NotImplementedError
 
 class GaussianObservations(Observations):
     def __init__(self, K, D, M=0):
@@ -202,9 +207,9 @@ class DiagonalGaussianObservations(Observations):
         x = np.concatenate(datas)
         weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
-            self.mus[k] = np.average(x, axis=0, weights=weights[:,k])
+            self.mus[k] = np.average(x, axis=0, weights=weights[:, k])
             sqerr = (x - self.mus[k])**2
-            self._log_sigmasq[k] = np.log(np.average(sqerr, weights=weights[:,k], axis=0))
+            self._log_sigmasq[k] = np.log(np.average(sqerr, weights=weights[:, k], axis=0))
 
     def smooth(self, expectations, data, input, tag):
         """
@@ -878,8 +883,22 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             resid = y[None, :, :] - yhat
             sqerr += np.einsum('tk,kti,ktj->kij', Ez, resid, resid)
             weight += np.sum(Ez, axis=0)
+        Sigmas = sqerr / weight[:, None, None] + 1e-8 * np.eye(D)
 
-        self.Sigmas = sqerr / weight[:, None, None] + 1e-8 * np.eye(D)
+        # If any states are unused, set their parameters to a perturbation of a used state
+        usage = sum([Ez.sum(0) for Ez in Ezs])
+        unused = np.where(usage < 1)[0]
+        used = np.where(usage > 1)[0]
+        if len(unused) > 0:
+            for k in unused:
+                i = npr.choice(used)
+                self.As[k] = self.As[i] + 0.01 * npr.randn(*self.As[i].shape)
+                self.Vs[k] = self.Vs[i] + 0.01 * npr.randn(*self.Vs[i].shape)
+                self.bs[k] = self.bs[i] + 0.01 * npr.randn(*self.bs[i].shape)
+                Sigmas[k] = Sigmas[i]
+
+        # Store the updated covariances
+        self.Sigmas = Sigmas
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, As, bs, Vs = self.D, self.As, self.bs, self.Vs
@@ -897,6 +916,36 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
             S = np.linalg.cholesky(self.Sigmas[z]) if with_noise else 0
             return mu + np.dot(S, npr.randn(D))
+
+    def hessian_expected_log_dynamics_prob(self, Ez, data, input, mask, tag=None):
+        assert np.all(mask), "Cannot compute Hessian of autoregressive obsevations with missing data."
+        assert self.lags == 1, "Does not compute Hessian of autoregressive observations with lags > 1"
+        T = data.shape[0]
+        K = self.K
+        D = self.D
+
+        # diagonal blocks, size ((T, D, D))
+        diagonal_blocks = np.zeros((T, D, D))
+
+        # initial distribution contributes a Gaussian term to first diagonal block
+        diagonal_blocks[0] = -1 * np.sum(Ez[0, :, None, None] * np.linalg.inv(self.Sigmas_init), axis=0)
+
+        # first part is transition dynamics - goes to all terms except final one
+        # E_q(z) x_{t} A_{z_t+1}.T Sigma_{z_t+1}^{-1} A_{z_t+1} x_{t}
+        inv_Sigmas = np.linalg.inv(self.Sigmas)
+        dynamics_terms = np.array([A.T@inv_Sigma@A for A, inv_Sigma in zip(self.As, inv_Sigmas)]) # A^T Qinv A terms
+        diagonal_blocks[:-1] += -1 * np.sum(Ez[1:,:,None,None] * dynamics_terms[None,:], axis=1)
+
+        # second part of diagonal blocks are inverse covariance matrices - goes to all but first time bin
+        # E_q(z) x_{t+1} Sigma_{z_t+1}^{-1} x_{t+1}
+        diagonal_blocks[1:] += -1 * np.sum(Ez[1:,:,None,None] * inv_Sigmas[None,:], axis=1)
+
+        # lower diagonal blocks are (T-1,D,D):
+        # E_q(z) x_{t+1} Sigma_{z_t+1}^{-1} A_{z_t+1} x_t
+        off_diag_terms = np.array([inv_Sigma@A for A, inv_Sigma in zip(self.As, inv_Sigmas)])
+        lower_diagonal_blocks = np.sum(Ez[1:,:,None,None] * off_diag_terms[None,:], axis=1)
+
+        return diagonal_blocks, lower_diagonal_blocks
 
 
 class AutoRegressiveObservationsNoInput(AutoRegressiveObservations):

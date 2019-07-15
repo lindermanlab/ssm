@@ -5,6 +5,7 @@ import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.misc import logsumexp
 from autograd.scipy.stats import dirichlet
+from autograd import hessian
 
 from ssm.util import one_hot, logistic, relu, rle, \
     fit_multiclass_logistic_regression, \
@@ -68,6 +69,16 @@ class Transitions(object):
             optimizer(_objective, self.params, num_iters=num_iters,
                       state=optimizer_state, full_output=True, **kwargs)
 
+    def hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+        # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
+        warn("Analytical Hessian is not implemented for this transition class. \
+              Optimization via Laplace-EM may be slow. Consider using an \
+              alternative posterior and inference method.")
+        T, D = data.shape
+        obj = lambda x, E_zzp1: np.sum(E_zzp1 * self.log_transition_matrices(x, input, mask, tag))
+        hess = hessian(obj)
+        terms = np.array([hess(x[None,:], Ezzp1) for x, Ezzp1 in zip(data, expected_joints)])
+        return terms
 
 class StationaryTransitions(Transitions):
     """
@@ -108,6 +119,10 @@ class StationaryTransitions(Transitions):
         P /= P.sum(axis=-1, keepdims=True)
         self.log_Ps = np.log(P)
 
+    def hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+        # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
+        T, D = data.shape
+        return np.zeros((T-1, D, D))
 
 class StickyTransitions(StationaryTransitions):
     """
@@ -136,6 +151,10 @@ class StickyTransitions(StationaryTransitions):
         P = expected_joints / expected_joints.sum(axis=1, keepdims=True)
         self.log_Ps = np.log(P)
 
+    def hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+        # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
+        T, D = data.shape
+        return np.zeros((T-1, D, D))
 
 class InputDrivenTransitions(StickyTransitions):
     """
@@ -184,6 +203,10 @@ class InputDrivenTransitions(StickyTransitions):
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
+    def hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+        # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
+        T, D = data.shape
+        return np.zeros((T-1, D, D))
 
 class RecurrentTransitions(InputDrivenTransitions):
     """
@@ -224,6 +247,19 @@ class RecurrentTransitions(InputDrivenTransitions):
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
+    def hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+        # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
+        T, D = data.shape
+        hess = np.zeros((T-1,D,D))
+        vtildes = np.exp(self.log_transition_matrices(data, input, mask, tag)) # normalized probabilities
+        Ez = np.sum(expected_joints, axis=2) # marginal over z from T=1 to T-1
+        for k in range(self.K):
+            vtilde = vtildes[:,k,:] # normalized probabilities given state k
+            Rv = vtilde@self.Rs
+            hess += Ez[:,k][:,None,None] * \
+                    ( np.einsum('tn, ni, nj ->tij', -vtilde, self.Rs, self.Rs) \
+                    + np.einsum('ti, tj -> tij', Rv, Rv))
+        return hess
 
 class RecurrentOnlyTransitions(Transitions):
     """
@@ -266,6 +302,15 @@ class RecurrentOnlyTransitions(Transitions):
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
+    def hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+        # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
+        T, D = data.shape
+        v = np.dot(input[1:], self.Ws.T) + np.dot(data[:-1], self.Rs.T) + self.r
+        shifted_exp = np.exp(v - np.max(v,axis=1,keepdims=True))
+        vtilde = shifted_exp / np.sum(shifted_exp,axis=1,keepdims=True) # normalized probabilities
+        Rv = vtilde@self.Rs
+        return np.einsum('tn, ni, nj ->tij', -vtilde, self.Rs, self.Rs) \
+               + np.einsum('ti, tj -> tij', Rv, Rv)
 
 class RBFRecurrentTransitions(InputDrivenTransitions):
     """
@@ -568,4 +613,3 @@ class NegativeBinomialSemiMarkovTransitions(Transitions):
 
         # Reset the transition matrix
         self._transition_matrix = None
-
