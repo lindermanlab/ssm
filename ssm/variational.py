@@ -1,7 +1,6 @@
 import autograd.numpy as np
 import autograd.numpy.random as npr
 
-from . import SLDS
 from ssm.emissions import _LinearEmissions
 from ssm.preprocessing import interpolate_data
 from ssm.primitives import lds_log_probability, lds_sample, lds_mean, \
@@ -93,7 +92,6 @@ class SLDSMeanFieldVariationalPosterior(VariationalPosterior):
             __init__(model, datas, masks, tags)
 
         # Initialize the parameters
-        assert isinstance(model, SLDS)
         self.D = model.D
         self.Ts = [data.shape[0] for data in datas]
         self.initial_variance = initial_variance
@@ -157,7 +155,6 @@ class SLDSTriDiagVariationalPosterior(VariationalPosterior):
             __init__(model, datas, masks, tags)
 
         # Initialize the parameters
-        assert isinstance(model, SLDS)
         self.D = model.D
         self.Ts = [data.shape[0] for data in datas]
         self.initial_variance = initial_variance
@@ -234,7 +231,6 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
             __init__(model, datas, masks, tags)
 
         # Initialize the parameters
-        assert isinstance(model, SLDS)
         self.D = model.D
         self.K = model.K
         self.Ts = [data.shape[0] for data in datas]
@@ -254,11 +250,13 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
 
         # Initialize q(x) = = N(J, h) where J is block tridiagonal precision
         # and h is the linear potential.  The mapping to mean parameters is
-        # mu = J^{-1} h and Sigma = J^{-1}.  Initialize J to be identity so
-        # that h is the mean.
-        J_diag = np.tile(self.initial_variance * np.eye(D)[None, :, :], (T, 1, 1))
+        # mu = J^{-1} h and Sigma = J^{-1}.  Initialize J to inverse of
+        # initial variance and scale h accordingly, so the mean is the output
+        # of the emissions invert function.
+        J_diag = np.tile(1.0 / self.initial_variance * np.eye(D)[None, :, :], (T, 1, 1))
         J_lower_diag = np.zeros((T-1, D, D))
-        h = self.model.emissions.invert(data, input=input, mask=mask, tag=tag)
+        h = (1.0 / self.initial_variance) \
+            * self.model.emissions.invert(data, input=input, mask=mask, tag=tag)
 
         return dict(log_pi0=log_pi0,
                     log_Ps=log_Ps,
@@ -298,22 +296,51 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
     def mean(self):
         return list(zip(self.mean_discrete_states, self.mean_continuous_states))
 
-    def log_density(self, sample):
-        # This should compute the log density q(x) and q(z).
-        # Given a sample \hat{x} from q(x), this returns the log probability
-        # of that sample. It also returns the entropy of q(z).
+    def entropy(self, sample=None):
+        """
+        Compute the entropy of the variational posterior distirbution.
 
-        logq = 0
+        Recall that under the structured mean field approximation
+
+        H[q(z)q(x)] = -E_{q(z)q(x)}[log q(z) + log q(x)]
+                    = -E_q(z)[log q(z)] - E_q(x)[log q(x)]
+                    = H[q(z)] + H[q(x)].
+
+        That is, the entropy separates into the sum of entropies for the
+        discrete and continuous states.
+
+        For each one, we have
+
+        E_q(u)[log q(u)] = E_q(u) [log q(u_1) + sum_t log q(u_t | u_{t-1}) + loq q(u_t) - log Z]
+                         = E_q(u_1)[log q(u_1)] + sum_t E_{q(u_t, u_{t-1}[log q(u_t | u_{t-1})]
+                             + E_q(u_t)[loq q(u_t)] - log Z
+
+        where u \in {z, x} and log Z is the log normalizer.  This shows that we just need the
+        posterior expectations and potentials, and the log normalizer of the distribution.
+
+        Note
+        ----
+        We haven't implemented the exact calculations for the continuous states yet,
+        so for now we're approximating the continuous state entropy via samples.
+        """
+
+        # Sample the continuous states
+        if sample is None:
+            sample = self.sample_continuous_states()
+        else:
+            assert isinstance(sample, list) and len(sample) == len(self.datas)
+
+        negentropy = 0
         for s, prms in zip(sample, self.params):
 
             # 1. Compute log q(x) of samples of x
-            logq += block_tridiagonal_log_probability(s, prms["J_diag"], prms["J_lower_diag"], prms["h"])
+            negentropy += block_tridiagonal_log_probability(s, prms["J_diag"], prms["J_lower_diag"], prms["h"])
 
             # 2. Compute E_{q(z)}[ log q(z) ]
             (Ez, Ezzp1, normalizer) = hmm_expected_states(prms["log_pi0"], prms["log_Ps"], prms["log_likes"])
-            logq -= normalizer # -log Z
-            logq += np.sum(Ez[0] * prms["log_pi0"]) # initial factor
-            logq += np.sum(Ez * prms["log_likes"]) # unitary factors
-            logq += np.sum(Ezzp1 * prms["log_Ps"]) # pairwise factors
+            negentropy -= normalizer # -log Z
+            negentropy += np.sum(Ez[0] * prms["log_pi0"]) # initial factor
+            negentropy += np.sum(Ez * prms["log_likes"]) # unitary factors
+            negentropy += np.sum(Ezzp1 * prms["log_Ps"]) # pairwise factors
 
-        return logq
+        return -negentropy

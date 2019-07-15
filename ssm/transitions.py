@@ -70,6 +70,9 @@ class Transitions(object):
 
     def hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
+        warn("Analytical Hessian is not implemented for this transition class. \
+              Optimization via Laplace-EM may be slow. Consider using an \
+              alternative posterior and inference method.")
         T, D = data.shape
         obj = lambda x, E_zzp1: np.sum(E_zzp1 * self.log_transition_matrices(x, input, mask, tag))
         hess = hessian(obj)
@@ -243,7 +246,18 @@ class RecurrentTransitions(InputDrivenTransitions):
         Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
     def hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
-        Transitions.hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints)
+        # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
+        T, D = data.shape
+        hess = np.zeros((T-1,D,D))
+        vtildes = np.exp(self.log_transition_matrices(data, input, mask, tag)) # normalized probabilities
+        Ez = np.sum(expected_joints, axis=2) # marginal over z from T=1 to T-1
+        for k in range(self.K):
+            vtilde = vtildes[:,k,:] # normalized probabilities given state k
+            Rv = vtilde@self.Rs
+            hess += Ez[:,k][:,None,None] * \
+                    ( np.einsum('tn, ni, nj ->tij', -vtilde, self.Rs, self.Rs) \
+                    + np.einsum('ti, tj -> tij', Rv, Rv))
+        return hess
 
 class RecurrentOnlyTransitions(Transitions):
     """
@@ -289,12 +303,12 @@ class RecurrentOnlyTransitions(Transitions):
     def hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
         T, D = data.shape
-        v = [self.Rs @ data[t] + self.Ws @ input[t+1] + self.r for t in range(T-1)]
-        vtilde = [np.exp(vt - np.max(vt)) / np.sum(np.exp(vt - np.max(vt))) for vt in v]
-        terms = np.array([-1.0 * self.Rs.T @ np.diag(vt) @ self.Rs
-                           + self.Rs.T@ np.outer(vt,vt) @ self.Rs
-                          for vt in vtilde])
-        return terms
+        v = np.dot(input[1:], self.Ws.T) + np.dot(data[:-1], self.Rs.T) + self.r
+        shifted_exp = np.exp(v - np.max(v,axis=1,keepdims=True))
+        vtilde = shifted_exp / np.sum(shifted_exp,axis=1,keepdims=True) # normalized probabilities
+        Rv = vtilde@self.Rs
+        return np.einsum('tn, ni, nj ->tij', -vtilde, self.Rs, self.Rs) \
+               + np.einsum('ti, tj -> tij', Rv, Rv)
 
 class RBFRecurrentTransitions(InputDrivenTransitions):
     """

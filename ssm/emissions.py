@@ -1,3 +1,5 @@
+from warnings import warn
+
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.special import gammaln
@@ -6,6 +8,7 @@ from autograd import hessian
 from ssm.util import ensure_args_are_lists, \
     logistic, logit, softplus, inv_softplus
 from ssm.preprocessing import interpolate_data, pca_with_imputation
+from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
 
 
 # Observation models for SLDS
@@ -56,6 +59,9 @@ class Emissions(object):
 
     def hessian_log_emissions_prob(self, data, input, mask, tag, x):
         assert self.single_subspace, "Only works with a single emission model"
+        warn("Analytical Hessian is not implemented for this Emissions class. \
+              Optimization via Laplace-EM may be slow. Consider using an \
+              alternative posterior and inference method.")
         # Return (T, D, D) array of blocks for the diagonal of the Hessian
         T, D = data.shape
         obj = lambda xt, datat, inputt, maskt: \
@@ -64,6 +70,31 @@ class Emissions(object):
         terms = np.array([np.squeeze(hess(xt, datat, inputt, maskt))
                           for xt, datat, inputt, maskt in zip(x, data, input, mask)])
         return terms
+
+    def m_step(self, discrete_expectations, continuous_expectations,
+               datas, inputs, masks, tags,
+               optimizer="bfgs", maxiter=100, **kwargs):
+        """
+        If M-step in Laplace-EM cannot be done in closed form for the emissions, default to SGD.
+        """
+        optimizer = dict(adam=adam, bfgs=bfgs, lbfgs=lbfgs, rmsprop=rmsprop, sgd=sgd)[optimizer]
+
+        # expected log likelihood
+        T = sum([data.shape[0] for data in datas])
+        def _objective(params, itr):
+            self.params = params
+            obj = 0
+            obj += self.log_prior()
+            for data, input, mask, tag, x, (Ez, _, _) in \
+                zip(datas, inputs, masks, tags, continuous_expectations, discrete_expectations):
+                obj += np.sum(Ez * self.log_likelihoods(data, input, mask, tag, x))
+            return -obj / T
+
+        # Optimize emissions log-likelihood
+        self.params = optimizer(_objective, self.params,
+                                num_iters=maxiter,
+                                suppress_warnings=True,
+                                **kwargs)
 
 
 # Many emissions models start with a linear layer
@@ -350,6 +381,26 @@ class GaussianEmissions(_GaussianEmissionsMixin, _LinearEmissions):
         hess = -1.0 * self.Cs[0].T@np.diag( 1.0 / np.exp(self.inv_etas[0]) )@self.Cs[0]
         return np.tile(hess[None,:,:], (T, 1, 1))
 
+    def m_step(self, discrete_expectations, continuous_expectations,
+               datas, inputs, masks, tags,
+               optimizer="bfgs", maxiter=100, **kwargs):
+        assert self.single_subspace, "Only implemented for a single emission model"
+        # Return exact m-step updates for C, F, d, and inv_etas
+        # stack across all datas
+        x = np.vstack(continuous_expectations)
+        u = np.vstack(inputs)
+        y = np.vstack(datas)
+        T, D = np.shape(x)
+        xb = np.hstack((np.ones((T,1)),x,u)) # design matrix
+        params = np.linalg.lstsq(xb.T@xb, xb.T@y, rcond=None)[0].T
+        self.ds = params[:,0].reshape((1,self.N))
+        self.Cs = params[:,1:D+1].reshape((1,self.N,self.D))
+        if self.M > 0:
+            self.Fs = params[:,D+1:].reshape((1,self.N,self.M))
+        mu = np.dot(xb, params.T)
+        Sigma = (y-mu).T@(y-mu) / T
+        self.inv_etas = np.log(np.diag(Sigma)).reshape((1,self.N))
+
 
 class GaussianOrthogonalEmissions(_GaussianEmissionsMixin, _OrthogonalLinearEmissions):
 
@@ -379,7 +430,7 @@ class _StudentsTEmissionsMixin(object):
     def __init__(self, N, K, D, M=0, single_subspace=True, **kwargs):
         super(_StudentsTEmissionsMixin, self).__init__(N, K, D, M, single_subspace=single_subspace, **kwargs)
         self.inv_etas = -4 + npr.randn(1, N) if single_subspace else npr.randn(K, N)
-        self.inv_nus = np.log(4) * np.ones(1, N) if single_subspace else np.log(4) * np.ones(K, N)
+        self.inv_nus = np.log(4) * np.ones((1, N)) if single_subspace else np.log(4) * np.ones(K, N)
 
     @property
     def params(self):

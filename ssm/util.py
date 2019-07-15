@@ -78,7 +78,7 @@ def random_rotation(n, theta=None):
 
     rot = np.array([[np.cos(theta), -np.sin(theta)],
                     [np.sin(theta), np.cos(theta)]])
-    out = np.zeros((n, n))
+    out = np.eye(n)
     out[:2, :2] = rot
     q = np.linalg.qr(np.random.randn(n, n))[0]
     return q.dot(out).dot(q.T)
@@ -434,10 +434,11 @@ def fit_negative_binomial_integer_r(xs, r_min=1, r_max=20):
 
 def newtons_method_block_tridiag_hessian(
     x0, obj, grad_func, hess_func,
-    stepsize=0.75, tolerance=1e-4, maxiter=100, backtracking=True):
+    tolerance=1e-4, maxiter=100):
     """
     Newton's method to minimize a positive definite function with a
     block tridiagonal Hessian matrix.
+    Algorithm 9.5, Boyd & Vandenberghe, 2004.
     """
     x = x0
     is_converged = False
@@ -446,17 +447,19 @@ def newtons_method_block_tridiag_hessian(
         H_diag, H_lower_diag = hess_func(x)
         g = grad_func(x)
         dx = -1.0 * solve_symm_block_tridiag(H_diag, H_lower_diag, g)
-        if backtracking:
-            stepsize = backtracking_line_search(x, dx, obj, g)
+        lambdasq = np.dot(g.ravel(), -1.0*dx.ravel())
+        if lambdasq / 2.0 <= tolerance:
+            is_converged = True
+            break
+        stepsize = backtracking_line_search(x, dx, obj, g)
         x = x + stepsize * dx
-        is_converged = np.mean(np.abs(dx)) < tolerance
         count += 1
         if count > maxiter:
             break
 
-    # if not is_converged:
-        # warn("Newton's method failed to converge in {} iterations. "
-             # "Final mean abs(dx): {}".format(maxiter, np.mean(np.abs(dx))))
+    if not is_converged:
+        warn("Newton's method failed to converge in {} iterations. "
+             "Final mean abs(dx): {}".format(maxiter, np.mean(np.abs(dx))))
 
     return x
 
@@ -464,9 +467,12 @@ def backtracking_line_search(x0, dx, obj, g, stepsize = 1.0, min_stepsize=1e-8,
                              alpha=0.2, beta=0.7):
     """
     A backtracking line search for the step size in Newton's method.
-    Chapter 9, Boyd & Vandenberghe, 2004.
+    Algorithm 9.2, Boyd & Vandenberghe, 2004.
     - dx is the descent direction
     - g is the gradient evaluated at x0
+    - alpha in (0,0.5) is fraction of decrease in objective predicted  by
+        a linear extrapolation that we will accept
+    - beta in (0,1) is step size reduction factor
     """
     x = x0
 

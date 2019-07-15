@@ -29,34 +29,37 @@ z_test, x_test, y_test = true_slds.sample(T)
 
 # Fit an SLDS with mean field posterior
 print("Fitting SLDS with SVI using structured variational posterior")
-slds = ssm.SLDS(N, K, D, emissions="bernoulli")
+slds = ssm.SLDS(N, K, D, emissions="bernoulli_orthog")
 slds.initialize(y)
+q_mf_elbos, q_mf = slds.fit(y, method="bbvi",
+                               variational_posterior="mf",
+                               initialize=False, num_iters=1000)
+q_mf_x = q_mf.mean[0]
+q_mf_y = slds.smooth(q_mf_x, y)
+# Find the permutation that matches the true and inferred states
+slds.permute(find_permutation(z, slds.most_likely_states(q_mf_x, y)))
+q_mf_z = slds.most_likely_states(q_mf_x, y)
 
-# q_mf = SLDSMeanFieldVariationalPosterior(slds, y_masked, masks=mask)
-# q_mf_elbos = slds.fit(q_mf, y_masked, masks=mask, num_iters=1000, initialize=False)
-# q_mf_x = q_mf.mean[0]
-# q_mf_y = slds.smooth(q_mf_x, y)
-
-# # Find the permutation that matches the true and inferred states
-# slds.permute(find_permutation(z, slds.most_likely_states(q_mf_x, y)))
-# q_mf_z = slds.most_likely_states(q_mf_x, y)
-
-# # Do the same with the structured posterior
+# Do the same with the structured posterior
 # print("Fitting SLDS with SVI using structured variational posterior")
-# slds = ssm.SLDS(N, K, D, emissions="gaussian")
-# slds.initialize(y_masked, masks=mask)
-
-# q_struct = SLDSTriDiagVariationalPosterior(slds, y_masked, masks=mask)
-# q_struct_elbos = slds.fit(q_struct, y_masked, masks=mask, num_iters=1000, initialize=False)
+# slds = ssm.SLDS(N, K, D, emissions="bernoulli")
+# slds.initialize(y)
+# q_struct_elbos, q_struct = slds.fit(y, method="bbvi",
+#                                variational_posterior="tridiag",
+#                                initialize=False, num_iters=1000)
 # q_struct_x = q_struct.mean[0]
 # q_struct_y = slds.smooth(q_struct_x, y)
-
 # # Find the permutation that matches the true and inferred states
 # slds.permute(find_permutation(z, slds.most_likely_states(q_struct_x, y)))
 # q_struct_z = slds.most_likely_states(q_struct_x, y)
 
-q_laplace_em = SLDSStructuredMeanFieldVariationalPosterior(slds, y)
-q_lem_elbos = slds.fit(q_laplace_em, y, method="laplace_em", num_iters=50, initialize=False)
+# Do the same with the structured posterior
+print("Fitting SLDS with Laplace-EM")
+slds = ssm.SLDS(N, K, D, emissions="bernoulli_orthog")
+slds.initialize(y)
+q_lem_elbos, q_laplace_em = slds.fit(y, method="laplace_em",
+                               variational_posterior="structured_meanfield",
+                               initialize=False, num_iters=50)
 q_lem_Ez, q_lem_x = q_laplace_em.mean[0]
 q_lem_y = slds.smooth(q_lem_x, y)
 

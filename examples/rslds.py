@@ -138,17 +138,12 @@ rslds_svi = ssm.SLDS(D_obs, K, D_latent,
 # the posterior constructor initialization looks at the rSLDS parameters.
 rslds_svi.initialize(y)
 
-# Uncomment this to fit with stochastic variational inference instead
-q_svi = SLDSTriDiagVariationalPosterior(rslds_svi, y)
-q_elbos_svi = rslds_svi.fit(q_svi, y, method="svi", num_iters=1000, initialize=False)
+# Fit with stochastic variational inference
+q_elbos_svi, q_svi = rslds_svi.fit(y, method="bbvi",
+                               variational_posterior="tridiag",
+                               initialize=False, num_iters=1000)
 xhat_svi = q_svi.mean[0]
 zhat_svi = rslds_svi.most_likely_states(xhat_svi, y)
-
-# Uncomment this to fit with variational EM
-# q_vem = SLDSTriDiagVariationalPosterior(rslds, y)
-# elbos = rslds.fit(q_vem, y, method="vem", num_iters=500, initialize=False)
-# xhat = q_vem.mean[0]
-# zhat = rslds.most_likely_states(xhat, y)
 
 # Fit with Laplace EM
 rslds_lem = ssm.SLDS(D_obs, K, D_latent,
@@ -157,21 +152,16 @@ rslds_lem = ssm.SLDS(D_obs, K, D_latent,
              emissions="gaussian_orthog",
              single_subspace=True)
 rslds_lem.initialize(y)
-q_lem = SLDSStructuredMeanFieldVariationalPosterior(rslds_lem, y)
-q_lem_elbos = rslds_lem.fit(q_lem, y, method="laplace_em", initialize=False,
-                  num_iters=100, alpha=0)
+q_elbos_lem, q_lem = rslds_lem.fit(y, method="laplace_em",
+                               variational_posterior="structured_meanfield",
+                               initialize=False, num_iters=100, alpha=0.0)
 xhat_lem = q_lem.mean_continuous_states[0]
 zhat_lem = rslds_lem.most_likely_states(xhat_lem, y)
 
 # Plot some results
-plt.figure(figsize=[8,4])
-plt.subplot(121)
+plt.figure()
 plt.plot(q_elbos_svi, label="SVI")
-plt.legend()
-plt.xlabel("Iteration")
-plt.ylabel("ELBO")
-plt.subplot(122)
-plt.plot(q_lem_elbos[1:], label="Laplace-EM")
+plt.plot(q_elbos_lem[1:], label="Laplace-EM")
 plt.legend()
 plt.xlabel("Iteration")
 plt.ylabel("ELBO")
