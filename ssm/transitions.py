@@ -9,7 +9,7 @@ from autograd import hessian
 
 from ssm.util import one_hot, logistic, relu, rle, \
     fit_multiclass_logistic_regression, \
-    fit_negative_binomial_integer_r
+    fit_negative_binomial_integer_r, ensure_args_are_lists
 from ssm.stats import multivariate_normal_logpdf
 from ssm.optimizers import adam, bfgs, lbfgs, rmsprop, sgd
 
@@ -27,7 +27,8 @@ class Transitions(object):
     def params(self, value):
         raise NotImplementedError
 
-    def initialize(self, datas, inputs, masks, tags):
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
         pass
 
     def permute(self, perm):
@@ -110,7 +111,8 @@ class StationaryTransitions(Transitions):
     def log_transition_matrices(self, data, input, mask, tag):
         T = data.shape[0]
         log_Ps = self.log_Ps - logsumexp(self.log_Ps, axis=1, keepdims=True)
-        return np.tile(log_Ps[None, :, :], (T-1, 1, 1))
+        # return np.tile(log_Ps[None, :, :], (T-1, 1, 1))
+        return log_Ps[None, :, :]
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         P = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations]) + 1e-16
@@ -352,7 +354,8 @@ class RBFRecurrentTransitions(InputDrivenTransitions):
     def Sigmas(self):
         return np.matmul(self._sqrt_Sigmas, np.swapaxes(self._sqrt_Sigmas, -1, -2))
 
-    def initialize(self, datas, inputs, masks, tags):
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
         # Fit a GMM to the data to set the means and covariances
         from sklearn.mixture import GaussianMixture
         gmm = GaussianMixture(self.K, covariance_type="full")

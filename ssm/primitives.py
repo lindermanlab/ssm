@@ -58,7 +58,7 @@ defvjp(hmm_normalizer,
        partial(_make_grad_hmm_normalizer, 2))
 
 
-def hmm_expected_states(log_pi0, log_Ps, ll):
+def hmm_expected_states(log_pi0, log_Ps, ll, memlimit=2**31):
     T, K = ll.shape
 
     # Make sure everything is C contiguous
@@ -73,14 +73,42 @@ def hmm_expected_states(log_pi0, log_Ps, ll):
     betas = np.zeros((T, K))
     backward_pass(log_Ps, ll, betas)
 
+    # Compute E[z_t] for t = 1, ..., T
     expected_states = alphas + betas
     expected_states -= logsumexp(expected_states, axis=1, keepdims=True)
     expected_states = np.exp(expected_states)
 
-    expected_joints = alphas[:-1,:,None] + betas[1:,None,:] + ll[1:,None,:] + log_Ps
-    expected_joints -= expected_joints.max((1,2))[:,None, None]
-    expected_joints = np.exp(expected_joints)
-    expected_joints /= expected_joints.sum((1,2))[:,None,None]
+    # Compute E[z_t, z_{t+1}] for t = 1, ..., T-1
+    # Note that this is an array of size T*K*K, which can be quite large.
+    # To be a bit more frugal with memory, first check if the given log_Ps
+    # are TxKxK.  If so, instantiate the full expected joints as well, since
+    # we will need them for the M-step.  However, if log_Ps is 1xKxK then we
+    # know that the transition matrix is stationary, and all we need for the
+    # M-step is the sum of the expected joints.
+    stationary = (log_Ps.shape[0] == 1)
+    if not stationary:
+        expected_joints = alphas[:-1,:,None] + betas[1:,None,:] + ll[1:,None,:] + log_Ps
+        expected_joints -= expected_joints.max((1,2))[:,None, None]
+        expected_joints = np.exp(expected_joints)
+        expected_joints /= expected_joints.sum((1,2))[:,None,None]
+
+    else:
+        # Compute the sum over time axis of the expected joints
+        # Limit ourselves to approximately 1GB of memory, assuming
+        # the entries are float64's (8 bytes)
+        batch_size = int(memlimit / (8 * K * K))
+        assert batch_size > 0
+
+        expected_joints = np.zeros((1, K, K))
+        for start in range(0, T-1, batch_size):
+            stop = min(T-1, start + batch_size)
+
+            # Compute expectations in this batch
+            tmp = alphas[start:stop,:,None] + betas[start+1:stop+1,None,:] + ll[start+1:stop+1,None,:] + log_Ps
+            tmp -= tmp.max((1,2))[:,None, None]
+            tmp = np.exp(tmp)
+            tmp /= tmp.sum((1,2))[:,None,None]
+            expected_joints += tmp.sum(axis=0)
 
     return expected_states, expected_joints, normalizer
 
@@ -138,11 +166,17 @@ def viterbi(log_pi0, log_Ps, ll):
     """
     T, K = ll.shape
 
+    # Check if the transition matrices are stationary or
+    # time-varying (hetero)
+    hetero = (log_Ps.shape[0] == T-1)
+    if not hetero:
+        assert log_Ps.shape[0] == 1
+
     # Pass max-sum messages backward
     scores = np.zeros_like(ll)
     args = np.zeros_like(ll, dtype=int)
     for t in range(T-2,-1,-1):
-        vals = log_Ps[t] + scores[t+1] + ll[t+1]
+        vals = log_Ps[t * hetero] + scores[t+1] + ll[t+1]
         args[t+1] = vals.argmax(axis=1)
         scores[t] = vals.max(axis=1)
 
