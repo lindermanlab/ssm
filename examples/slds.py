@@ -6,9 +6,13 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 import ssm
-from ssm.variational import SLDSMeanFieldVariationalPosterior, SLDSTriDiagVariationalPosterior, \
-	SLDSStructuredMeanFieldVariationalPosterior
 from ssm.util import random_rotation, find_permutation
+
+import seaborn as sns
+color_names = ["windows blue", "red", "amber", "faded green"]
+colors = sns.xkcd_palette(color_names)
+sns.set_style("white")
+sns.set_context("talk")
 
 # Set the parameters of the HMM
 T = 10000   # number of time bins
@@ -40,7 +44,7 @@ q_mf_y = slds.smooth(q_mf_x, y)
 slds.permute(find_permutation(z, slds.most_likely_states(q_mf_x, y)))
 q_mf_z = slds.most_likely_states(q_mf_x, y)
 
-Do the same with the structured posterior
+# Do the same with the structured posterior
 print("Fitting SLDS with SVI using structured variational posterior")
 slds = ssm.SLDS(N, K, D, emissions="bernoulli")
 slds.initialize(y)
@@ -76,7 +80,8 @@ q_lem_x_trans = lr.predict(q_lem_x)
 # Plot the ELBOS
 plt.figure()
 plt.plot(q_lem_elbos, label="Laplace EM")
-# plt.plot(q_struct_elbos, label="LDS")
+plt.plot(q_struct_elbos, label="LDS")
+plt.plot(q_mf_elbos, label="MF")
 plt.xlabel("Iteration")
 plt.ylabel("ELBO")
 plt.legend()

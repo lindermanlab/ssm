@@ -16,8 +16,6 @@ sns.set_style("white")
 sns.set_context("talk")
 
 import ssm
-from ssm.variational import SLDSMeanFieldVariationalPosterior, \
-    SLDSTriDiagVariationalPosterior, SLDSStructuredMeanFieldVariationalPosterior
 from ssm.util import random_rotation
 
 # Global parameters
