@@ -40,18 +40,18 @@ q_mf_y = slds.smooth(q_mf_x, y)
 slds.permute(find_permutation(z, slds.most_likely_states(q_mf_x, y)))
 q_mf_z = slds.most_likely_states(q_mf_x, y)
 
-# Do the same with the structured posterior
-# print("Fitting SLDS with SVI using structured variational posterior")
-# slds = ssm.SLDS(N, K, D, emissions="bernoulli")
-# slds.initialize(y)
-# q_struct_elbos, q_struct = slds.fit(y, method="bbvi",
-#                                variational_posterior="tridiag",
-#                                initialize=False, num_iters=1000)
-# q_struct_x = q_struct.mean[0]
-# q_struct_y = slds.smooth(q_struct_x, y)
-# # Find the permutation that matches the true and inferred states
-# slds.permute(find_permutation(z, slds.most_likely_states(q_struct_x, y)))
-# q_struct_z = slds.most_likely_states(q_struct_x, y)
+Do the same with the structured posterior
+print("Fitting SLDS with SVI using structured variational posterior")
+slds = ssm.SLDS(N, K, D, emissions="bernoulli")
+slds.initialize(y)
+q_struct_elbos, q_struct = slds.fit(y, method="bbvi",
+                               variational_posterior="tridiag",
+                               initialize=False, num_iters=1000)
+q_struct_x = q_struct.mean[0]
+q_struct_y = slds.smooth(q_struct_x, y)
+# Find the permutation that matches the true and inferred states
+slds.permute(find_permutation(z, slds.most_likely_states(q_struct_x, y)))
+q_struct_z = slds.most_likely_states(q_struct_x, y)
 
 # Do the same with the structured posterior
 print("Fitting SLDS with Laplace-EM")

@@ -690,22 +690,22 @@ class _AutoRegressiveObservationsBase(Observations):
 
         # Instantaneous inputs
         mus = np.empty((K, T, D))
+        mus = []
         for k, (A, b, V, mu0) in enumerate(zip(As, bs, Vs, mu0s)):
             # Initial condition
-            mus[k, :self.lags] = mu0
+            mus_k_init = mu0 * np.zeros((self.lags, D))
 
-            # Inputs
-            mus[k, self.lags:] = np.dot(input[self.lags:, :M], V.T)
-
-            # Lagged data
+            # Subsequent means are determined by the AR process
+            mus_k_ar = np.dot(input[self.lags:, :M], V.T)
             for l in range(self.lags):
                 Al = A[:, l*D:(l + 1)*D]
-                mus[k, self.lags:] += np.dot(data[self.lags-l-1:-l-1], Al.T)
+                mus_k_ar = mus_k_ar + np.dot(data[self.lags-l-1:-l-1], Al.T)
+            mus_k_ar = mus_k_ar + b
 
-            # Bias
-            mus[k, self.lags:] += b
+            # Append concatenated mean
+            mus.append(np.vstack((mus_k_init, mus_k_ar)))
 
-        return mus
+        return np.array(mus)
 
     def smooth(self, expectations, data, input, tag):
         """

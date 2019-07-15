@@ -27,10 +27,7 @@ color_names = ["windows blue",
                "dark brown"]
 colors = sns.xkcd_palette(color_names)
 
-import ssm
-from ssm.variational import SLDSMeanFieldVariationalPosterior, SLDSTriDiagVariationalPosterior, \
-    SLDSStructuredMeanFieldVariationalPosterior
-from ssm.util import random_rotation, find_permutation
+from ssm import LDS
 
 # Set the parameters of the HMM
 T = 1000   # number of time bins
@@ -38,7 +35,7 @@ D = 2      # number of latent dimensions
 N = 10     # number of observed dimensions
 
 # Make an LDS with somewhat interesting dynamics parameters
-true_lds = ssm.LDS(N, D, emissions="gaussian")
+true_lds = LDS(N, D, emissions="gaussian")
 A0 = .99 * random_rotation(D, theta=np.pi/20)
 # S = (1 + 3 * npr.rand(D))
 S = np.arange(1, D+1)
@@ -53,7 +50,7 @@ _, x, y = true_lds.sample(T)
 print("Fitting LDS with SVI")
 
 # Create the model and initialize its parameters
-lds = ssm.LDS(N, D, emissions="gaussian")
+lds = LDS(N, D, emissions="gaussian")
 lds.initialize(y)
 q_mf_elbos, q_mf = lds.fit(y, method="bbvi", variational_posterior="mf", num_iters=5000, stepsize=0.1, initialize=False)
 # Get the posterior mean of the continuous states
@@ -63,7 +60,7 @@ q_mf_y = lds.smooth(q_mf_x, y)
 
 
 print("Fitting LDS with SVI using structured variational posterior")
-lds = ssm.LDS(N, D, emissions="gaussian")
+lds = LDS(N, D, emissions="gaussian")
 lds.initialize(y)
 q_struct_elbos, q_struct = lds.fit(y, method="bbvi", variational_posterior="lds", num_iters=2000, stepsize=0.1, initialize=False)
 # Get the posterior mean of the continuous states
@@ -72,7 +69,7 @@ q_struct_x = q_struct.mean[0]
 q_struct_y = lds.smooth(q_struct_x, y)
 
 print("Fitting LDS with Laplace EM")
-lds = ssm.LDS(N, D, emissions="gaussian")
+lds = LDS(N, D, emissions="gaussian")
 lds.initialize(y)
 q_lem_elbos, q_lem = lds.fit(y, method="laplace_em", variational_posterior="structured_meanfield",
                              num_iters=10, initialize=False)
