@@ -3,8 +3,7 @@ import warnings
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
-from autograd.scipy.misc import logsumexp
-from autograd.scipy.special import gammaln, digamma
+from autograd.scipy.special import gammaln, digamma, logsumexp
 
 from ssm.util import random_rotation, ensure_args_are_lists, \
     logistic, logit, one_hot, generalized_newton_studentst_dof, fit_linear_regression
