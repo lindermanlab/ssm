@@ -17,14 +17,13 @@ sns.set_style("white")
 sns.set_context("talk")
 
 import ssm
-from ssm.variational import SLDSMeanFieldVariationalPosterior
 from ssm.util import random_rotation, find_permutation
 
 
 # In[2]:
 
 
-# Set the parameters of the HMM
+# Set the parameters of the LDS
 T = 50      # number of time bins per batch
 B = 20      # number of batches
 D = 2       # number of latent dimensions
@@ -35,13 +34,13 @@ N = 10      # number of observed dimensions
 
 
 # Make an SLDS with the true parameters
-true_lds = ssm.LDS(N, D, emissions="poisson_nn", 
-               emission_kwargs=dict(link="softplus", 
+true_lds = ssm.LDS(N, D, emissions="poisson_nn",
+               emission_kwargs=dict(link="softplus",
                                     hidden_layer_sizes=(50, 50))
               )
 true_lds.dynamics.As[0] = .95 * random_rotation(D, theta=(1) * np.pi/20)
 
-# Sample a bunch of short trajectories 
+# Sample a bunch of short trajectories
 # (they all converge so we only learn from the initial condition)
 zs, xs, ys = list(zip(*[true_lds.sample(T) for _ in range(B)]))
 
@@ -93,7 +92,7 @@ plt.figure(figsize=(12, 12))
 splt = 3
 for i in range(splt):
     for j in range(splt):
-        n = i * splt + j 
+        n = i * splt + j
         if n < N:
             ax = plt.subplot(splt, splt, n+1)
             im = plt.imshow(tuning_curves[:, n].reshape((npts, npts)), vmin=0, vmax=vmax, cmap="Greys")
@@ -101,9 +100,9 @@ for i in range(splt):
                 plt.xlabel("$x_1$")
             if j == 0:
                 plt.ylabel("$x_2$")
-                
+
             plt.title("Neuron {}".format(n+1))
-            
+
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.05)
             plt.colorbar(im, cax=cax)
@@ -126,14 +125,15 @@ for b in range(5):
 
 
 print("Fitting LDS with SVI")
-lds = ssm.LDS(N, D, emissions="poisson_nn", 
-          emission_kwargs=dict(link="softplus", 
+lds = ssm.LDS(N, D, emissions="poisson_nn",
+          emission_kwargs=dict(link="softplus",
                                hidden_layer_sizes=(50, 50))
          )
 lds.initialize(ys)
 
 q = SLDSMeanFieldVariationalPosterior(lds, ys)
-lds_elbos = lds.fit(q, ys, num_iters=10000, print_intvl=100, initialize=False)
+lds_elbos, q = lds.fit(ys, method="bbvi", variational_posterior="mf",
+                       num_iters=10000, print_intvl=100, initialize=False)
 lds_xs = q.mean
 
 
@@ -172,4 +172,3 @@ plt.plot(lds_ys[0] + 10 * np.arange(N), '-', lw=2)
 plt.ylabel("$y$")
 plt.xlabel("time")
 plt.xlim(0, T)
-

@@ -8,6 +8,7 @@
 
 import os
 import pickle
+import copy
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
@@ -23,7 +24,6 @@ sns.set_style("white")
 sns.set_context("talk")
 
 import ssm
-from ssm.variational import SLDSTriDiagVariationalPosterior
 from ssm.util import random_rotation, find_permutation
 
 
@@ -65,8 +65,8 @@ def make_nascar_model():
     w4, b4 = np.array([0.0, -1.0]), np.array([0.0])    # y < 0
     Rs = np.row_stack((100*w1, 100*w2, 10*w3,10*w4))
     r = np.concatenate((100*b1, 100*b2, 10*b3, 10*b4))
-    
-    true_rslds = SLDS(D_obs, K, D_latent, 
+
+    true_rslds = SLDS(D_obs, K, D_latent,
                       transitions="recurrent_only",
                       dynamics="diagonal_gaussian",
                       emissions="gaussian_orthog",
@@ -76,10 +76,10 @@ def make_nascar_model():
     true_rslds.dynamics.As = np.array(As)
     true_rslds.dynamics.bs = np.array(bs)
     true_rslds.dynamics.sigmasq = 1e-4 * np.ones((K, D_latent))
-    
+
     true_rslds.transitions.Rs = Rs
     true_rslds.transitions.r = r
-    
+
     true_rslds.emissions.inv_etas = np.log(1e-2) * np.ones((1, D_obs))
     return true_rslds
 
@@ -90,21 +90,36 @@ z, x, y = true_rslds.sample(T=T)
 
 # In[4]:
 
+# Fit an rSLDS with its default initialization, using Laplace-EM with a structured variational posterior
+rslds = ssm.SLDS(D_obs, K, D_latent,
+             transitions="recurrent_only",
+             dynamics="diagonal_gaussian",
+             emissions="gaussian_orthog",
+             single_subspace=True)
+rslds.initialize(y)
+q_elbos_lem, q_lem = rslds.fit(y, method="laplace_em",
+                               variational_posterior="structured_meanfield",
+                               initialize=False, num_iters=100, alpha=0.0)
+xhat_lem = q_lem.mean_continuous_states[0]
+rslds.permute(find_permutation(z, rslds.most_likely_states(xhat_lem, y)))
+zhat_lem = rslds.most_likely_states(xhat_lem, y)
+
+# store rslds
+rslds_lem = copy.deepcopy(rslds)
+
+# In[5]:
 
 # Fit a robust rSLDS with its default initialization
-rslds = ssm.SLDS(D_obs, K, D_latent, 
+rslds = ssm.SLDS(D_obs, K, D_latent,
              transitions="recurrent_only",
              dynamics="diagonal_gaussian",
              emissions="gaussian_orthog",
              single_subspace=True)
 rslds.initialize(y)
 
-q = SLDSTriDiagVariationalPosterior(rslds, y)
-elbos = rslds.fit(q, y, num_iters=1000, initialize=False)
-
-
-# In[5]:
-
+q_elbos_svi, q_svi = rslds.fit(y, method="bbvi",
+                               variational_posterior="tridiag",
+                               initialize=False, num_iters=1000)
 
 # Get the posterior mean of the continuous states
 xhat = q.mean[0]
@@ -119,7 +134,9 @@ zhat = rslds.most_likely_states(xhat, y)
 
 # Plot some results
 plt.figure()
-plt.plot(elbos)
+plt.plot(q_elbos_svi, label="SVI")
+plt.plot(q_elbos_lem[1:], label="Laplace-EM")
+plt.legend()
 plt.xlabel("Iteration")
 plt.ylabel("ELBO")
 
@@ -146,7 +163,7 @@ def plot_trajectory(z, x, ax=None, ls="-"):
 def plot_most_likely_dynamics(model,
     xlim=(-4, 4), ylim=(-3, 3), nxpts=20, nypts=20,
     alpha=0.8, ax=None, figsize=(3, 3)):
-    
+
     K = model.K
     assert model.D == 2
     x = np.linspace(*xlim, nxpts)
@@ -180,14 +197,17 @@ def plot_most_likely_dynamics(model,
 
 # In[8]:
 
-
-plt.figure(figsize=(8,4))
-ax1 = plt.subplot(121)
+plt.figure(figsize=[10,4])
+ax1 = plt.subplot(131)
 plot_trajectory(z, x, ax=ax1)
 plt.title("True")
-ax2 = plt.subplot(122)
-plot_trajectory(zhat, xhat, ax=ax2)
-plt.title("Inferred")
+ax2 = plt.subplot(132)
+plot_trajectory(zhat_svi, xhat_svi, ax=ax2)
+plt.title("Inferred, SVI")
+ax3 = plt.subplot(133)
+plot_trajectory(zhat_lem, xhat_lem, ax=ax3)
+plt.title("Inferred, Laplace-EM")
+plt.tight_layout()
 
 
 # In[9]:
@@ -201,7 +221,12 @@ plt.title("True Dynamics")
 
 plt.figure(figsize=(6,4))
 ax = plt.subplot(111)
-lim = abs(xhat).max(axis=0) + 1
-plot_most_likely_dynamics(rslds, xlim=(-lim[0], lim[0]), ylim=(-lim[1], lim[1]), ax=ax)
-plt.title("Inferred Dynamics")
+lim = abs(xhat_lem).max(axis=0) + 1
+plot_most_likely_dynamics(rslds_lem, xlim=(-lim[0], lim[0]), ylim=(-lim[1], lim[1]), ax=ax)
+plt.title("Inferred Dynamics, Laplace-EM")
 
+plt.figure(figsize=(6,6))
+ax = plt.subplot(111)
+lim = abs(xhat_svi).max(axis=0) + 1
+plot_most_likely_dynamics(rslds, xlim=(-lim[0], lim[0]), ylim=(-lim[1], lim[1]), ax=ax)
+plt.title("Inferred Dynamics, SVI")

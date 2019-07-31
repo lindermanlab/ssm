@@ -37,11 +37,10 @@ color_names = ["windows blue",
 colors = sns.xkcd_palette(color_names)
 
 import ssm
-from ssm.variational import SLDSMeanFieldVariationalPosterior, SLDSTriDiagVariationalPosterior
-from ssm.util import random_rotation, find_permutation
+from ssm.util import random_rotation
 
 # Specify whether or not to save figures
-save_figures = True
+save_figures = False
 
 
 # In[2]:
@@ -125,8 +124,23 @@ plt.tight_layout()
 if save_figures:
     plt.savefig("lds_2.pdf")
 
-
 # In[6]:
+
+print("Fitting LDS with SVI using structured variational posterior")
+lds = ssm.LDS(N, D, emissions="gaussian_orthog")
+lds.initialize(y)
+
+q_lem_elbos, q_lem = lds.fit(y, method="laplace_em", variational_posterior="structured_meanfield",
+                             num_iters=10, initialize=False)
+
+# Get the posterior mean of the continuous states
+q_lem_x = q_lem.mean_continuous_states[0]
+
+# Smooth the data under the variational posterior
+q_lem_y = lds.smooth(q_lem_x, y)
+
+
+# In[7]:
 
 
 print("Fitting LDS with SVI")
@@ -136,15 +150,10 @@ lds = ssm.LDS(N, D, emissions="gaussian_orthog")
 lds.initialize(y)
 
 # Create a variational posterior
-q_mf = SLDSMeanFieldVariationalPosterior(lds, y)
-q_mf_elbos = lds.fit(q_mf, y, num_iters=1000, initialize=False)
+q_mf_elbos, q_mf = lds.fit(y, method="bbvi", variational_posterior="mf", num_iters=1000, initialize=False)
 
 # Get the posterior mean of the continuous states
 q_mf_x = q_mf.mean[0]
-
-
-# In[7]:
-
 
 # Smooth the data under the variational posterior
 q_mf_y = lds.smooth(q_mf_x, y)
@@ -157,8 +166,7 @@ print("Fitting LDS with SVI using structured variational posterior")
 lds = ssm.LDS(N, D, emissions="gaussian_orthog")
 lds.initialize(y)
 
-q_struct = SLDSTriDiagVariationalPosterior(lds, y)
-q_struct_elbos = lds.fit(q_struct, y, num_iters=1000, initialize=False)
+q_struct_elbos, q_struct = lds.fit(y, method="bbvi", variational_posterior="tridiag", num_iters=1000, initialize=False)
 
 # Get the posterior mean of the continuous states
 q_struct_x = q_struct.mean[0]
@@ -171,6 +179,7 @@ q_struct_y = lds.smooth(q_struct_x, y)
 
 
 # Plot the ELBOs
+plt.plot(q_lem_elbos, label="Laplace-EM")
 plt.plot(q_mf_elbos, label="MF")
 plt.plot(q_struct_elbos, label="LDS")
 plt.xlabel("Iteration")
@@ -184,8 +193,9 @@ plt.legend()
 plt.figure(figsize=(8,4))
 plt.plot(x + 4 * np.arange(D), '-k')
 for d in range(D):
-    plt.plot(q_mf_x[:,d] + 4 * d, '-', color=colors[0], label="MF" if d==0 else None)
-    plt.plot(q_struct_x[:,d] + 4 * d, '-', color=colors[1], label="Struct" if d==0 else None)
+    plt.plot(q_lem_x[:,d] + 4 * d, '--', color=colors[0], label="Laplace-EM" if d==0 else None)
+    plt.plot(q_mf_x[:,d] + 4 * d, '--', color=colors[1], label="MF" if d==0 else None)
+    plt.plot(q_struct_x[:,d] + 4 * d, ':', color=colors[2], label="Struct" if d==0 else None)
 plt.ylabel("$x$")
 plt.legend()
 
@@ -197,8 +207,9 @@ plt.legend()
 plt.figure(figsize=(8,4))
 for n in range(N):
     plt.plot(y[:, n] + 4 * n, '-k', label="True" if n == 0 else None)
-    plt.plot(q_mf_y[:, n] + 4 * n, '--', color=colors[0], label="MF" if n == 0 else None)
-    plt.plot(q_struct_y[:, n] + 4 * n, ':',  color=colors[1], label="Struct" if n == 0 else None)
+    plt.plot(q_lem_y[:, n] + 4 * n, '--', color=colors[0], label="Laplace-EM" if n == 0 else None)
+    plt.plot(q_mf_y[:, n] + 4 * n, '--', color=colors[1], label="MF" if n == 0 else None)
+    plt.plot(q_struct_y[:, n] + 4 * n, ':',  color=colors[2], label="Struct" if n == 0 else None)
 plt.legend()
 plt.xlabel("time")
 
@@ -207,8 +218,6 @@ plt.xlabel("time")
 
 # In[13]:
 
-
-from ssm.models import HMM
 
 N_iters = 50
 K = 15
@@ -244,10 +253,10 @@ lls = hmm.observations.log_likelihoods(data, input, mask, tag)
 
 plt.figure(figsize=(6, 6))
 for k in range(K):
-    plt.contour(XX, YY, np.exp(lls[:,k]).reshape(XX.shape), 
+    plt.contour(XX, YY, np.exp(lls[:,k]).reshape(XX.shape),
                 cmap=white_to_color_cmap(colors[k % len(colors)]))
     plt.plot(x[z==k, 0], x[z==k, 1], 'o', mfc=colors[k], mec='none', ms=4)
-    
+
 plt.plot(x[:,0], x[:,1], '-k', lw=2, alpha=.5)
 plt.xlabel("$x_1$")
 plt.ylabel("$x_2$")
@@ -276,7 +285,7 @@ for d in range(D):
     for i, (_, x_smpl) in enumerate(smpls):
         x_smpl = np.concatenate((x[:1], x_smpl))
         plt.plot(x_smpl[:,d] - d*lim, '-', lw=1, color=colors[i])
-        
+
 plt.yticks(-np.arange(D) * lim, ["$x_{}$".format(d+1) for d in range(D)])
 plt.xlabel("time")
 plt.xlim(0, T)
@@ -306,10 +315,10 @@ lls = hmm.observations.log_likelihoods(data, input, mask, tag)
 
 plt.figure(figsize=(6, 6))
 for k in range(K):
-    plt.contour(XX, YY, np.exp(lls[:,k]).reshape(XX.shape), 
+    plt.contour(XX, YY, np.exp(lls[:,k]).reshape(XX.shape),
                 cmap=white_to_color_cmap(colors[k % len(colors)]))
     plt.plot(x[z==k, 0], x[z==k, 1], 'o', mfc=colors[k], mec='none', ms=4)
-    
+
 plt.plot(x[:,0], x[:,1], '-k', lw=2, alpha=.5)
 for i, (_, x_smpl) in enumerate(smpls):
     x_smpl = np.concatenate((x[:1], x_smpl))
@@ -393,4 +402,3 @@ plt.tight_layout()
 
 if save_figures:
     plt.savefig("lds_7.pdf")
-
