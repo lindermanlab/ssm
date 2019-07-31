@@ -1,6 +1,6 @@
 import autograd.numpy as np
 import autograd.numpy.random as npr
-from autograd.scipy.misc import logsumexp
+from autograd.scipy.special import logsumexp
 from autograd import grad, elementwise_grad
 from autograd.test_util import check_grads
 
@@ -20,7 +20,7 @@ def forward_pass_np(log_pi0, log_Ps, log_likes):
     return np.array(alphas)
 
 def hmm_normalizer_np(log_pi0, log_Ps, ll):
-    alphas = forward_pass_np(log_pi0, log_Ps, ll)    
+    alphas = forward_pass_np(log_pi0, log_Ps, ll)
     Z = logsumexp(alphas[-1])
     return Z
 
@@ -42,7 +42,7 @@ def test_forward_pass(T=1000, K=3):
 def test_grad_hmm_normalizer(T=1000, K=3):
     log_pi0, log_Ps, ll = make_parameters(T, K)
     dlog_pi0, dlog_Ps, dll = np.zeros_like(log_pi0), np.zeros_like(log_Ps), np.zeros_like(ll)
-    
+
     alphas = np.zeros((T, K))
     forward_pass(-np.log(K) * np.ones(K), log_Ps, ll, alphas)
     grad_hmm_normalizer(log_Ps, alphas, dlog_pi0, dlog_Ps, dll)
@@ -60,14 +60,14 @@ def test_hmm_normalizer_primitive(T=1000, K=3):
 
 def test_backward_pass(T=1000, K=5, D=2):
     from pyhsmm.internals.hmm_messages_interface import messages_backwards_log
-    
+
     # Make parameters
     log_pi0 = -np.log(K) * np.ones(K)
     As = npr.rand(K, K)
     As /= As.sum(axis=-1, keepdims=True)
     log_Ps = np.log(np.repeat(As[None, :, :], T-1, axis=0))
     ll = npr.randn(T, K)
-    
+
     # Use pyhsmm to compute
     true_betas = np.zeros((T, K))
     messages_backwards_log(As, ll, true_betas)
@@ -75,5 +75,5 @@ def test_backward_pass(T=1000, K=5, D=2):
     # Use ssm to compute
     test_betas = np.zeros((T, K))
     backward_pass(log_Ps, ll, test_betas)
-    
+
     assert np.allclose(true_betas, test_betas)

@@ -3,7 +3,7 @@ import warnings
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
-from autograd.scipy.misc import logsumexp
+from autograd.scipy.special import logsumexp
 from autograd.scipy.special import gammaln, digamma
 
 from ssm.util import random_rotation, ensure_args_are_lists, \
