@@ -5,7 +5,7 @@ from autograd import elementwise_grad
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.linalg import block_diag
-from autograd.scipy.special import logsumexp
+from autograd.scipy.special import logsumexp, gammaln
 from scipy.optimize import minimize
 from warnings import warn
 
