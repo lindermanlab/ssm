@@ -340,7 +340,8 @@ def fit_scalar_glm(Xs, ys,
 
             # Linearize the gradient for uncertain data
             H = G * (y - yhat)
-            dH = d2g(u) * (y - yhat) - dg(u) * df(u)
+            # dH = d2g(u) * (y - yhat) - dg(u) * df(u)
+            dH = G * (y - yhat) - G**2 * d2A(g(u))  # nearly the same as R!
 
             # Update the negative Hessian
             weighted_X = X * R[:, None] * weight[:, None]
@@ -499,55 +500,62 @@ def fit_negative_binomial_integer_r(xs, r_min=1, r_max=20):
 
 if __name__ == "__main__":
     # Try it out with logistic regression
-    npr.seed(1)
-    n = 10000
-    p = 5
+    npr.seed(3)
+    n = 100000
+    p = 20
     X = npr.randn(n, p)
     w = npr.randn(p)
     b = -3
     u = X.dot(w) + b
 
-    print("gaussian")
-    y = npr.randn(n) + u
-    what, bhat = fit_scalar_glm(X, y, model="gaussian", mean_function="identity")
-    print(w, b)
-    print(what, bhat)
-    print("")
+    # print("gaussian")
+    # y = npr.randn(n) + u
+    # what, bhat = fit_scalar_glm(X, y, model="gaussian", mean_function="identity")
+    # print(w, b)
+    # print(what, bhat)
+    # print("")
 
-    print("gaussian with uncertain inputs")
-    y = npr.randn(n) + u
-    what, bhat = fit_scalar_glm(X, y, model="gaussian", mean_function="identity",
-        X_variances=np.tile(0.1 * np.eye(p)[None, ...], (n, 1, 1)))
-    print(w, b)
-    print(what, bhat)
-    print("")
+    # print("gaussian with uncertain inputs")
+    # y = npr.randn(n) + u
+    # what, bhat = fit_scalar_glm(X, y, model="gaussian", mean_function="identity",
+    #     X_variances=np.tile(0.1 * np.eye(p)[None, ...], (n, 1, 1)))
+    # print(w, b)
+    # print(what, bhat)
+    # print("")
 
-    print("logistic regression")
-    y = npr.rand(n) < 1 / (1 + np.exp(-u))
-    what, bhat = fit_scalar_glm(X, y, model="bernoulli", mean_function="logistic")
-    print(w, b)
-    print(what, bhat)
-    print("")
+    # print("logistic regression")
+    # y = npr.rand(n) < 1 / (1 + np.exp(-u))
+    # what, bhat = fit_scalar_glm(X, y, model="bernoulli", mean_function="logistic")
+    # print(w, b)
+    # print(what, bhat)
+    # print("")
 
-    print("poisson / exp")
-    y = npr.poisson(np.exp(u))
-    what, bhat = fit_scalar_glm(X, y, model="poisson", mean_function="exp", prior=(0, 10))
-    print(w, b)
-    print(what, bhat)
-    print("")
+    # print("poisson / exp")
+    # y = npr.poisson(np.exp(u))
+    # what, bhat = fit_scalar_glm(X, y, model="poisson", mean_function="exp", prior=(0, 10))
+    # print(w, b)
+    # print(what, bhat)
+    # print("")
 
-    print("poisson / softplus")
+    # print("poisson / softplus")
+    # y = npr.poisson(np.log1p(np.exp(u)))
+    # what, bhat = fit_scalar_glm(X, y, model="poisson", mean_function="softplus")
+    # print("true: ", w, b)
+    # print("inf:  ", what, bhat)
+    # print("")
+
+    # r = 3
+    # print("negative_binomial / logistic; r=", r)
+    # y = npr.negative_binomial(r, 1 - 1 / (1 + np.exp(-u)))
+    # what, bhat = fit_scalar_glm(X, y, model="negative_binomial", mean_function="exp", model_hypers=dict(r=r))
+    # print("true: ", w, b)
+    # print("inf:  ", what, bhat)
+    # print("")
+
+    print("poisson / softplus with uncertain data")
     y = npr.poisson(np.log1p(np.exp(u)))
-    what, bhat = fit_scalar_glm(X, y, model="poisson", mean_function="softplus")
+    what, bhat = fit_scalar_glm(X, y, model="poisson", mean_function="softplus",
+        X_variances=np.tile(0.5 * np.eye(p)[None, ...], (n, 1, 1)))
     print("true: ", w, b)
     print("inf:  ", what, bhat)
     print("")
-
-    r = 3
-    print("negative_binomial / logistic; r=", r)
-    y = npr.negative_binomial(r, 1 - 1 / (1 + np.exp(-u)))
-    what, bhat = fit_scalar_glm(X, y, model="negative_binomial", mean_function="exp", model_hypers=dict(r=r))
-    print("true: ", w, b)
-    print("inf:  ", what, bhat)
-    print("")
-
