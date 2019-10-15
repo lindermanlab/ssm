@@ -254,7 +254,7 @@ class RecurrentTransitions(InputDrivenTransitions):
         Ez = np.sum(expected_joints, axis=2) # marginal over z from T=1 to T-1
         for k in range(self.K):
             vtilde = vtildes[:,k,:] # normalized probabilities given state k
-            Rv = vtilde@self.Rs
+            Rv = vtilde @ self.Rs
             hess += Ez[:,k][:,None,None] * \
                     ( np.einsum('tn, ni, nj ->tij', -vtilde, self.Rs, self.Rs) \
                     + np.einsum('ti, tj -> tij', Rv, Rv))

@@ -235,14 +235,70 @@ def kalman_sample(mu0, S0, As, Bs, Qs, Cs, Ds, Rs, us, ys):
 
     return xs
 
+@numba.jit(nopython=True, cache=True)
 def kalman_smoother(mu0, S0, As, Bs, Qs, Cs, Ds, Rs, us, ys):
     """
-    Compute p(x_t | y_{1:T}, u_{1:T}) = N(x_t | m_{t|T}, S_{t|T})
+    Compute the conditional mean and variance of the latent
+    states given observed data ys and inputs us.  Run the KF to get
+    the filtered probability distributions, then run the Rauch-Tung-Striebel
+    smoother backward in time.
 
-    We're following https://users.ece.cmu.edu/~byronyu/papers/derive_ks.pdf
+    Notation:
 
+    T:  number of time steps
+    D:  continuous latent state dimension
+    U:  input dimension
+    N:  observed data dimension
+
+    Parameters:
+
+    mu0: (D,)       initial state mean
+    S0:  (D, D)     initial state covariance
+    As:  (T, D, D)  dynamics matrices
+    Bs:  (T, D, U)  input to latent state matrices
+    Qs:  (T, D, D)  dynamics covariance matrices
+    Cs:  (T, N, D)  emission matrices
+    Ds:  (T, N, U)  input to emissions matrices
+    Rs:  (T, N, N)  emission covariance matrices
+    us:  (T, U)     inputs
+    ys:  (T, N)     observations
+
+    Return:
+
+    smoothed_mus:         (T, D)          # posterior marginal mean
+    smoothed_Sigmas:      (T, D, D)       # posterior marginal covariance
+    smoothed_CrossSigmas: (T-1, D, D)     # posterior marginal cross-covariance Cov(x_t, x_{t+1})
     """
-    raise NotImplementedError
+    T, N = ys.shape
+    D = mu0.shape[0]
+
+    # Run the Kalman Filter
+    filtered_mus, filtered_Sigmas = \
+        kalman_filter(mu0, S0, As, Bs, Qs, Cs, Ds, Rs, us, ys)
+
+    # Initialize outputs, noise, and temporary variables
+    smoothed_mus = np.zeros((T, D))
+    smoothed_Sigmas = np.zeros((T, D, D))
+    smoothed_CrossSigmas = np.zeros((T-1, D, D))
+    Gt = np.zeros((D, D))
+
+    # The last time step is known from the Kalman filter
+    smoothed_mus[-1] = filtered_mus[-1]
+    smoothed_Sigmas[-1] = filtered_Sigmas[-1]
+
+    # Run the smoother backward in time
+    for t in range(T-2, -1, -1):
+        # This is like the Kalman gain but in reverse
+        # See Eq 8.11 of Saarka's "Bayesian Filtering and Smoothing"
+        Gt = np.linalg.solve(Qs[t] + As[t] @ filtered_Sigmas[t] @ As[t].T,
+                             As[t] @ filtered_Sigmas[t]).T
+
+        smoothed_mus[t] = filtered_mus[t] + Gt @ (smoothed_mus[t+1] - As[t] @ filtered_mus[t] - Bs[t] @ us[t])
+        smoothed_Sigmas[t] = filtered_Sigmas[t] + \
+                             Gt @ (smoothed_Sigmas[t+1] - As[t] @ filtered_Sigmas[t] @ As[t].T - Qs[t]) @ Gt.T
+        smoothed_CrossSigmas[t] = Gt @ smoothed_Sigmas[t+1]
+
+    return smoothed_mus, smoothed_Sigmas, smoothed_CrossSigmas
 
 ## Test
 def test_hmm():
@@ -297,9 +353,9 @@ def test_hmm():
     assert np.allclose(true_betas, test_betas)
 
 
-if __name__ == "__main__":
+def test_lds():
     T = 1000
-    D = 1
+    D = 2
     N = 10
     m0 = np.zeros(D)
     S0 = np.eye(D)
@@ -312,11 +368,27 @@ if __name__ == "__main__":
     us = np.ones((T, 1))
     ys = np.sin(2 * np.pi * np.arange(T) / 50)[:, None] * npr.randn(1, 10) + 0.1 * npr.randn(T, N)
 
+    # Filter
     from pylds.lds_messages_interface import kalman_filter as kf
     ll, filtered_mus1, filtered_Sigmas1 = kf(m0, S0, As, Bs, Qs, Cs, Ds, Rs, us, ys)
     filtered_mus2, filtered_Sigmas2 = kalman_filter(m0, S0, As, Bs, Qs, Cs, Ds, Rs, us, ys)
-
     assert np.allclose(filtered_mus1, filtered_mus2)
     assert np.allclose(filtered_Sigmas1, filtered_Sigmas2)
 
+    # Sample
     xs = kalman_sample(m0, S0, As, Bs, Qs, Cs, Ds, Rs, us, ys)
+
+    # Smooth
+    from pylds.lds_messages_interface import E_step as ks
+    ll, smoothed_mus1, smoothed_Sigmas1, ExnxT1 = ks(m0, S0, As, Bs, Qs, Cs, Ds, Rs, us, ys)
+    smoothed_mus2, smoothed_Sigmas2, smoothed_CrossSigmas = kalman_smoother(m0, S0, As, Bs, Qs, Cs, Ds, Rs, us, ys)
+    ExxnT2 = smoothed_CrossSigmas + smoothed_mus2[:-1][:, :, None] * smoothed_mus2[1:, None, :]
+    ExnxT2 = np.swapaxes(ExxnT2, 1, 2)
+    assert np.allclose(smoothed_mus1, smoothed_mus2)
+    assert np.allclose(smoothed_Sigmas1, smoothed_Sigmas2)
+    assert np.allclose(ExnxT1, ExnxT2)
+
+
+if __name__ == "__main__":
+    test_hmm()
+    test_lds()
