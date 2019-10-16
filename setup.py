@@ -34,9 +34,11 @@ extensions = cythonize(extensions)
 
 setup(name='ssm',
       version='0.0.1',
-      description='State space models in python',
+      description='Bayesian learning and inference for a variety of state space models',
       author='Scott Linderman',
-      install_requires=['numpy', 'scipy', 'matplotlib', 'scikit-learn', 'tqdm', 'autograd'],
+      author_email='scott.linderman@stanford.edu',
+      url='https://github.com/slinderman/ssm',
+      install_requires=['future', 'numpy', 'scipy', 'matplotlib', 'joblib', 'scikit-learn', 'tqdm', 'autograd'],
       packages=['ssm'],
       ext_modules=extensions,
       include_dirs=[np.get_include(),],

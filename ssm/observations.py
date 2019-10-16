@@ -3,10 +3,16 @@ import warnings
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
+<<<<<<< HEAD
 from autograd.scipy.special import gammaln, digamma, logsumexp
+=======
+from autograd.scipy.special import logsumexp
+from autograd.scipy.special import gammaln, digamma
+>>>>>>> upstream/master
 
 from ssm.util import random_rotation, ensure_args_are_lists, \
-    logistic, logit, one_hot, generalized_newton_studentst_dof, fit_linear_regression
+    logistic, logit, one_hot
+from ssm.regression import fit_linear_regression, generalized_newton_studentst_dof
 from ssm.preprocessing import interpolate_data
 from ssm.cstats import robust_ar_statistics
 from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
@@ -692,7 +698,7 @@ class _AutoRegressiveObservationsBase(Observations):
         mus = []
         for k, (A, b, V, mu0) in enumerate(zip(As, bs, Vs, mu0s)):
             # Initial condition
-            # mus_k_init = mu0 * np.ones((self.lags, D))
+            mus_k_init = mu0 * np.ones((self.lags, D))
 
             # Subsequent means are determined by the AR process
             mus_k_ar = np.dot(input[self.lags:, :M], V.T)
@@ -1046,15 +1052,31 @@ class AutoRegressiveDiagonalNoiseObservations(AutoRegressiveObservations):
 
     def log_likelihoods(self, data, input, mask, tag):
         assert np.all(mask), "Cannot compute likelihood of autoregressive obsevations with missing data."
-        mus = np.swapaxes(self._compute_mus(data, input, mask, tag), 0, 1)
 
+<<<<<<< HEAD
         import ipdb
         ipdb.set_trace()
 
         # Compute the likelihood of the initial data and remainder separately
+=======
+>>>>>>> upstream/master
         L = self.lags
-        ll_init = stats.diagonal_gaussian_logpdf(data[:L, None, :], mus[:L], self.sigmasq_init)
-        ll_ar = stats.diagonal_gaussian_logpdf(data[L:, None, :], mus[L:], self.sigmasq)
+        mus = self._compute_mus(data, input, mask, tag)
+
+        # Compute the likelihood of the initial data and remainder separately
+        # stats.multivariate_studentst_logpdf supports broadcasting, but we get
+        # significant performance benefit if we call it with (TxD), (D,), (D,D), and (,)
+        # arrays as inputs
+        ll_init = np.column_stack([stats.diagonal_gaussian_logpdf(data[:L], mu[:L], sigmasq)
+                               for mu, sigmasq in zip(mus, self.sigmasq_init)])
+
+        ll_ar = np.column_stack([stats.diagonal_gaussian_logpdf(data[L:], mu[L:], sigmasq)
+                               for mu, sigmasq in zip(mus, self.sigmasq)])
+
+
+        # Compute the likelihood of the initial data and remainder separately
+        # ll_init = stats.diagonal_gaussian_logpdf(data[:L, None, :], mus[:L], self.sigmasq_init)
+        # ll_ar = stats.diagonal_gaussian_logpdf(data[L:, None, :], mus[L:], self.sigmasq)
         return np.row_stack((ll_init, ll_ar))
 
 

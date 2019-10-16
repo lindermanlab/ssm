@@ -265,7 +265,7 @@ class _OrthogonalLinearEmissions(_LinearEmissions):
     def permute(self, perm):
         if not self.single_subspace:
             self._As = self._As[perm]
-            self._Ms = self._Bs[perm]
+            self._Ms = self._Ms[perm]
             self.Fs = self.Fs[perm]
             self.ds = self.ds[perm]
 
