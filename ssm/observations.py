@@ -693,7 +693,7 @@ class _AutoRegressiveObservationsBase(Observations):
         mus = []
         for k, (A, b, V, mu0) in enumerate(zip(As, bs, Vs, mu0s)):
             # Initial condition
-            mus_k_init = mu0 * np.zeros((self.lags, D))
+            # mus_k_init = mu0 * np.ones((self.lags, D))
 
             # Subsequent means are determined by the AR process
             mus_k_ar = np.dot(input[self.lags:, :M], V.T)
@@ -1048,6 +1048,9 @@ class AutoRegressiveDiagonalNoiseObservations(AutoRegressiveObservations):
     def log_likelihoods(self, data, input, mask, tag):
         assert np.all(mask), "Cannot compute likelihood of autoregressive obsevations with missing data."
         mus = np.swapaxes(self._compute_mus(data, input, mask, tag), 0, 1)
+
+        import ipdb
+        ipdb.set_trace()
 
         # Compute the likelihood of the initial data and remainder separately
         L = self.lags
