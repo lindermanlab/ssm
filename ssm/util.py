@@ -2,7 +2,7 @@ from warnings import warn
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
-from autograd.scipy.misc import logsumexp
+from autograd.scipy.special import logsumexp
 from autograd.scipy.linalg import block_diag
 from autograd import grad
 

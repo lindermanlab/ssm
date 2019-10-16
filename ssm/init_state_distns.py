@@ -3,7 +3,7 @@ from warnings import warn
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
-from autograd.scipy.misc import logsumexp
+from autograd.scipy.special import logsumexp
 from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 

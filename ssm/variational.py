@@ -255,8 +255,13 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         # of the emissions invert function.
         J_diag = np.tile(1.0 / self.initial_variance * np.eye(D)[None, :, :], (T, 1, 1))
         J_lower_diag = np.zeros((T-1, D, D))
-        h = (1.0 / self.initial_variance) \
-            * self.model.emissions.invert(data, input=input, mask=mask, tag=tag)
+        if self.model.emissions.single_subspace:
+            h = (1.0 / self.initial_variance) \
+                * self.model.emissions.invert(data, input=input, mask=mask, tag=tag)
+        else:
+            # TODO smarter inversion with multiple subspace!
+            h = (1.0 / self.initial_variance) * npr.randn(data.shape[0], self.D)
+            # raise NotImplementedError
 
         return dict(log_pi0=log_pi0,
                     log_Ps=log_Ps,

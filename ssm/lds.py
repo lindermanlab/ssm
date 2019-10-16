@@ -592,7 +592,7 @@ class SLDS(object):
             x_mask = np.ones((T, D), dtype=bool)
             hessian_diag, hessian_lower_diag = self.dynamics.hessian_expected_log_dynamics_prob(Ez, x, input, x_mask, tag)
             hessian_diag[:-1] += self.transitions.hessian_expected_log_trans_prob(x, input, x_mask, tag, Ezzp1)
-            hessian_diag += self.emissions.hessian_log_emissions_prob(data, input, mask, tag, x)
+            hessian_diag += self.emissions.hessian_log_emissions_prob(data, input, mask, tag, x, Ez)
 
             # The Hessian of the log probability should be *negative* definite since we are *maximizing* it.
             hessian_diag -= 1e-8 * np.eye(D)

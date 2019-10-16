@@ -57,7 +57,7 @@ class Emissions(object):
         """
         raise NotImplementedError
 
-    def hessian_log_emissions_prob(self, data, input, mask, tag, x):
+    def hessian_log_emissions_prob(self, data, input, mask, tag, x, Ez):
         assert self.single_subspace, "Only works with a single emission model"
         warn("Analytical Hessian is not implemented for this Emissions class. \
               Optimization via Laplace-EM may be slow. Consider using an \
@@ -373,32 +373,41 @@ class GaussianEmissions(_GaussianEmissionsMixin, _LinearEmissions):
         # self.inv_etas[:,...] = np.log(pca.noise_variance_)
         pass
 
-    def hessian_log_emissions_prob(self, data, input, mask, tag, x):
-        assert self.single_subspace, "Only implemented for a single emission model"
+    def hessian_log_emissions_prob(self, data, input, mask, tag, x, Ez):
         # Return (T, D, D) array of blocks for the diagonal of the Hessian
         T, D = data.shape
-        hess = -1.0 * self.Cs[0].T@np.diag( 1.0 / np.exp(self.inv_etas[0]) )@self.Cs[0]
-        return np.tile(hess[None,:,:], (T, 1, 1))
+        if self.single_subspace:
+            block = -1.0 * self.Cs[0].T@np.diag( 1.0 / np.exp(self.inv_etas[0]) )@self.Cs[0]
+            hess = np.tile(block[None,:,:], (T, 1, 1))
+        else:
+            blocks = np.array([-1.0 * C.T@np.diag(1.0/np.exp(inv_eta))@C
+                               for C, inv_eta in zip(self.Cs, self.inv_etas)])
+            hess = np.sum(Ez[:,:,None,None] * blocks, axis=1)
+        return hess
 
     def m_step(self, discrete_expectations, continuous_expectations,
                datas, inputs, masks, tags,
                optimizer="bfgs", maxiter=100, **kwargs):
-        assert self.single_subspace, "Only implemented for a single emission model"
-        # Return exact m-step updates for C, F, d, and inv_etas
-        # stack across all datas
-        x = np.vstack(continuous_expectations)
-        u = np.vstack(inputs)
-        y = np.vstack(datas)
-        T, D = np.shape(x)
-        xb = np.hstack((np.ones((T,1)),x,u)) # design matrix
-        params = np.linalg.lstsq(xb.T@xb, xb.T@y, rcond=None)[0].T
-        self.ds = params[:,0].reshape((1,self.N))
-        self.Cs = params[:,1:D+1].reshape((1,self.N,self.D))
-        if self.M > 0:
-            self.Fs = params[:,D+1:].reshape((1,self.N,self.M))
-        mu = np.dot(xb, params.T)
-        Sigma = (y-mu).T@(y-mu) / T
-        self.inv_etas = np.log(np.diag(Sigma)).reshape((1,self.N))
+        if self.single_subspace:
+            # Return exact m-step updates for C, F, d, and inv_etas
+            # stack across all datas
+            x = np.vstack(continuous_expectations)
+            u = np.vstack(inputs)
+            y = np.vstack(datas)
+            T, D = np.shape(x)
+            xb = np.hstack((np.ones((T,1)),x,u)) # design matrix
+            params = np.linalg.lstsq(xb.T@xb, xb.T@y, rcond=None)[0].T
+            self.ds = params[:,0].reshape((1,self.N))
+            self.Cs = params[:,1:D+1].reshape((1,self.N,self.D))
+            if self.M > 0:
+                self.Fs = params[:,D+1:].reshape((1,self.N,self.M))
+            mu = np.dot(xb, params.T)
+            Sigma = (y-mu).T@(y-mu) / T
+            self.inv_etas = np.log(np.diag(Sigma)).reshape((1,self.N))
+        else:
+            Emissions.m_step(self, discrete_expectations, continuous_expectations,
+                             datas, inputs, masks, tags,
+                             optimizer=optimizer, maxiter=maxiter, **kwargs)
 
 
 class GaussianOrthogonalEmissions(_GaussianEmissionsMixin, _OrthogonalLinearEmissions):
@@ -409,12 +418,17 @@ class GaussianOrthogonalEmissions(_GaussianEmissionsMixin, _OrthogonalLinearEmis
         pca = self._initialize_with_pca(datas, inputs=inputs, masks=masks, tags=tags)
         self.inv_etas[:,...] = np.log(pca.noise_variance_)
 
-    def hessian_log_emissions_prob(self, data, input, mask, tag, x):
-        assert self.single_subspace, "Only implemented for a single emission model"
+    def hessian_log_emissions_prob(self, data, input, mask, tag, x, Ez):
         # Return (T, D, D) array of blocks for the diagonal of the Hessian
         T, D = data.shape
-        hess = -1.0 * self.Cs[0].T@np.diag( 1.0 / np.exp(self.inv_etas[0]) )@self.Cs[0]
-        return np.tile(hess[None,:,:], (T, 1, 1))
+        if self.single_subspace:
+            block = -1.0 * self.Cs[0].T@np.diag( 1.0 / np.exp(self.inv_etas[0]) )@self.Cs[0]
+            hess = np.tile(block[None,:,:], (T, 1, 1))
+        else:
+            blocks = np.array([-1.0 * C.T@np.diag(1.0/np.exp(inv_eta))@C
+                               for C, inv_eta in zip(self.Cs, self.inv_etas)])
+            hess = np.sum(Ez[:,:,None,None] * blocks, axis=1)
+        return hess
 
 
 class GaussianIdentityEmissions(_GaussianEmissionsMixin, _IdentityEmissions):
@@ -541,7 +555,7 @@ class BernoulliEmissions(_BernoulliEmissionsMixin, _LinearEmissions):
         yhats = [self.link(np.clip(d, .1, .9)) for d in datas]
         self._initialize_with_pca(yhats, inputs=inputs, masks=masks, tags=tags)
 
-    def hessian_log_emissions_prob(self, data, input, mask, tag, x):
+    def hessian_log_emissions_prob(self, data, input, mask, tag, x, Ez):
         """
         d/dx  (y - p) * C
             = -dpsi/dx (dp/d\psi)  C
@@ -562,7 +576,7 @@ class BernoulliOrthogonalEmissions(_BernoulliEmissionsMixin, _OrthogonalLinearEm
         yhats = [self.link(np.clip(d, .1, .9)) for d in datas]
         self._initialize_with_pca(yhats, inputs=inputs, masks=masks, tags=tags)
 
-    def hessian_log_emissions_prob(self, data, input, mask, tag, x):
+    def hessian_log_emissions_prob(self, data, input, mask, tag, x, Ez):
         """
         d/dx  (y - p) * C
             = -dpsi/dx (dp/d\psi)  C
@@ -636,7 +650,7 @@ class PoissonEmissions(_PoissonEmissionsMixin, _LinearEmissions):
         yhats = [self.link(np.clip(d, .1, np.inf)) for d in datas]
         self._initialize_with_pca(yhats, inputs=inputs, masks=masks, tags=tags)
 
-    def hessian_log_emissions_prob(self, data, input, mask, tag, x):
+    def hessian_log_emissions_prob(self, data, input, mask, tag, x, Ez):
         """
         d/dx log p(y | x) = d/dx [y * (Cx + Fu + d) - exp(Cx + Fu + d)
                           = y * C - lmbda * C
@@ -665,7 +679,7 @@ class PoissonOrthogonalEmissions(_PoissonEmissionsMixin, _OrthogonalLinearEmissi
         yhats = [self.link(np.clip(d, .1, np.inf)) for d in datas]
         self._initialize_with_pca(yhats, inputs=inputs, masks=masks, tags=tags)
 
-    def hessian_log_emissions_prob(self, data, input, mask, tag, x):
+    def hessian_log_emissions_prob(self, data, input, mask, tag, x, Ez):
         """
         d/dx log p(y | x) = d/dx [y * (Cx + Fu + d) - exp(Cx + Fu + d)
                           = y * C - lmbda * C
