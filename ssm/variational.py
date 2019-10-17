@@ -262,9 +262,8 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
                 * self.model.emissions.invert(data, input=input, mask=mask, tag=tag)
         else:
             # TODO smarter inversion with multiple subspace!
-            if self.model.emissions.single_subspace is False:
-                warn("Posterior initialization is not implemented for multiple subspaces. \
-                      A random initialization is used.")
+            warn("Posterior initialization is not implemented for multiple subspaces. \
+                  A random initialization is used.")
             h = (1.0 / self.initial_variance) * npr.randn(data.shape[0], self.D)
 
         return dict(log_pi0=log_pi0,
