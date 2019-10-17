@@ -58,7 +58,8 @@ class Emissions(object):
         raise NotImplementedError
 
     def hessian_log_emissions_prob(self, data, input, mask, tag, x, Ez):
-        assert self.single_subspace, "Only works with a single emission model"
+        if self.single_subspace is False:
+            raise Exception("Multiple subspaces are not supported for this Emissions class.")
         warn("Analytical Hessian is not implemented for this Emissions class. \
               Optimization via Laplace-EM may be slow. Consider using an \
               alternative posterior and inference method.")
@@ -561,7 +562,8 @@ class BernoulliEmissions(_BernoulliEmissionsMixin, _LinearEmissions):
             = -dpsi/dx (dp/d\psi)  C
             = -C p (1-p) C
         """
-        assert self.single_subspace
+        if self.single_subspace is False:
+            raise Exception("Multiple subspaces are not supported for this Emissions class.")
         assert self.link_name == "logit"
         psi =  self.forward(x, input, tag)[:, 0, :]
         p = self.mean(psi)
@@ -582,7 +584,8 @@ class BernoulliOrthogonalEmissions(_BernoulliEmissionsMixin, _OrthogonalLinearEm
             = -dpsi/dx (dp/d\psi)  C
             = -C p (1-p) C
         """
-        assert self.single_subspace
+        if self.single_subspace is False:
+            raise Exception("Multiple subspaces are not supported for this Emissions class.")
         assert self.link_name == "logit"
         psi =  self.forward(x, input, tag)[:, 0, :]
         p = self.mean(psi)
@@ -659,13 +662,14 @@ class PoissonEmissions(_PoissonEmissionsMixin, _LinearEmissions):
         d/dx  (y - lmbda)^T C = d/dx -exp(Cx + Fu + d)^T C
             = -C^T exp(Cx + Fu + d)^T C
         """
+        if self.single_subspace is False:
+            raise Exception("Multiple subspaces are not supported for this Emissions class.")
+
         if self.link_name == "log":
-            assert self.single_subspace
             lambdas = self.mean(self.forward(x, input, tag))
             return np.einsum('tn, ni, nj ->tij', -lambdas[:, 0, :], self.Cs[0], self.Cs[0])
 
         elif self.link_name == "softplus":
-            assert self.single_subspace
             lambdas = self.mean(self.forward(x, input, tag))[:, 0, :] / self.bin_size
             expterms = np.exp(-np.dot(x,self.Cs[0].T)-np.dot(input,self.Fs[0].T)-self.ds[0])
             diags = (data / lambdas * (expterms - 1.0 / lambdas) - expterms * self.bin_size) / (1.0+expterms)**2
@@ -688,13 +692,14 @@ class PoissonOrthogonalEmissions(_PoissonEmissionsMixin, _OrthogonalLinearEmissi
         d/dx  (y - lmbda)^T C = d/dx -exp(Cx + Fu + d)^T C
             = -C^T exp(Cx + Fu + d)^T C
         """
+        if self.single_subspace is False:
+            raise Exception("Multiple subspaces are not supported for this Emissions class.")
+
         if self.link_name == "log":
-            assert self.single_subspace
             lambdas = self.mean(self.forward(x, input, tag))
             return np.einsum('tn, ni, nj ->tij', -lambdas[:, 0, :], self.Cs[0], self.Cs[0])
 
         elif self.link_name == "softplus":
-            assert self.single_subspace
             lambdas = self.mean(self.forward(x, input, tag))[:, 0, :] / self.bin_size
             expterms = np.exp(-np.dot(x,self.Cs[0].T)-np.dot(input,self.Fs[0].T)-self.ds[0])
             diags = (data / lambdas * (expterms - 1.0 / lambdas) - expterms * self.bin_size) / (1.0+expterms)**2
