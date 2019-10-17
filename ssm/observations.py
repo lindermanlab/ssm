@@ -3,12 +3,10 @@ import warnings
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
-<<<<<<< HEAD
+
 from autograd.scipy.special import gammaln, digamma, logsumexp
-=======
 from autograd.scipy.special import logsumexp
 from autograd.scipy.special import gammaln, digamma
->>>>>>> upstream/master
 
 from ssm.util import random_rotation, ensure_args_are_lists, \
     logistic, logit, one_hot
@@ -1053,13 +1051,7 @@ class AutoRegressiveDiagonalNoiseObservations(AutoRegressiveObservations):
     def log_likelihoods(self, data, input, mask, tag):
         assert np.all(mask), "Cannot compute likelihood of autoregressive obsevations with missing data."
 
-<<<<<<< HEAD
-        import ipdb
-        ipdb.set_trace()
-
         # Compute the likelihood of the initial data and remainder separately
-=======
->>>>>>> upstream/master
         L = self.lags
         mus = self._compute_mus(data, input, mask, tag)
 
