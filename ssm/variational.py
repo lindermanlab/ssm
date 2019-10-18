@@ -9,6 +9,8 @@ from ssm.primitives import lds_log_probability, lds_sample, lds_mean, \
 
 from ssm.util import ensure_variational_args_are_lists
 
+from warnings import warn
+
 class VariationalPosterior(object):
     """
     Base class for a variational posterior distribution.
@@ -255,8 +257,14 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         # of the emissions invert function.
         J_diag = np.tile(1.0 / self.initial_variance * np.eye(D)[None, :, :], (T, 1, 1))
         J_lower_diag = np.zeros((T-1, D, D))
-        h = (1.0 / self.initial_variance) \
-            * self.model.emissions.invert(data, input=input, mask=mask, tag=tag)
+        if self.model.emissions.single_subspace:
+            h = (1.0 / self.initial_variance) \
+                * self.model.emissions.invert(data, input=input, mask=mask, tag=tag)
+        else:
+            # TODO smarter inversion with multiple subspace!
+            warn("Posterior initialization is not implemented for multiple subspaces. \
+                  A random initialization is used.")
+            h = (1.0 / self.initial_variance) * npr.randn(data.shape[0], self.D)
 
         return dict(log_pi0=log_pi0,
                     log_Ps=log_Ps,

@@ -592,7 +592,7 @@ class SLDS(object):
             x_mask = np.ones((T, D), dtype=bool)
             hessian_diag, hessian_lower_diag = self.dynamics.hessian_expected_log_dynamics_prob(Ez, x, input, x_mask, tag)
             hessian_diag[:-1] += self.transitions.hessian_expected_log_trans_prob(x, input, x_mask, tag, Ezzp1)
-            hessian_diag += self.emissions.hessian_log_emissions_prob(data, input, mask, tag, x)
+            hessian_diag += self.emissions.hessian_log_emissions_prob(data, input, mask, tag, x, Ez)
 
             # The Hessian of the log probability should be *negative* definite since we are *maximizing* it.
             hessian_diag -= 1e-8 * np.eye(D)
@@ -679,36 +679,40 @@ class SLDS(object):
         optimizer_state = self.p_optimizer_state if hasattr(self, "p_optimizer_state") else None
         self.params, self.p_optimizer_state = \
             optimizer(_objective, self.params, num_iters=emission_optimizer_maxiter,
-                      state=optimizer_state, full_output=True)
+                      state=optimizer_state, full_output=True, step_size=0.01)
 
 
-    def _laplace_em_elbo(self, variational_posterior, datas, inputs, masks, tags):
-
-        continuous_samples = variational_posterior.sample_continuous_states()
-        discrete_expectations = variational_posterior.mean_discrete_states
+    def _laplace_em_elbo(self, variational_posterior, datas, inputs, masks, tags, n_samples=1):
 
         elbo = 0.0
-        elbo += self.log_prior()
+        for sample in range(n_samples):
 
-        for x, (Ez, Ezzp1, _), data, input, mask, tag in \
-            zip(continuous_samples, discrete_expectations, datas, inputs, masks, tags):
+            # sample continuous states
+            continuous_samples = variational_posterior.sample_continuous_states()
+            discrete_expectations = variational_posterior.mean_discrete_states
 
-            # The "mask" for x is all ones
-            x_mask = np.ones_like(x, dtype=bool)
-            log_pi0 = self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
-            log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
-            log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
-            log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
+            # log p(theta)
+            elbo += self.log_prior()
 
-            # Compute the expected log probability
-            elbo += np.sum(Ez[0] * log_pi0)
-            elbo += np.sum(Ezzp1 * log_Ps)
-            elbo += np.sum(Ez * log_likes)
+            for x, (Ez, Ezzp1, _), data, input, mask, tag in \
+                zip(continuous_samples, discrete_expectations, datas, inputs, masks, tags):
 
-        # add entropy of variational posterior
-        elbo += variational_posterior.entropy(continuous_samples)
+                # The "mask" for x is all ones
+                x_mask = np.ones_like(x, dtype=bool)
+                log_pi0 = self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
+                log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
+                log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
+                log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
 
-        return elbo
+                # Compute the expected log probability
+                elbo += np.sum(Ez[0] * log_pi0)
+                elbo += np.sum(Ezzp1 * log_Ps)
+                elbo += np.sum(Ez * log_likes)
+
+            # add entropy of variational posterior
+            elbo += variational_posterior.entropy(continuous_samples)
+
+        return elbo / n_samples
 
     def _fit_laplace_em(self, variational_posterior, datas,
                         inputs=None, masks=None, tags=None,
@@ -765,7 +769,7 @@ class SLDS(object):
 
         return elbos
 
-    def _make_variational_posterior(self, variational_posterior, datas, inputs, masks, tags, method):
+    def _make_variational_posterior(self, variational_posterior, datas, inputs, masks, tags, method, **variational_posterior_kwargs):
         # Initialize the variational posterior
         if isinstance(variational_posterior, str):
             # Make a posterior of the specified type
@@ -780,7 +784,7 @@ class SLDS(object):
             if variational_posterior not in _var_posteriors:
                 raise Exception("Invalid posterior: {}. Options are {}.".\
                                 format(variational_posterior, _var_posteriors.keys()))
-            posterior = _var_posteriors[variational_posterior](self, datas, inputs, masks, tags)
+            posterior = _var_posteriors[variational_posterior](self, datas, inputs, masks, tags, **variational_posterior_kwargs)
 
         else:
             # Check validity of given posterior
@@ -803,6 +807,7 @@ class SLDS(object):
     @ensure_args_are_lists
     def fit(self, datas, inputs=None, masks=None, tags=None,
             method="laplace_em", variational_posterior="structured_meanfield",
+            variational_posterior_kwargs=None,
             initialize=True, **kwargs):
 
         """
@@ -851,7 +856,8 @@ class SLDS(object):
             self.initialize(datas, inputs, masks, tags)
 
         # Initialize the variational posterior
-        posterior = self._make_variational_posterior(variational_posterior, datas, inputs, masks, tags, method)
+        variational_posterior_kwargs = variational_posterior_kwargs or {}
+        posterior = self._make_variational_posterior(variational_posterior, datas, inputs, masks, tags, method, **variational_posterior_kwargs)
         elbos = _fitting_methods[method](posterior, datas, inputs, masks, tags, learning=True, **kwargs)
         return elbos, posterior
 

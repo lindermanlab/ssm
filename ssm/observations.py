@@ -3,8 +3,9 @@ import warnings
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
+
+from autograd.scipy.special import gammaln, digamma, logsumexp
 from autograd.scipy.special import logsumexp
-from autograd.scipy.special import gammaln, digamma
 
 from ssm.util import random_rotation, ensure_args_are_lists, \
     logistic, logit, one_hot
@@ -694,7 +695,7 @@ class _AutoRegressiveObservationsBase(Observations):
         mus = []
         for k, (A, b, V, mu0) in enumerate(zip(As, bs, Vs, mu0s)):
             # Initial condition
-            mus_k_init = mu0 * np.zeros((self.lags, D))
+            mus_k_init = mu0 * np.ones((self.lags, D))
 
             # Subsequent means are determined by the AR process
             mus_k_ar = np.dot(input[self.lags:, :M], V.T)
