@@ -196,25 +196,36 @@ def test_hmm_mp_perf(T=10000, K=100, D=20):
     out = np.zeros((T, K))
 
     # Run the PyHSMM message passing code
-    from pyhsmm.internals.hmm_messages_interface import messages_forwards_log
+    from pyhsmm.internals.hmm_messages_interface import messages_forwards_log, messages_backwards_log
     tic = time()
     messages_forwards_log(As, ll, pi0, out)
     pyhsmm_dt = time() - tic
-    print("PyHSMM: ", pyhsmm_dt, "sec")
+    print("PyHSMM Fwd: ", pyhsmm_dt, "sec")
+
+    tic = time()
+    messages_backwards_log(As, ll, out)
+    pyhsmm_dt = time() - tic
+    print("PyHSMM Bwd: ", pyhsmm_dt, "sec")
 
     # Run the SSM message passing code
     from ssm.messages import forward_pass as fpc
     tic = time()
     fpc(log_pi0, log_Ps, ll, out)
     smm_dt = time() - tic
-    print("SMM HMM: ", smm_dt, "sec")
+    print("SMM (Cython) Fwd: ", smm_dt, "sec")
 
     # Run the SSM message passing code
     from ssm.messages_numba import forward_pass as fpn
     tic = time()
     fpn(pi0, As, ll, out)
     smm_dt = time() - tic
-    print("SMM (Numba) HMM: ", smm_dt, "sec")
+    print("SMM (Numba) Fwd: ", smm_dt, "sec")
+
+    from ssm.messages_numba import backward_pass as bpn
+    tic = time()
+    bpn(As, ll, out)
+    smm_dt = time() - tic
+    print("SMM (Numba) Bwd: ", smm_dt, "sec")
 
 
 def test_hmm_likelihood_perf(T=10000, K=50, D=20):
