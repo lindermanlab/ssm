@@ -20,34 +20,27 @@ def logsumexp(x):
     return m + np.log(out)
 
 @numba.jit(nopython=True, cache=True)
-def forward_pass(log_pi0,
-                 log_Ps,
+def forward_pass(pi0,
+                 Ps,
                  log_likes,
                  alphas):
 
     T = log_likes.shape[0]  # number of time steps
     K = log_likes.shape[1]  # number of discrete states
 
-    assert log_Ps.shape[0] == T-1 or log_Ps.shape[0] == 1
-    assert log_Ps.shape[1] == K
-    assert log_Ps.shape[2] == K
+    assert Ps.shape[0] == T-1 or Ps.shape[0] == 1
+    assert Ps.shape[1] == K
+    assert Ps.shape[2] == K
     assert alphas.shape[0] == T
     assert alphas.shape[1] == K
 
     # Check if we have heterogeneous transition matrices.
     # If not, save memory by passing in log_Ps of shape (1, K, K)
-    hetero = (log_Ps.shape[0] == T-1)
-    tmp = np.zeros(K)
-
-    for k in range(K):
-        alphas[0, k] = log_pi0[k] + log_likes[0, k]
-
-    for t in range(T - 1):
-        for k in range(K):
-            for j in range(K):
-                tmp[j] = alphas[t, j] + log_Ps[t * hetero, j, k]
-            alphas[t+1, k] = logsumexp(tmp) + log_likes[t+1, k]
-
+    hetero = (Ps.shape[0] == T-1)
+    alphas[0] = np.log(pi0) + log_likes[0]
+    for t in range(T-1):
+        m = np.max(alphas[t])
+        alphas[t+1] = np.log(np.dot(np.exp(alphas[t] - m), Ps[t * hetero])) + m + log_likes[t+1]
     return logsumexp(alphas[T-1])
 
 

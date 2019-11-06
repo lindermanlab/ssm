@@ -185,6 +185,38 @@ def test_viterbi(T=1000, K=20, D=2):
     assert np.allclose(z_star, z_star2)
 
 
+def test_hmm_mp_perf(T=10000, K=100, D=20):
+    # Make parameters
+    pi0 = np.ones(K) / K
+    log_pi0 = np.log(pi0)
+    As = npr.rand(T-1, K, K)
+    As /= As.sum(axis=2, keepdims=True)
+    log_Ps = np.log(As)
+    ll = npr.randn(T, K)
+    out = np.zeros((T, K))
+
+    # Run the PyHSMM message passing code
+    from pyhsmm.internals.hmm_messages_interface import messages_forwards_log
+    tic = time()
+    messages_forwards_log(As, ll, pi0, out)
+    pyhsmm_dt = time() - tic
+    print("PyHSMM: ", pyhsmm_dt, "sec")
+
+    # Run the SSM message passing code
+    from ssm.messages import forward_pass as fpc
+    tic = time()
+    fpc(log_pi0, log_Ps, ll, out)
+    smm_dt = time() - tic
+    print("SMM HMM: ", smm_dt, "sec")
+
+    # Run the SSM message passing code
+    from ssm.messages_numba import forward_pass as fpn
+    tic = time()
+    fpn(pi0, As, ll, out)
+    smm_dt = time() - tic
+    print("SMM (Numba) HMM: ", smm_dt, "sec")
+
+
 def test_hmm_likelihood_perf(T=10000, K=50, D=20):
     # Create a true HMM
     A = npr.rand(K, K)
@@ -241,4 +273,5 @@ def test_hmm_likelihood_perf(T=10000, K=50, D=20):
 
 
 if __name__ == "__main__":
-    test_hmm_likelihood_perf()
+    # test_hmm_likelihood_perf()
+    test_hmm_mp_perf()
