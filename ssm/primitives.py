@@ -12,45 +12,47 @@ from ssm.cstats import _blocks_to_bands_lower, _blocks_to_bands_upper, \
                        _transpose_banded, vjp_cholesky_banded_lower, \
                        _vjp_solve_banded_A, _vjp_solveh_banded_A
 
-from ssm.messages import forward_pass, backward_pass, \
-                         backward_sample, grad_hmm_normalizer, \
-                         compute_stationary_expected_joints
+from ssm.messages import forward_pass, grad_hmm_normalizer
 
 to_c = lambda arr: np.copy(getval(arr), 'C') if not arr.flags['C_CONTIGUOUS'] else getval(arr)
 
 @primitive
-def hmm_normalizer(log_pi0, log_Ps, ll):
+def hmm_normalizer(pi0, Ps, ll):
     T, K = ll.shape
     alphas = np.zeros((T, K))
 
     # Make sure everything is C contiguous
-    log_pi0 = to_c(log_pi0)
-    log_Ps = to_c(log_Ps)
+    pi0 = to_c(pi0)
+    Ps = to_c(Ps)
     ll = to_c(ll)
 
-    forward_pass(log_pi0, log_Ps, ll, alphas)
+    forward_pass(pi0, Ps, ll, alphas)
     return logsumexp(alphas[-1])
 
-def _make_grad_hmm_normalizer(argnum, ans, log_pi0, log_Ps, ll):
+
+def _make_grad_hmm_normalizer(argnum, ans, pi0, Ps, ll):
     # Make sure everything is C contiguous and unboxed
-    log_pi0 = to_c(log_pi0)
-    log_Ps = to_c(log_Ps)
+    pi0 = to_c(pi0)
+    Ps = to_c(Ps)
     ll = to_c(ll)
 
-    dlog_pi0 = np.zeros_like(log_pi0)
-    dlog_Ps= np.zeros_like(log_Ps)
+    dlog_pi0 = np.zeros_like(pi0)
+    dlog_Ps= np.zeros_like(Ps)
     dll = np.zeros_like(ll)
     T, K = ll.shape
 
     # Forward pass to get alphas
     alphas = np.zeros((T, K))
-    forward_pass(log_pi0, log_Ps, ll, alphas)
-    grad_hmm_normalizer(log_Ps, alphas, dlog_pi0, dlog_Ps, dll)
+    forward_pass(pi0, Ps, ll, alphas)
+    grad_hmm_normalizer(np.log(Ps), alphas, dlog_pi0, dlog_Ps, dll)
 
+    # Compute necessary gradient
+    # Account for the log transformation
+    # df/dP = df/dlogP * dlogP/dP = df/dlogP * 1 / P
     if argnum == 0:
-        return lambda g: g * dlog_pi0
+        return lambda g: g * dlog_pi0 / pi0
     if argnum == 1:
-        return lambda g: g * dlog_Ps
+        return lambda g: g * dlog_Ps / Ps
     if argnum == 2:
         return lambda g: g * dll
 
@@ -58,126 +60,6 @@ defvjp(hmm_normalizer,
        partial(_make_grad_hmm_normalizer, 0),
        partial(_make_grad_hmm_normalizer, 1),
        partial(_make_grad_hmm_normalizer, 2))
-
-
-def hmm_expected_states(log_pi0, log_Ps, ll, memlimit=2**31):
-    T, K = ll.shape
-
-    # Make sure everything is C contiguous
-    log_pi0 = to_c(log_pi0)
-    log_Ps = to_c(log_Ps)
-    ll = to_c(ll)
-
-    alphas = np.zeros((T, K))
-    forward_pass(log_pi0, log_Ps, ll, alphas)
-    normalizer = logsumexp(alphas[-1])
-
-    betas = np.zeros((T, K))
-    backward_pass(log_Ps, ll, betas)
-
-    # Compute E[z_t] for t = 1, ..., T
-    expected_states = alphas + betas
-    expected_states -= logsumexp(expected_states, axis=1, keepdims=True)
-    expected_states = np.exp(expected_states)
-
-    # Compute E[z_t, z_{t+1}] for t = 1, ..., T-1
-    # Note that this is an array of size T*K*K, which can be quite large.
-    # To be a bit more frugal with memory, first check if the given log_Ps
-    # are TxKxK.  If so, instantiate the full expected joints as well, since
-    # we will need them for the M-step.  However, if log_Ps is 1xKxK then we
-    # know that the transition matrix is stationary, and all we need for the
-    # M-step is the sum of the expected joints.
-    stationary = (log_Ps.shape[0] == 1)
-    if not stationary:
-        expected_joints = alphas[:-1,:,None] + betas[1:,None,:] + ll[1:,None,:] + log_Ps
-        expected_joints -= expected_joints.max((1,2))[:,None, None]
-        expected_joints = np.exp(expected_joints)
-        expected_joints /= expected_joints.sum((1,2))[:,None,None]
-
-    else:
-        # Compute the sum over time axis of the expected joints
-        expected_joints = np.zeros((K, K))
-        compute_stationary_expected_joints(alphas, betas, ll, log_Ps[0], expected_joints)
-        expected_joints = expected_joints[None, :, :]
-
-    return expected_states, expected_joints, normalizer
-
-
-def hmm_filter(log_pi0, log_Ps, ll):
-    T, K = ll.shape
-
-    # Make sure everything is C contiguous
-    log_pi0 = to_c(log_pi0)
-    log_Ps = to_c(log_Ps)
-    ll = to_c(ll)
-
-    # Forward pass gets the predicted state at time t given
-    # observations up to and including those from time t
-    alphas = np.zeros((T, K))
-    forward_pass(log_pi0, log_Ps, ll, alphas)
-
-    # Predict forward with the transition matrix
-    pz_tt = np.exp(alphas - logsumexp(alphas, axis=1, keepdims=True))
-    pz_tp1t = np.matmul(pz_tt[:-1,None,:], np.exp(log_Ps))[:,0,:]
-
-    # Include the initial state distribution
-    pz_tp1t = np.row_stack((np.exp(log_pi0 - logsumexp(log_pi0)), pz_tp1t))
-
-    assert np.allclose(np.sum(pz_tp1t, axis=1), 1.0)
-    return pz_tp1t
-
-
-def hmm_sample(log_pi0, log_Ps, ll):
-    T, K = ll.shape
-
-    # Make sure everything is C contiguous
-    log_pi0 = to_c(log_pi0)
-    log_Ps = to_c(log_Ps)
-    ll = to_c(ll)
-
-    # Forward pass gets the predicted state at time t given
-    # observations up to and including those from time t
-    alphas = np.zeros((T, K))
-    forward_pass(log_pi0, log_Ps, ll, alphas)
-
-    # Sample backward
-    us = npr.rand(T)
-    zs = -1 * np.ones(T, dtype=int)
-    backward_sample(log_Ps, ll, alphas, us, zs)
-    return zs
-
-
-def viterbi(log_pi0, log_Ps, ll):
-    """
-    Find the most likely state sequence
-
-    This is modified from pyhsmm.internals.hmm_states
-    by Matthew Johnson.
-    """
-    T, K = ll.shape
-
-    # Check if the transition matrices are stationary or
-    # time-varying (hetero)
-    hetero = (log_Ps.shape[0] == T-1)
-    if not hetero:
-        assert log_Ps.shape[0] == 1
-
-    # Pass max-sum messages backward
-    scores = np.zeros_like(ll)
-    args = np.zeros_like(ll, dtype=int)
-    for t in range(T-2,-1,-1):
-        vals = log_Ps[t * hetero] + scores[t+1] + ll[t+1]
-        args[t+1] = vals.argmax(axis=1)
-        scores[t] = vals.max(axis=1)
-
-    # Now maximize forwards
-    z = np.zeros(T, dtype=int)
-    z[0] = (scores[0] + log_pi0 + ll[0]).argmax()
-    for t in range(1, T):
-        z[t] = args[t, z[t-1]]
-
-    return z
-
 
 """
 Block tridiagonal system operations:

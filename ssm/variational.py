@@ -3,9 +3,9 @@ import autograd.numpy.random as npr
 
 from ssm.emissions import _LinearEmissions
 from ssm.preprocessing import interpolate_data
-from ssm.primitives import lds_log_probability, lds_sample, lds_mean, \
-                           block_tridiagonal_sample, hmm_expected_states, \
-                           hmm_sample, block_tridiagonal_mean, block_tridiagonal_log_probability
+from ssm.primitives import lds_log_probability, lds_sample, lds_mean, block_tridiagonal_sample, \
+                           block_tridiagonal_mean, block_tridiagonal_log_probability
+from ssm.messages import hmm_expected_states, hmm_sample
 
 from ssm.util import ensure_variational_args_are_lists
 

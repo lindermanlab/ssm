@@ -19,6 +19,16 @@ def logsumexp(x):
 
     return m + np.log(out)
 
+
+@numba.jit(nopython=True, cache=True)
+def dlse(a, out):
+    K = a.shape[0]
+    lse = logsumexp(a)
+    for k in range(K):
+        out[k] = np.exp(a[k] - lse)
+
+
+
 @numba.jit(nopython=True, cache=True)
 def forward_pass(pi0,
                  Ps,
@@ -42,6 +52,27 @@ def forward_pass(pi0,
         m = np.max(alphas[t])
         alphas[t+1] = np.log(np.dot(np.exp(alphas[t] - m), Ps[t * hetero])) + m + log_likes[t+1]
     return logsumexp(alphas[T-1])
+
+
+
+@numba.jit(nopython=True, cache=True)
+def hmm_filter(pi0, Ps, ll):
+    T, K = ll.shape
+
+    # Forward pass gets the predicted state at time t given
+    # observations up to and including those from time t
+    alphas = np.zeros((T, K))
+    forward_pass(pi0, Ps, ll, alphas)
+
+    # Predict forward with the transition matrix
+    pz_tt = np.exp(alphas - logsumexp(alphas, axis=1, keepdims=True))
+    pz_tp1t = np.matmul(pz_tt[:-1,None,:], Ps)[:,0,:]
+
+    # Include the initial state distribution
+    pz_tp1t = np.row_stack(pi0, pz_tp1t)
+
+    assert np.allclose(np.sum(pz_tp1t, axis=1), 1.0)
+    return pz_tp1t
 
 
 @numba.jit(nopython=True, cache=True)
@@ -71,6 +102,230 @@ def backward_pass(Ps,
         betas[t] = np.log(np.dot(Ps[t * hetero], np.exp(tmp - m))) + m
 
 
+
+@numba.jit(nopython=True, cache=True)
+def _compute_stationary_expected_joints(alphas, betas, lls, log_P, E_zzp1):
+    """
+    Helper function to compute summary statistics, summing over time.
+    NOTE: Can rewrite this in nicer form with Numba.
+    """
+    T = alphas.shape[0]
+    K = alphas.shape[1]
+    assert betas.shape[0] == T and betas.shape[1] == K
+    assert lls.shape[0] == T and lls.shape[1] == K
+    assert log_P.shape[0] == K and log_P.shape[1] == K
+    assert E_zzp1.shape[0] == K and E_zzp1.shape[1] == K
+
+    tmp = np.zeros((K, K))
+
+    # Compute the sum over time axis of the expected joints
+    for t in range(T-1):
+        maxv = -np.inf
+        for i in range(K):
+            for j in range(K):
+                # Compute expectations in this batch
+                tmp[i, j] = alphas[t,i] + betas[t+1,j] + lls[t+1,j] + log_P[i, j]
+                if tmp[i, j] > maxv:
+                    maxv = tmp[i, j]
+
+        # safe exponentiate
+        tmpsum = 0.0
+        for i in range(K):
+            for j in range(K):
+                tmp[i, j] = np.exp(tmp[i, j] - maxv)
+                tmpsum += tmp[i, j]
+
+        # Add to expected joints
+        for i in range(K):
+            for j in range(K):
+                E_zzp1[i, j] += tmp[i, j] / (tmpsum + 1e-16)
+
+
+def hmm_expected_states(pi0, Ps, ll):
+    T, K = ll.shape
+
+    alphas = np.zeros((T, K))
+    forward_pass(pi0, Ps, ll, alphas)
+    normalizer = logsumexp(alphas[-1])
+
+    betas = np.zeros((T, K))
+    backward_pass(Ps, ll, betas)
+
+    # Compute E[z_t] for t = 1, ..., T
+    expected_states = alphas + betas
+    expected_states -= scsp.logsumexp(expected_states, axis=1, keepdims=True)
+    expected_states = np.exp(expected_states)
+
+    # Compute E[z_t, z_{t+1}] for t = 1, ..., T-1
+    # Note that this is an array of size T*K*K, which can be quite large.
+    # To be a bit more frugal with memory, first check if the given log_Ps
+    # are TxKxK.  If so, instantiate the full expected joints as well, since
+    # we will need them for the M-step.  However, if log_Ps is 1xKxK then we
+    # know that the transition matrix is stationary, and all we need for the
+    # M-step is the sum of the expected joints.
+    stationary = (Ps.shape[0] == 1)
+    if not stationary:
+        expected_joints = alphas[:-1,:,None] + betas[1:,None,:] + ll[1:,None,:] + np.log(Ps + 1e-16)
+        expected_joints -= expected_joints.max((1,2))[:,None, None]
+        expected_joints = np.exp(expected_joints)
+        expected_joints /= expected_joints.sum((1,2))[:,None,None]
+
+    else:
+        # Compute the sum over time axis of the expected joints
+        expected_joints = np.zeros((K, K))
+        _compute_stationary_expected_joints(alphas, betas, ll, np.log(Ps[0] + 1e-16), expected_joints)
+        expected_joints = expected_joints[None, :, :]
+
+    return expected_states, expected_joints, normalizer
+
+
+@numba.jit(nopython=True, cache=True)
+def backward_sample(Ps, log_likes, alphas, us, zs):
+    T = log_likes.shape[0]
+    K = log_likes.shape[1]
+    assert Ps.shape[0] == T-1 or Ps.shape[0] == 1
+    assert Ps.shape[1] == K
+    assert Ps.shape[2] == K
+    assert alphas.shape[0] == T
+    assert alphas.shape[1] == K
+    assert us.shape[0] == T
+    assert zs.shape[0] == T
+
+    lpzp1 = np.zeros(K)
+    lpz = np.zeros(K)
+
+    # Trick for handling time-varying transition matrices
+    hetero = (Ps.shape[0] == T-1)
+
+    for t in range(T-1,-1,-1):
+        # compute normalized log p(z[t] = k | z[t+1])
+        lpz = lpzp1 + alphas[t]
+        Z = logsumexp(lpz)
+
+        # sample
+        acc = 0
+        zs[t] = K-1
+        for k in range(K):
+            acc += np.exp(lpz[k] - Z)
+            if us[t] < acc:
+                zs[t] = k
+                break
+
+        # set the transition potential
+        if t > 0:
+            lpzp1 = np.log(Ps[(t-1) * hetero, :, zs[t]])
+
+
+@numba.jit(nopython=True, cache=True)
+def hmm_sample(pi0, Ps, ll):
+    T, K = ll.shape
+
+    # Forward pass gets the predicted state at time t given
+    # observations up to and including those from time t
+    alphas = np.zeros((T, K))
+    forward_pass(pi0, Ps, ll, alphas)
+
+    # Sample backward
+    us = npr.rand(T)
+    zs = -1 * np.ones(T, dtype=int)
+    backward_sample(Ps, ll, alphas, us, zs)
+    return zs
+
+
+@numba.jit(nopython=True, cache=True)
+def viterbi(pi0, Ps, ll):
+    """
+    Find the most likely state sequence
+
+    This is modified from pyhsmm.internals.hmm_states
+    by Matthew Johnson.
+    """
+    T, K = ll.shape
+
+    # Check if the transition matrices are stationary or
+    # time-varying (hetero)
+    hetero = (Ps.shape[0] == T-1)
+    if not hetero:
+        assert Ps.shape[0] == 1
+
+    # Pass max-sum messages backward
+    scores = np.zeros((T, K))
+    args = np.zeros((T, K))
+    for t in range(T-2,-1,-1):
+        vals = np.log(Ps[t * hetero]) + scores[t+1] + ll[t+1]
+        for k in range(K):
+            args[t+1, k] = np.argmax(vals[k])
+            scores[t, k] = np.max(vals[k])
+
+    # Now maximize forwards
+    z = np.zeros(T)
+    z[0] = (scores[0] + np.log(pi0) + ll[0]).argmax()
+    for t in range(1, T):
+        z[t] = args[t, int(z[t-1])]
+
+    return z
+
+
+@numba.jit(nopython=True, cache=True)
+def grad_hmm_normalizer(log_Ps,
+                        alphas,
+                        d_log_pi0,
+                        d_log_Ps,
+                        d_log_likes):
+
+    T = alphas.shape[0]
+    K = alphas.shape[1]
+    assert (log_Ps.shape[0] == T-1) or (log_Ps.shape[0] == 1)
+    assert d_log_Ps.shape[0] == log_Ps.shape[0]
+    assert log_Ps.shape[1] == d_log_Ps.shape[1] == K
+    assert log_Ps.shape[2] == d_log_Ps.shape[2] == K
+    assert d_log_pi0.shape[0] == K
+    assert d_log_likes.shape[0] == T
+    assert d_log_likes.shape[1] == K
+
+    # Initialize temp storage for gradients
+    tmp1 = np.zeros((K,))
+    tmp2 = np.zeros((K, K))
+
+    # Trick for handling time-varying transition matrices
+    hetero = (log_Ps.shape[0] == T-1)
+
+    dlse(alphas[T-1], d_log_likes[T-1])
+    for t in range(T-1, 0, -1):
+        # tmp2 = dLSE_da(alphas[t-1], log_Ps[t-1])
+        #      = np.exp(alphas[t-1] + log_Ps[t-1].T - logsumexp(alphas[t-1] + log_Ps[t-1].T, axis=1))
+        #      = [dlse(alphas[t-1] + log_Ps[t-1, :, k]) for k in range(K)]
+        for k in range(K):
+            for j in range(K):
+                tmp1[j] = alphas[t-1, j] + log_Ps[(t-1) * hetero, j, k]
+            dlse(tmp1, tmp2[k])
+
+
+        # d_log_Ps[t-1] = vjp_LSE_B(alphas[t-1], log_Ps[t-1], d_log_likes[t])
+        #               = d_log_likes[t] * dLSE_da(alphas[t-1], log_Ps[t-1]).T
+        #               = d_log_likes[t] * tmp2.T
+        #
+        # d_log_Ps[t-1, j, k] = d_log_likes[t, k] * tmp2.T[j, k]
+        #                     = d_log_likes[t, k] * tmp2[k, j]
+        for j in range(K):
+            for k in range(K):
+                d_log_Ps[(t-1) * hetero, j, k] += d_log_likes[t, k] * tmp2[k, j]
+
+        # d_log_likes[t-1] = d_log_likes[t].dot(dLSE_da(alphas[t-1], log_Ps[t-1]))
+        #                  = d_log_likes[t].dot(tmp2)
+        for k in range(K):
+            d_log_likes[t-1, k] = 0
+            for j in range(K):
+                d_log_likes[t-1, k] += d_log_likes[t, j] * tmp2[j, k]
+
+    # d_log_pi0 = d_log_likes[0]
+    for k in range(K):
+        d_log_pi0[k] = d_log_likes[0, k]
+
+
+##
+# Gaussian linear dynamical systems message passing code
+##
 @numba.jit(nopython=True, cache=True)
 def _condition_on(m, S, C, D, R, u, y, mcond, Scond):
     # Condition a Gaussian potential on a new linear Gaussian observation

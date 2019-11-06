@@ -10,8 +10,8 @@ from autograd import value_and_grad, grad
 
 from .optimizers import adam_step, rmsprop_step, sgd_step, lbfgs, bfgs, convex_combination
 from .optimizers import adam, sgd, rmsprop
-from .primitives import hmm_normalizer, hmm_expected_states, hmm_filter, \
-    hmm_sample, viterbi, symm_block_tridiag_matmul
+from .primitives import hmm_normalizer, symm_block_tridiag_matmul
+from .messages import hmm_expected_states, hmm_filter, hmm_sample, viterbi
 from .util import ensure_args_are_lists, ensure_args_not_none, \
     ensure_slds_args_not_none, ensure_variational_args_are_lists, \
     replicate, collapse, newtons_method_block_tridiag_hessian
