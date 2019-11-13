@@ -146,7 +146,7 @@ class StickyTransitions(StationaryTransitions):
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         expected_joints = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations]) + 1e-8
-        expected_joints += self.kappa * np.eye(self.K)
+        expected_joints += self.kappa * np.eye(self.K) + (self.alpha-1) * np.ones((self.K, self.K))
         P = expected_joints / expected_joints.sum(axis=1, keepdims=True)
         self.log_Ps = np.log(P)
 
