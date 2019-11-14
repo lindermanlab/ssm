@@ -196,17 +196,7 @@ class ExponentialObservations(Observations):
         weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
             self.log_lambdas[k] = -np.log(np.average(x, axis=0, weights=weights[:,k]) + 1e-16)
-        
-#        K, D = self.K, self.D
-#        J = np.zeros((K, D))
-#        h = np.zeros((K, D))
-#        for (Ez, _, _), y in zip(expectations, datas):
-#            J += np.sum(Ez[:, :, None], axis=0)
-#            h += np.sum(Ez[:, :, None] * y[:, None, :], axis=0)
-#        test2 = -np.log(h / J) #self.mus
-#        
-#        return test1,test2
-        
+                
     def smooth(self, expectations, data, input, tag):
         """
         Compute the mean observation under the posterior distribution
