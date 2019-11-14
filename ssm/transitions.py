@@ -145,9 +145,9 @@ class StickyTransitions(StationaryTransitions):
         return lp
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        expected_joints = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations]) 
-        expected_joints += self.kappa * np.eye(self.K) + (self.alpha-1) * np.ones((self.K, self.K)) + 1e-16
-        P = expected_joints / expected_joints.sum(axis=1, keepdims=True) 
+        expected_joints = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations]) + 1e-16
+        expected_joints += self.kappa * np.eye(self.K) + (self.alpha-1) * np.ones((self.K, self.K)) 
+        P = (expected_joints / expected_joints.sum(axis=1, keepdims=True)) + 1e-16
         assert np.all(P >= 0), "mode is well defined only when transition matrix entries are non-negative! Check alpha >= 1"
         self.log_Ps = np.log(P)
 
