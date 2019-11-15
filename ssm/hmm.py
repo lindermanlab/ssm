@@ -83,6 +83,7 @@ class HMM(object):
             t=obs.MultivariateStudentsTObservations,
             diagonal_t=obs.StudentsTObservations,
             diagonal_studentst=obs.StudentsTObservations,
+            exponential=obs.ExponentialObservations,
             bernoulli=obs.BernoulliObservations,
             categorical=obs.CategoricalObservations,
             poisson=obs.PoissonObservations,

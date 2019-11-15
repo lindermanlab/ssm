@@ -15,9 +15,11 @@ from ssm.cstats import robust_ar_statistics
 from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
 import ssm.stats as stats
 
-
 class Observations(object):
-
+    # K = number of discrete states
+    # D = number of observed dimensions
+    # M = exogenous input dimensions (the inputs modulate the probability of discrete state transitions via a multiclass logistic regression)
+    
     def __init__(self, K, D, M=0):
         self.K, self.D, self.M = K, D, M
 
@@ -156,6 +158,51 @@ class GaussianObservations(Observations):
         """
         return expectations.dot(self.mus)
 
+class ExponentialObservations(Observations):
+    def __init__(self, K, D, M=0):
+        super(ExponentialObservations, self).__init__(K, D, M)
+        self.log_lambdas = npr.randn(K, D)
+
+    @property
+    def params(self):
+        return self.log_lambdas
+
+    @params.setter
+    def params(self, value):
+        self.log_lambdas = value
+
+    def permute(self, perm):
+        self.log_lambdas = self.log_lambdas[perm]
+
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
+        # Initialize with KMeans
+        from sklearn.cluster import KMeans
+        data = np.concatenate(datas)
+        km = KMeans(self.K).fit(data)
+        self.log_lambdas = -np.log(km.cluster_centers_ + 1e-3)
+
+    def log_likelihoods(self, data, input, mask, tag):
+        lambdas = np.exp(self.log_lambdas)
+        mask = np.ones_like(data, dtype=bool) if mask is None else mask
+        return stats.exponential_logpdf(data[:, None, :], lambdas, mask=mask[:, None, :])
+
+    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
+        lambdas = np.exp(self.log_lambdas)
+        return npr.exponential(1/lambdas[z])
+
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        x = np.concatenate(datas)
+        weights = np.concatenate([Ez for Ez, _, _ in expectations])
+        for k in range(self.K):
+            self.log_lambdas[k] = -np.log(np.average(x, axis=0, weights=weights[:,k]) + 1e-16)
+                
+    def smooth(self, expectations, data, input, tag):
+        """
+        Compute the mean observation under the posterior distribution
+        of latent discrete states.
+        """
+        return expectations.dot(1/np.exp(self.log_lambdas))
 
 class DiagonalGaussianObservations(Observations):
     def __init__(self, K, D, M=0):

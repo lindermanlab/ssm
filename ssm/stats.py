@@ -637,3 +637,37 @@ def vonmises_logpdf(data, mus, kappas, mask=None):
 
     ll = kappas * np.cos(data - mus) - np.log(2 * np.pi) - np.log(i0(kappas))
     return np.sum(ll * mask, axis=-1)
+
+
+def exponential_logpdf(data, lambdas, mask=None):
+    """
+    Compute the log probability density of an exponential distribution.
+    This will broadcast as long as data and lambdas have the same
+    (or at least compatible) leading dimensions.
+
+    Parameters
+    ----------
+    data : array_like (..., D)
+        The points at which to evaluate the log density
+
+    lambdas : array_like (..., D)
+        The rates of the Poisson distribution(s)
+
+    mask : array_like (..., D) bool
+        Optional mask indicating which entries in the data are observed
+
+    Returns
+    -------
+    lps : array_like (...,)
+        Log probabilities under the Poisson distribution(s).
+    """
+    D = data.shape[-1]
+    assert lambdas.shape[-1] == D
+
+    # Check mask
+    mask = mask if mask is not None else np.ones_like(data, dtype=bool)
+    assert mask.shape == data.shape
+
+    # Compute log pdf
+    lls = np.log(lambdas) - lambdas * data
+    return np.sum(lls * mask, axis=-1)

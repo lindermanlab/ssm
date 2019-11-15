@@ -26,6 +26,7 @@ def test_sample(T=10, K=4, D=3, M=2):
         "diagonal_gaussian",
         "t",
         "diagonal_t",
+        "exponential",
         "bernoulli",
         "categorical",
         "poisson",
