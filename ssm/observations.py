@@ -797,6 +797,23 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         self.l2_penalty_b = l2_penalty_b
         self.l2_penalty_V = l2_penalty_V
 
+    @property
+    def A(self):
+        return self.As[0]
+
+    @A.setter
+    def A(self, value):
+        assert value.shape == self.As[0].shape
+        self.As[0] = value
+
+    @property
+    def b(self):
+        return self.bs[0]
+
+    @b.setter
+    def b(self, value):
+        assert value.shape == self.bs[0].shape
+        self.bs[0] == value
 
     @property
     def Sigmas_init(self):

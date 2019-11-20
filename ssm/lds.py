@@ -1014,3 +1014,7 @@ class LDS(SLDS):
             assert np.isfinite(elbo)
 
         return elbo / n_samples
+    
+    def sample(self, T, input=None, tag=None, prefix=None, with_noise=True):
+        (_, x, y) = super().sample(T, input=input, tag=tag, prefix=prefix, with_noise=with_noise)
+        return (x, y)
