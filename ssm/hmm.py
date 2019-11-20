@@ -42,9 +42,11 @@ class HMM(object):
         # Make the initial state distribution
         if init_state_distn is None:
             init_state_distn = isd.InitialStateDistribution(K, D, M=M)
-        if not isinstance(init_state_distn, isd.InitialStateDistribution):
+        if not (isinstance(init_state_distn, isd.InitialStateDistribution) \
+            or isinstance(init_state_distn, isd.FixedInitialStateDistribution)):
             raise TypeError("'init_state_distn' must be a subclass of"
-                            " ssm.init_state_distns.InitialStateDistribution")
+                            " ssm.init_state_distns.InitialStateDistribution"
+                            " or ssm.init_state_distns.FixedInitialStateDistribution")
 
         # Make the transition model
         transition_classes = dict(
