@@ -45,3 +45,17 @@ class InitialStateDistribution(object):
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         pi0 = sum([Ez[0] for Ez, _, _ in expectations]) + 1e-8
         self.log_pi0 = np.log(pi0 / pi0.sum())
+
+
+class FixedInitialStateDistribution(InitialStateDistribution):
+    def __init__(self, K, D, pi0=None, M=0):
+        super(FixedInitialStateDistribution, self).__init__(K, D, M=M)
+        if pi0 is not None:
+            # Handle the case where user passes a numpy array of (K, 1) instead of (K,)
+            pi0 = np.squeeze(np.array(pi0))
+            assert len(pi0) == K, "Array passed as pi0 is of the wrong length"
+            self.log_pi0 = np.log(pi0 + 1e-16)
+
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        # Don't change the distribution
+        pass
