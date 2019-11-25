@@ -16,7 +16,6 @@ from ssm.optimizers import adam, bfgs, lbfgs, rmsprop, sgd
 class Transitions(object):
     def __init__(self, K, D, M=0):
         self.K, self.D, self.M = K, D, M
-        self.type_name = self.__class__.__name__
 
     @property
     def params(self):
@@ -38,6 +37,9 @@ class Transitions(object):
 
     def log_transition_matrices(self, data, input, mask, tag):
         raise NotImplementedError
+
+    def transition_matrices(self, data, input, mask, tag):
+        return np.exp(self.log_transition_matrices(data, input, mask, tag))
 
     def m_step(self, expectations, datas, inputs, masks, tags,
                optimizer="lbfgs", num_iters=100, **kwargs):
@@ -255,7 +257,7 @@ class RecurrentTransitions(InputDrivenTransitions):
         Ez = np.sum(expected_joints, axis=2) # marginal over z from T=1 to T-1
         for k in range(self.K):
             vtilde = vtildes[:,k,:] # normalized probabilities given state k
-            Rv = vtilde@self.Rs
+            Rv = vtilde @ self.Rs
             hess += Ez[:,k][:,None,None] * \
                     ( np.einsum('tn, ni, nj ->tij', -vtilde, self.Rs, self.Rs) \
                     + np.einsum('ti, tj -> tij', Rv, Rv))

@@ -6,7 +6,8 @@ import autograd.numpy.random as npr
 from autograd import value_and_grad
 
 from ssm.optimizers import adam_step, rmsprop_step, sgd_step, convex_combination
-from ssm.primitives import hmm_normalizer, hmm_expected_states, hmm_filter, hmm_sample, viterbi
+from ssm.primitives import hmm_normalizer
+from ssm.messages import hmm_expected_states, hmm_filter, hmm_sample, viterbi
 from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
     ensure_slds_args_not_none, ensure_variational_args_are_lists, \
     replicate, collapse
@@ -210,7 +211,7 @@ class HMM(object):
             mask = np.ones((T,) + D, dtype=bool)
 
             # Sample the first state from the initial distribution
-            pi0 = np.exp(self.init_state_distn.log_initial_state_distn(data, input, mask, tag))
+            pi0 = self.init_state_distn.initial_state_distn(data, input, mask, tag)
             z[0] = npr.choice(self.K, p=pi0)
             data[0] = self.observations.sample_x(z[0], data[:0], input=input[0], with_noise=with_noise)
 
@@ -232,7 +233,7 @@ class HMM(object):
 
         # Fill in the rest of the data
         for t in range(pad, pad+T):
-            Pt = np.exp(self.transitions.log_transition_matrices(data[t-1:t+1], input[t-1:t+1], mask=mask[t-1:t+1], tag=tag))[0]
+            Pt = self.transitions.transition_matrices(data[t-1:t+1], input[t-1:t+1], mask=mask[t-1:t+1], tag=tag)[0]
             z[t] = npr.choice(self.K, p=Pt[z[t-1]])
             data[t] = self.observations.sample_x(z[t], data[:t], input=input[t], tag=tag, with_noise=with_noise)
 
@@ -245,24 +246,24 @@ class HMM(object):
 
     @ensure_args_not_none
     def expected_states(self, data, input=None, mask=None, tag=None):
-        log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
-        log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+        pi0 = self.init_state_distn.initial_state_distn(data, input, mask, tag)
+        Ps = self.transitions.transition_matrices(data, input, mask, tag)
         log_likes = self.observations.log_likelihoods(data, input, mask, tag)
-        return hmm_expected_states(log_pi0, log_Ps, log_likes)
+        return hmm_expected_states(pi0, Ps, log_likes)
 
     @ensure_args_not_none
     def most_likely_states(self, data, input=None, mask=None, tag=None):
-        log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
-        log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+        pi0 = self.init_state_distn.initial_state_distn(data, input, mask, tag)
+        Ps = self.transitions.transition_matrices(data, input, mask, tag)
         log_likes = self.observations.log_likelihoods(data, input, mask, tag)
-        return viterbi(log_pi0, log_Ps, log_likes)
+        return viterbi(pi0, Ps, log_likes)
 
     @ensure_args_not_none
     def filter(self, data, input=None, mask=None, tag=None):
-        log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
-        log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+        pi0 = self.init_state_distn.initial_state_distn(data, input, mask, tag)
+        Ps = self.transitions.transition_matrices(data, input, mask, tag)
         log_likes = self.observations.log_likelihoods(data, input, mask, tag)
-        return hmm_filter(log_pi0, log_Ps, log_likes)
+        return hmm_filter(pi0, Ps, log_likes)
 
     @ensure_args_not_none
     def smooth(self, data, input=None, mask=None, tag=None):
@@ -292,10 +293,10 @@ class HMM(object):
         """
         ll = 0
         for data, input, mask, tag in zip(datas, inputs, masks, tags):
-            log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
-            log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+            pi0 = self.init_state_distn.initial_state_distn(data, input, mask, tag)
+            Ps = self.transitions.transition_matrices(data, input, mask, tag)
             log_likes = self.observations.log_likelihoods(data, input, mask, tag)
-            ll += hmm_normalizer(log_pi0, log_Ps, log_likes)
+            ll += hmm_normalizer(pi0, Ps, log_likes)
             assert np.isfinite(ll)
         return ll
 
@@ -312,17 +313,14 @@ class HMM(object):
         :return total log probability of the data.
         """
         ell = 0.0
-        for (Ez, Ezzp1, _), data, inp, mask, tag in \
+        for (Ez, Ezzp1, _), data, input, mask, tag in \
                 zip(expectations, datas, inputs, masks, tags):
 
-            log_pi0 = self.init_state_distn.log_initial_state_distn(
-                data, inp, mask, tag)
-            log_Ps = self.transitions.log_transition_matrices(
-                data, inp, mask, tag)
-            log_likes = self.observations.log_likelihoods(
-                data, inp, mask, tag)
+            pi0 = self.init_state_distn.initial_state_distn(data, input, mask, tag)
+            log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+            log_likes = self.observations.log_likelihoods(data, input, mask, tag)
 
-            ell += np.sum(Ez[0] * log_pi0)
+            ell += np.sum(Ez[0] * np.log(pi0))
             ell += np.sum(Ezzp1 * log_Ps)
             ell += np.sum(Ez * log_likes)
             assert np.isfinite(ell)
@@ -393,14 +391,14 @@ class HMM(object):
 
             # M step: set the parameter and compute the (normalized) objective function
             self.params = params
-            log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
+            pi0 = self.init_state_distn.initial_state_distn(data, input, mask, tag)
             log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
             log_likes = self.observations.log_likelihoods(data, input, mask, tag)
 
             # Compute the expected log probability
             # (Scale by number of length of this minibatch.)
             obj = self.log_prior()
-            obj += np.sum(Ez[0] * log_pi0) * M
+            obj += np.sum(Ez[0] * np.log(pi0)) * M
             obj += np.sum(Ezzp1 * log_Ps) * (T - M) / (Ti - 1)
             obj += np.sum(Ez * log_likes) * T / Ti
             assert np.isfinite(obj)
@@ -649,7 +647,7 @@ class HSMM(HMM):
 
         # Fill in the rest of the data
         for t in range(pad, pad+T):
-            Pt = np.exp(self.transitions.log_transition_matrices(data[t-1:t+1], input[t-1:t+1], mask=mask[t-1:t+1], tag=tag))[0]
+            Pt = self.transitions.transition_matrices(data[t-1:t+1], input[t-1:t+1], mask=mask[t-1:t+1], tag=tag)[0]
             z[t] = npr.choice(K_total, p=Pt[z[t-1]])
             data[t] = self.observations.sample_x(m[z[t]], data[:t], input=input[t], tag=tag, with_noise=with_noise)
 
@@ -666,10 +664,10 @@ class HSMM(HMM):
     @ensure_args_not_none
     def expected_states(self, data, input=None, mask=None, tag=None):
         m = self.state_map
-        log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
-        log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+        pi0 = self.init_state_distn.initial_state_distn(data, input, mask, tag)
+        Ps = self.transitions.transition_matrices(data, input, mask, tag)
         log_likes = self.observations.log_likelihoods(data, input, mask, tag)
-        Ez, Ezzp1, normalizer = hmm_expected_states(replicate(log_pi0, m), log_Ps, replicate(log_likes, m))
+        Ez, Ezzp1, normalizer = hmm_expected_states(replicate(pi0, m), Ps, replicate(log_likes, m))
 
         # Collapse the expected states
         Ez = collapse(Ez, m)
@@ -679,28 +677,28 @@ class HSMM(HMM):
     @ensure_args_not_none
     def most_likely_states(self, data, input=None, mask=None, tag=None):
         m = self.state_map
-        log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
-        log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+        pi0 = self.init_state_distn.initial_state_distn(data, input, mask, tag)
+        Ps = self.transitions.transition_matrices(data, input, mask, tag)
         log_likes = self.observations.log_likelihoods(data, input, mask, tag)
-        z_star = viterbi(replicate(log_pi0, m), log_Ps, replicate(log_likes, m))
+        z_star = viterbi(replicate(pi0, m), Ps, replicate(log_likes, m))
         return self.state_map[z_star]
 
     @ensure_args_not_none
     def filter(self, data, input=None, mask=None, tag=None):
         m = self.state_map
-        log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
-        log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+        pi0 = self.init_state_distn.initial_state_distn(data, input, mask, tag)
+        Ps = self.transitions.transition_matrices(data, input, mask, tag)
         log_likes = self.observations.log_likelihoods(data, input, mask, tag)
-        pzp1 = hmm_filter(replicate(log_pi0, m), log_Ps, replicate(log_likes, m))
+        pzp1 = hmm_filter(replicate(pi0, m), Ps, replicate(log_likes, m))
         return collapse(pzp1, m)
 
     @ensure_args_not_none
     def posterior_sample(self, data, input=None, mask=None, tag=None):
         m = self.state_map
-        log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
-        log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+        pi0 = self.init_state_distn.initial_state_distn(data, input, mask, tag)
+        Ps = self.transitions.transition_matrices(data, input, mask, tag)
         log_likes = self.observations.log_likelihoods(data, input, mask, tag)
-        z_smpl = hmm_sample(replicate(log_pi0, m), log_Ps, replicate(log_likes, m))
+        z_smpl = hmm_sample(replicate(pi0, m), Ps, replicate(log_likes, m))
         return self.state_map[z_smpl]
 
     @ensure_args_not_none
@@ -725,10 +723,10 @@ class HSMM(HMM):
         m = self.state_map
         ll = 0
         for data, input, mask, tag in zip(datas, inputs, masks, tags):
-            log_pi0 = self.init_state_distn.log_initial_state_distn(data, input, mask, tag)
-            log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+            pi0 = self.init_state_distn.initial_state_distn(data, input, mask, tag)
+            Ps = self.transitions.transition_matrices(data, input, mask, tag)
             log_likes = self.observations.log_likelihoods(data, input, mask, tag)
-            ll += hmm_normalizer(replicate(log_pi0, m), log_Ps, replicate(log_likes, m))
+            ll += hmm_normalizer(replicate(pi0, m), Ps, replicate(log_likes, m))
             assert np.isfinite(ll)
         return ll
 

@@ -186,6 +186,45 @@ def test_viterbi(T=1000, K=20, D=2):
     assert np.allclose(z_star, z_star2)
 
 
+def test_hmm_mp_perf(T=10000, K=100, D=20):
+    # Make parameters
+    pi0 = np.ones(K) / K
+    Ps = npr.rand(T-1, K, K)
+    Ps /= Ps.sum(axis=2, keepdims=True)
+    ll = npr.randn(T, K)
+    out1 = np.zeros((T, K))
+    out2 = np.zeros((T, K))
+
+    # Run the PyHSMM message passing code
+    from pyhsmm.internals.hmm_messages_interface import messages_forwards_log, messages_backwards_log
+    tic = time()
+    messages_forwards_log(Ps, ll, pi0, out1)
+    pyhsmm_dt = time() - tic
+    print("PyHSMM Fwd: ", pyhsmm_dt, "sec")
+
+    # Run the SSM message passing code
+    from ssm.messages import forward_pass, backward_pass
+    forward_pass(pi0, Ps, ll, out2) # Call once to compile, then time it
+    tic = time()
+    forward_pass(pi0, Ps, ll, out2)
+    smm_dt = time() - tic
+    print("SMM Fwd: ", smm_dt, "sec")
+    assert np.allclose(out1, out2)
+
+    # Backward pass
+    tic = time()
+    messages_backwards_log(Ps, ll, out1)
+    pyhsmm_dt = time() - tic
+    print("PyHSMM Bwd: ", pyhsmm_dt, "sec")
+
+    backward_pass(Ps, ll, out2) # Call once to compile, then time it
+    tic = time()
+    backward_pass(Ps, ll, out2)
+    smm_dt = time() - tic
+    print("SMM (Numba) Bwd: ", smm_dt, "sec")
+    assert np.allclose(out1, out2)
+
+
 def test_hmm_likelihood_perf(T=10000, K=50, D=20):
     # Create a true HMM
     A = npr.rand(K, K)
@@ -242,4 +281,5 @@ def test_hmm_likelihood_perf(T=10000, K=50, D=20):
 
 
 if __name__ == "__main__":
-    test_hmm_likelihood_perf()
+    # test_hmm_likelihood_perf()
+    test_hmm_mp_perf()
