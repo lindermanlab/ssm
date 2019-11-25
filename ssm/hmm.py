@@ -425,7 +425,7 @@ class HMM(object):
 
         return lls
 
-    def _fit_em(self, datas, inputs, masks, tags, num_em_iters=100, tolerance=0,
+    def _fit_em(self, datas, inputs, masks, tags, num_iters=100, tolerance=0,
                 init_state_mstep_kwargs={},
                 transitions_mstep_kwargs={},
                 observations_mstep_kwargs={}):
@@ -437,7 +437,7 @@ class HMM(object):
         """
         lls = [self.log_probability(datas, inputs, masks, tags)]
 
-        pbar = trange(num_em_iters)
+        pbar = trange(num_iters)
         pbar.set_description("LP: {:.1f}".format(lls[-1]))
         for itr in pbar:
             # E step: compute expected latent states with current parameters
@@ -742,7 +742,7 @@ class HSMM(HMM):
         """
         raise NotImplementedError("Need to get raw expectations for the expected transition probability.")
 
-    def _fit_em(self, datas, inputs, masks, tags, num_em_iters=100, **kwargs):
+    def _fit_em(self, datas, inputs, masks, tags, num_iters=100, **kwargs):
         """
         Fit the parameters with expectation maximization.
 
@@ -751,7 +751,7 @@ class HSMM(HMM):
         """
         lls = [self.log_probability(datas, inputs, masks, tags)]
 
-        pbar = trange(num_em_iters)
+        pbar = trange(num_iters)
         pbar.set_description("LP: {:.1f}".format(lls[-1]))
         for itr in pbar:
             # E step: compute expected latent states with current parameters
