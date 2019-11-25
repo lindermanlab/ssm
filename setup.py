@@ -11,14 +11,6 @@ print("USE_OPENMP", USE_OPENMP)
 
 # Create the extensions. Manually enumerate the required
 extensions = []
-extensions.append(
-    Extension('ssm.messages',
-              extra_compile_args=[],
-              extra_link_args=[],
-              language="c++",
-              sources=["ssm/messages.pyx"],
-              )
-)
 
 extensions.append(
     Extension('ssm.cstats',
