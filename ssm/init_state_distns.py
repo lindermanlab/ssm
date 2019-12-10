@@ -23,9 +23,12 @@ class InitialStateDistribution(object):
         self.log_pi0 = value[0]
 
     @property
-    def pi0(self):
+    def initial_state_distn(self):
         return np.exp(self.log_pi0 - logsumexp(self.log_pi0))
 
+    @property
+    def log_initial_state_distn(self):
+        return self.log_pi0 - logsumexp(self.log_pi0)
 
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
@@ -36,9 +39,6 @@ class InitialStateDistribution(object):
         Permute the discrete latent states.
         """
         self.log_pi0 = self.log_pi0[perm]
-
-    def initial_state_distn(self, data, input, mask, tag):
-        return self.pi0
 
     def log_prior(self):
         return 0

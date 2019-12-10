@@ -166,7 +166,7 @@ class SLDS(object):
         self.emissions.params = value[3]
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, num_em_iters=25):
+    def initialize(self, datas, inputs=None, masks=None, tags=None, num_iters=25):
         # First initialize the observation model
         self.emissions.initialize(datas, inputs, masks, tags)
 
@@ -176,14 +176,14 @@ class SLDS(object):
         xmasks = [np.ones_like(x, dtype=bool) for x in xs]
 
         # Now run a few iterations of EM on a ARHMM with the variational mean
-        print("Initializing with an ARHMM using {} steps of EM.".format(num_em_iters))
+        print("Initializing with an ARHMM using {} steps of EM.".format(num_iters))
         arhmm = hmm.HMM(self.K, self.D, M=self.M,
                         init_state_distn=copy.deepcopy(self.init_state_distn),
                         transitions=copy.deepcopy(self.transitions),
                         observations=copy.deepcopy(self.dynamics))
 
         arhmm.fit(xs, inputs=inputs, masks=xmasks, tags=tags,
-                  method="em", num_em_iters=num_em_iters)
+                  method="em", num_iters=num_iters)
 
         self.init_state_distn = copy.deepcopy(arhmm.init_state_distn)
         self.transitions = copy.deepcopy(arhmm.transitions)
@@ -226,7 +226,7 @@ class SLDS(object):
             xmask = np.ones((T+1,) + D, dtype=bool)
 
             # Sample the first state from the initial distribution
-            pi0 = np.exp(self.init_state_distn.log_initial_state_distn(data, input, xmask, tag))
+            pi0 = self.init_state_distn.initial_state_distn
             z[0] = npr.choice(self.K, p=pi0)
             x[0] = self.dynamics.sample_x(z[0], x[:0], tag=tag, with_noise=with_noise)
 
@@ -257,19 +257,19 @@ class SLDS(object):
     @ensure_slds_args_not_none
     def expected_states(self, variational_mean, data, input=None, mask=None, tag=None):
         x_mask = np.ones_like(variational_mean, dtype=bool)
-        log_pi0 = self.init_state_distn.log_initial_state_distn(variational_mean, input, x_mask, tag)
-        log_Ps = self.transitions.log_transition_matrices(variational_mean, input, x_mask, tag)
+        pi0 = self.init_state_distn.log_initial_state_distn
+        Ps = self.transitions.transition_matrices(variational_mean, input, x_mask, tag)
         log_likes = self.dynamics.log_likelihoods(variational_mean, input, x_mask, tag)
         log_likes += self.emissions.log_likelihoods(data, input, mask, tag, variational_mean)
-        return hmm_expected_states(log_pi0, log_Ps, log_likes)
+        return hmm_expected_states(pi0, Ps, log_likes)
 
     @ensure_slds_args_not_none
     def most_likely_states(self, variational_mean, data, input=None, mask=None, tag=None):
-        log_pi0 = self.init_state_distn.log_initial_state_distn(variational_mean, input, mask, tag)
-        log_Ps = self.transitions.log_transition_matrices(variational_mean, input, mask, tag)
+        pi0 = self.init_state_distn.initial_state_distn
+        Ps = self.transitions.transition_matrices(variational_mean, input, mask, tag)
         log_likes = self.dynamics.log_likelihoods(variational_mean, input, np.ones_like(variational_mean, dtype=bool), tag)
         log_likes += self.emissions.log_likelihoods(data, input, mask, tag, variational_mean)
-        return viterbi(log_pi0, log_Ps, log_likes)
+        return viterbi(pi0, Ps, log_likes)
 
     @ensure_slds_args_not_none
     def smooth(self, variational_mean, data, input=None, mask=None, tag=None):
@@ -305,11 +305,12 @@ class SLDS(object):
 
                 # The "mask" for x is all ones
                 x_mask = np.ones_like(x, dtype=bool)
-                log_pi0 = self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
-                log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
+
+                pi0 = self.init_state_distn.initial_state_distn
+                Ps = self.transitions.transition_matrices(x, input, x_mask, tag)
                 log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
                 log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
-                elbo += hmm_normalizer(log_pi0, log_Ps, log_likes)
+                elbo += hmm_normalizer(pi0, Ps, log_likes)
 
             # -log q(x)
             elbo -= variational_posterior.log_density(xs)
@@ -379,7 +380,7 @@ class SLDS(object):
             zip(expectations, xs, x_masks, datas, masks, inputs, tags):
 
             # Compute expected log likelihood (inner ELBO)
-            log_pi0 = self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
+            log_pi0 = self.init_state_distn.log_initial_state_distn
             log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
             log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
             log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
@@ -506,7 +507,7 @@ class SLDS(object):
         approximation of the form,
 
             p(x, z | y) \approx q(x) q(z)
-
+J
         where q(x) is a linear Gaussian dynamical system and q(z) is a hidden
         Markov model.
         """
@@ -534,12 +535,12 @@ class SLDS(object):
             x_mask = np.ones_like(x_samples[0], dtype=bool)
 
             # Compute expected log initial distribution, transition matrices, and likelihoods
-            prms["log_pi0"] = np.mean(
-                [self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
+            prms["pi0"] = np.mean(
+                [self.init_state_distn.initial_state_distn
                  for x in x_samples], axis=0)
 
-            prms["log_Ps"] = np.mean(
-                [self.transitions.log_transition_matrices(x, input, x_mask, tag)
+            prms["Ps"] = np.mean(
+                [self.transitions.transition_matrices(x, input, x_mask, tag)
                  for x in x_samples], axis=0)
 
             prms["log_likes"] = np.mean(
@@ -570,7 +571,7 @@ class SLDS(object):
         def neg_expected_log_joint(x, Ez, Ezzp1, scale=1):
             # The "mask" for x is all ones
             x_mask = np.ones_like(x, dtype=bool)
-            log_pi0 = self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
+            log_pi0 = self.init_state_distn.log_initial_state_distn
             log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
             log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
             log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
@@ -699,7 +700,7 @@ class SLDS(object):
 
                 # The "mask" for x is all ones
                 x_mask = np.ones_like(x, dtype=bool)
-                log_pi0 = self.init_state_distn.log_initial_state_distn(x, input, x_mask, tag)
+                log_pi0 = self.init_state_distn.log_initial_state_distn
                 log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
                 log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
                 log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)

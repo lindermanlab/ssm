@@ -44,7 +44,8 @@ def _make_grad_hmm_normalizer(argnum, ans, pi0, Ps, ll):
     # Forward pass to get alphas
     alphas = np.zeros((T, K))
     forward_pass(pi0, Ps, ll, alphas)
-    grad_hmm_normalizer(np.log(Ps), alphas, dlog_pi0, dlog_Ps, dll)
+    log_Ps = np.log(Ps) - logsumexp(Ps, axis=1, keepdims=True)
+    grad_hmm_normalizer(log_Ps, alphas, dlog_pi0, dlog_Ps, dll)
 
     # Compute necessary gradient
     # Account for the log transformation
