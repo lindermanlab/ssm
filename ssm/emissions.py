@@ -477,6 +477,7 @@ class _StudentsTEmissionsMixin(object):
         T = z.shape[0]
         z = np.zeros_like(z, dtype=int) if self.single_subspace else z
         mus = self.forward(x, input, tag)
+        nus = np.exp(self.inv_etas)
         etas = np.exp(self.inv_etas)
         taus = npr.gamma(nus[z] / 2.0, 2.0 / nus[z])
         return mus[np.arange(T), z, :] + np.sqrt(etas[z] / taus) * npr.randn(T, self.N)
