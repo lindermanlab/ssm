@@ -646,8 +646,15 @@ class _PoissonEmissionsMixin(object):
         lambdas = self.mean(self.forward(variational_mean, input, tag))
         return lambdas[:,0,:] if self.single_subspace else np.sum(lambdas * expected_states[:,:,None], axis=1)
 
-
 class PoissonEmissions(_PoissonEmissionsMixin, _LinearEmissions):
+    def __init__(self, N, K, D, M=0, single_subspace=True, **kwargs):
+        super(PoissonEmissions, self).__init__(N, K, D, M=M, single_subspace=single_subspace, **kwargs)
+        # Scale down the measurement and control matrices so that
+        # rate params don't explode when exponentiated.
+        if self.link_name == "log":
+            self.Cs /= np.exp(np.linalg.norm(self.Cs, axis=2)[:,:,None])
+            self.Fs /= np.exp(np.linalg.norm(self.Fs, axis=2)[:,:,None])
+
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
