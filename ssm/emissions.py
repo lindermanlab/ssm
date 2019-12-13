@@ -781,6 +781,12 @@ class _AutoRegressiveEmissionsMixin(object):
 
 
 class AutoRegressiveEmissions(_AutoRegressiveEmissionsMixin, _LinearEmissions):
+    def __init__(self, N, K, D, M=0, single_subspace=True, **kwargs):
+        super(AutoRegressiveEmissions, self).__init__(N, K, D, M=M, single_subspace=single_subspace, **kwargs)
+        # Shrink the eigenvalues of the A matrices to avoid instability.
+        # Since the As are diagonal, this is just a clip.
+        self.As = np.clip(self.As, -1.0 + 1e-8, 1 - 1e-8)
+
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None, num_em_iters=25):
         # Initialize the subspace with PCA
