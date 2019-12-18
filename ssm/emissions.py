@@ -9,6 +9,7 @@ from ssm.util import ensure_args_are_lists, \
     logistic, logit, softplus, inv_softplus
 from ssm.preprocessing import interpolate_data, pca_with_imputation
 from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
+from ssm.stats import independent_studentst_logpdf
 
 
 # Observation models for SLDS
@@ -461,14 +462,10 @@ class _StudentsTEmissionsMixin(object):
             self.inv_nus = self.inv_nus[perm]
 
     def log_likelihoods(self, data, input, mask, tag, x):
-        N, etas, nus = self.N, np.exp(self.inv_etas), np.exp(self.inv_nus)
+        etas, nus = np.exp(self.inv_etas), np.exp(self.inv_nus)
         mus = self.forward(x, input, tag)
-
-        resid = data[:, None, :] - mus
-        z = resid / etas
-        return -0.5 * (nus + N) * np.log(1.0 + (resid * z).sum(axis=2) / nus) + \
-            gammaln((nus + N) / 2.0) - gammaln(nus / 2.0) - N / 2.0 * np.log(nus) \
-            -N / 2.0 * np.log(np.pi) - 0.5 * np.sum(np.log(etas), axis=1)
+        return independent_studentst_logpdf(data[:, None, :],
+                                            mus, etas, nus, mask=mask[:, None, :])
 
     def invert(self, data, input=None, mask=None, tag=None):
         return self._invert(data, input=input, mask=mask, tag=tag)
