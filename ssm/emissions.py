@@ -42,10 +42,10 @@ class Emissions(object):
         raise NotImplementedError
 
     def forward(self, x, input=None, tag=None):
-        raise NotImplemented
+        raise NotImplementedError
 
     def invert(self, data, input=None, mask=None, tag=None):
-        raise NotImplemented
+        raise NotImplementedError
 
     def sample(self, z, x, input=None, tag=None):
         raise NotImplementedError

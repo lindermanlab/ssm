@@ -13,7 +13,7 @@ from ssm.cstats import _blocks_to_bands_lower, _blocks_to_bands_upper, \
                        _vjp_solve_banded_A, _vjp_solveh_banded_A
 
 from ssm.messages import forward_pass, grad_hmm_normalizer
-from ssm.constants import LOG_EPS, DIV_EPS
+from ssm.util import LOG_EPS, DIV_EPS
 
 to_c = lambda arr: np.copy(getval(arr), 'C') if not arr.flags['C_CONTIGUOUS'] else getval(arr)
 

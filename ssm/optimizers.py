@@ -141,3 +141,65 @@ rmsprop = partial(_generic_sgd, "rmsprop")
 adam = partial(_generic_sgd, "adam")
 bfgs = partial(_generic_minimize, "BFGS")
 lbfgs = partial(_generic_minimize, "L-BFGS-B")
+
+
+# Special optimizer for function with block-tridiagonal hessian
+def newtons_method_block_tridiag_hessian(
+    x0, obj, grad_func, hess_func,
+    tolerance=1e-4, maxiter=100):
+    """
+    Newton's method to minimize a positive definite function with a
+    block tridiagonal Hessian matrix.
+    Algorithm 9.5, Boyd & Vandenberghe, 2004.
+    """
+    x = x0
+    is_converged = False
+    count = 0
+    while not is_converged:
+        H_diag, H_lower_diag = hess_func(x)
+        g = grad_func(x)
+        dx = -1.0 * solve_symm_block_tridiag(H_diag, H_lower_diag, g)
+        lambdasq = np.dot(g.ravel(), -1.0*dx.ravel())
+        if lambdasq / 2.0 <= tolerance:
+            is_converged = True
+            break
+        stepsize = backtracking_line_search(x, dx, obj, g)
+        x = x + stepsize * dx
+        count += 1
+        if count > maxiter:
+            break
+
+    if not is_converged:
+        warn("Newton's method failed to converge in {} iterations. "
+             "Final mean abs(dx): {}".format(maxiter, np.mean(np.abs(dx))))
+
+    return x
+
+
+def backtracking_line_search(x0, dx, obj, g, stepsize = 1.0, min_stepsize=1e-8,
+                             alpha=0.2, beta=0.7):
+    """
+    A backtracking line search for the step size in Newton's method.
+    Algorithm 9.2, Boyd & Vandenberghe, 2004.
+    - dx is the descent direction
+    - g is the gradient evaluated at x0
+    - alpha in (0,0.5) is fraction of decrease in objective predicted  by
+        a linear extrapolation that we will accept
+    - beta in (0,1) is step size reduction factor
+    """
+    x = x0
+
+    # criterion: stop when f(x + stepsize * dx) < f(x) + \alpha * stepsize * f'(x)^T dx
+    f_term = obj(x)
+    grad_term = alpha * np.dot(g.ravel(), dx.ravel())
+
+    # decrease stepsize until criterion is met
+    # or stop at minimum step size
+    while stepsize > min_stepsize:
+        fx = obj(x+ stepsize*dx)
+        if np.isnan(fx) or fx > f_term + grad_term*stepsize:
+            stepsize *= beta
+        else:
+            break
+
+    return stepsize

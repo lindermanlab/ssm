@@ -8,25 +8,23 @@ from autograd.tracer import getval
 from autograd.misc import flatten
 from autograd import value_and_grad, grad
 
-from ssm.optimizers import adam_step, rmsprop_step, sgd_step, lbfgs, bfgs, convex_combination
-from ssm.optimizers import adam, sgd, rmsprop
+from ssm.optimizers import adam_step, rmsprop_step, sgd_step, lbfgs, bfgs, \
+    convex_combination, adam, sgd, rmsprop, \
+    newtons_method_block_tridiag_hessian
 from ssm.primitives import hmm_normalizer, symm_block_tridiag_matmul
-from ssm.messages import hmm_expected_states, hmm_filter, hmm_sample, viterbi
-from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
-    ensure_slds_args_not_none, ensure_variational_args_are_lists, \
-    replicate, collapse, newtons_method_block_tridiag_hessian
+from ssm.messages import hmm_expected_states, viterbi
+from ssm.util import ensure_args_are_lists, \
+    ensure_slds_args_not_none, ensure_variational_args_are_lists
 
 import ssm.observations as obs
 import ssm.transitions as trans
 import ssm.init_state_distns as isd
-import ssm.hierarchical as hier
 import ssm.emissions as emssn
 import ssm.hmm as hmm
 import ssm.variational as varinf
 
-from scipy.optimize import minimize
-
 __all__ = ['SLDS', 'LDS']
+
 
 class SLDS(object):
     """
@@ -1015,7 +1013,7 @@ class LDS(SLDS):
             assert np.isfinite(elbo)
 
         return elbo / n_samples
-    
+
     def sample(self, T, input=None, tag=None, prefix=None, with_noise=True):
         (_, x, y) = super().sample(T, input=input, tag=tag, prefix=prefix, with_noise=with_noise)
         return (x, y)
