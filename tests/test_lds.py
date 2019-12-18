@@ -402,7 +402,7 @@ def test_lds_log_probability_perf(T=1000, D=10, N_iter=10):
     stop = time.time()
     print("Time per iter: {:.4f}".format((stop - start) / N_iter))
 
-def test_lds_sample_and_fit(T=100, D=10, N=15):
+def test_lds_sample_and_fit(T=100, N=15, K=3, D=10):
     transition_names = [
     "standard",
     "stationary",
@@ -456,29 +456,6 @@ def test_lds_sample_and_fit(T=100, D=10, N=15):
     #    "laplace_em": ["structured_meanfield"]
     }
 
-    # Test vanilla LDS
-    print("Testing Vanilla LDS...")
-    for dynamics in dynamics_names:
-        for emissions in emission_names:
-            for method in methods:
-                for posterior in methods[method]:
-                    true_lds = ssm.LDS(N, D, dynamics=dynamics, emissions=emissions)
-                    x, y = true_lds.sample(T)
-
-                    print("Fitting: "
-                          "dynamics = {}, "
-                          "emissions = {}, "
-                          "method = {}, "
-                          "posterior = {}, ".format(
-                            dynamics,
-                            emissions,
-                            method,
-                            posterior
-                        )
-                    )
-                    fit_lds = ssm.LDS(N, D, dynamics=dynamics, emissions=emissions)
-                    fit_lds.fit(y, method=method, variational_posterior=posterior, alpha=0)
-
     # Test SLDS and RSLDS
     print("Testing SLDS and RSLDS...")
     for dynamics in dynamics_names:
@@ -486,12 +463,6 @@ def test_lds_sample_and_fit(T=100, D=10, N=15):
             for transitions in transition_names:
                 for method in methods:
                     for posterior in methods[method]:
-                        true_slds = ssm.SLDS(N, K, D,
-                                            transitions=transitions,
-                                            dynamics=dynamics,
-                                            emissions=emissions)
-                        z, x, y = true_slds.sample(T)
-
                         print("Fitting: "
                               "dynamics = {}, "
                               "emissions = {}, "
@@ -503,11 +474,17 @@ def test_lds_sample_and_fit(T=100, D=10, N=15):
                                 posterior
                             )
                         )
+                        true_slds = ssm.SLDS(N, K, D,
+                                            transitions=transitions,
+                                            dynamics=dynamics,
+                                            emissions=emissions)
+                        z, x, y = true_slds.sample(T)
+
                         fit_slds = ssm.SLDS(N, K, D,
                                             transitions=transitions,
                                             dynamics=dynamics,
                                             emissions=emissions)
-                        fit_lds.fit(y, method=method, variational_posterior=posterior)
+                        fit_slds.fit(y, method=method, variational_posterior=posterior)
 
 
 if __name__ == "__main__":
