@@ -785,7 +785,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             __init__(K, D, M, lags=lags)
 
         # Initialize the dynamics and the noise covariances
-        self._As = .95 * np.array([
+        self._As = .80 * np.array([
                 np.column_stack([random_rotation(D), np.zeros((D, (lags-1) * D))])
             for _ in range(K)])
 
@@ -1052,7 +1052,7 @@ class AutoRegressiveDiagonalNoiseObservations(AutoRegressiveObservations):
                      l2_penalty_V=l2_penalty_V)
 
         # Initialize the dynamics and the noise covariances
-        self._As = .95 * np.array([
+        self._As = .80 * np.array([
                 np.column_stack([random_rotation(D), np.zeros((D, (lags-1) * D))])
             for _ in range(K)])
 
