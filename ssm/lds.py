@@ -807,7 +807,8 @@ J
     def fit(self, datas, inputs=None, masks=None, tags=None,
             method="laplace_em", variational_posterior="structured_meanfield",
             variational_posterior_kwargs=None,
-            initialize=True, **kwargs):
+            initialize=True, num_init_iters=25, 
+            **kwargs):
 
         """
         Fitting methods for an arbitrary switching LDS:
@@ -852,7 +853,7 @@ J
 
         # Initialize the model parameters
         if initialize:
-            self.initialize(datas, inputs, masks, tags)
+            self.initialize(datas, inputs, masks, tags, num_iters=num_init_iters)
 
         # Initialize the variational posterior
         variational_posterior_kwargs = variational_posterior_kwargs or {}
