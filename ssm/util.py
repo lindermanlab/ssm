@@ -8,7 +8,7 @@ from autograd import grad
 from scipy.optimize import linear_sum_assignment, minimize
 from scipy.special import gammaln, digamma, polygamma
 
-SEED = hash("ssm")
+SEED = hash("ssm") % (2**32)
 LOG_EPS = 1e-16
 DIV_EPS = 1e-16
 
