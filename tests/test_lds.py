@@ -1,5 +1,6 @@
 import time
 import ssm
+from ssm.util import SEED
 
 from autograd import elementwise_grad
 import autograd.numpy as np
@@ -404,7 +405,6 @@ def test_lds_log_probability_perf(T=1000, D=10, N_iter=10):
 
 def test_lds_sample_and_fit(T=100, N=15, K=3, D=10):
     transition_names = [
-    "standard",
     "stationary",
     "sticky",
     "inputdriven",
@@ -418,10 +418,8 @@ def test_lds_sample_and_fit(T=100, N=15, K=3, D=10):
     "none",
     "gaussian",
     "diagonal_gaussian",
-    "t",
     "studentst",
     "diagonal_t",
-    "diagonal_studentst",
     ]
 
     # Exclude the identity emissions (for now)
@@ -433,18 +431,12 @@ def test_lds_sample_and_fit(T=100, N=15, K=3, D=10):
     "studentst",
     "studentst_orthog",
     "studentst_nn",
-    "t",
-    "t_orthog",
-    "t_nn",
     "poisson",
     "poisson_orthog",
     "poisson_nn",
     "bernoulli",
     "bernoulli_orthog",
     "bernoulli_nn",
-    "ar",
-    "ar_orthog",
-    "ar_nn",
     "autoregressive",
     "autoregressive_orthog",
     "autoregressive_nn",
@@ -463,11 +455,14 @@ def test_lds_sample_and_fit(T=100, N=15, K=3, D=10):
             for transitions in transition_names:
                 for method in methods:
                     for posterior in methods[method]:
+                        npr.seed(seed=SEED)
                         print("Fitting: "
+                              "transitions = {},"
                               "dynamics = {}, "
                               "emissions = {}, "
                               "method = {}, "
                               "posterior = {}, ".format(
+                                transitions,
                                 dynamics,
                                 emissions,
                                 method,
@@ -484,7 +479,11 @@ def test_lds_sample_and_fit(T=100, N=15, K=3, D=10):
                                             transitions=transitions,
                                             dynamics=dynamics,
                                             emissions=emissions)
-                        fit_slds.fit(y, method=method, variational_posterior=posterior)
+                        fit_slds.fit(y,
+                                     method=method,
+                                     variational_posterior=posterior,
+                                     num_init_iters=2,
+                                     num_iters=2)
 
 
 if __name__ == "__main__":
