@@ -764,11 +764,10 @@ def _kalman_info_filter(
     return log_Z, filtered_Js, filtered_hs
 
 
-@numba.jit(nopython=True, cache=True)
+#@numba.jit(nopython=True, cache=True)
 def _kalman_info_sample(J_ini, h_ini, log_Z_ini,
                        J_dyn_11, J_dyn_21, J_dyn_22, h_dyn_1, h_dyn_2, log_Z_dyn,
-                       J_obs, h_obs, log_Z_obs,
-                       num_samples=1):
+                       J_obs, h_obs, log_Z_obs):
     """
     Information form Kalman sampling for time-varying linear dynamical system with inputs.
     """
@@ -781,11 +780,11 @@ def _kalman_info_sample(J_ini, h_ini, log_Z_ini,
                            J_obs, h_obs, log_Z_obs)
 
     # Allocate output arrays
-    samples = np.zeros((T, D, num_samples))
-    noise = npr.randn(T, D, num_samples)
+    samples = np.zeros((T, D))
+    noise = npr.randn(T, D)
 
     # Initialize with samples of the last state
-    samples[-1] = _sample_info_gaussian(filtered_Js[-1], np.reshape(filtered_hs[-1], (D, 1)), noise[-1])
+    samples[-1] = _sample_info_gaussian(filtered_Js[-1], filtered_hs[-1], noise[-1])
 
     # Run the Kalman information filter
     for t in range(T-2, -1, -1):
@@ -796,7 +795,7 @@ def _kalman_info_sample(J_ini, h_ini, log_Z_ini,
 
         # Condition on the next observation
         J_post = filtered_Js[t] + J_11
-        h_post = filtered_hs[t] + h_1 - np.dot(J_21, samples[t+1])
+        h_post = filtered_hs[t] + h_1 - np.dot(J_21.T, samples[t+1])
         samples[t] = _sample_info_gaussian(J_post, h_post, noise[t])
 
     return samples
@@ -975,15 +974,12 @@ def kalman_info_filter_with_predictions(
 def kalman_info_sample(
     J_ini, h_ini, log_Z_ini,
     J_dyn_11, J_dyn_21, J_dyn_22, h_dyn_1, h_dyn_2, log_Z_dyn,
-    J_obs, h_obs, log_Z_obs,
-    num_samples=1):
+    J_obs, h_obs, log_Z_obs):
 
-    samples = _kalman_info_sample(
+    return _kalman_info_sample(
         J_ini, h_ini, log_Z_ini,
         J_dyn_11, J_dyn_21, J_dyn_22, h_dyn_1, h_dyn_2, log_Z_dyn,
         J_obs, h_obs, log_Z_obs)
-
-    return samples[:, :, 0] if num_samples == 1 else samples
 
 
 @kalman_info_wrapper
@@ -1067,7 +1063,7 @@ def convert_mean_to_info_args(m0, S0, As, Bs, Qs, Cs, Ds, Rs, us, ys):
     return J_ini, h_ini, 0, J_dyn_11, J_dyn_21, J_dyn_22, h_dyn_1, h_dyn_2, np.zeros(T-1), J_obs, h_obs, np.zeros(T)
 
 
-def test_lds(T=1000, D=2, N=10, U=3):
+def test_lds(T=1000, D=1, N=10, U=3):
     args = make_lds_parameters(T, D, N, U)
 
     # Test the standard Kalman filter
@@ -1105,7 +1101,32 @@ def test_lds(T=1000, D=2, N=10, U=3):
     assert np.allclose(smoothed_Sigmas1, smoothed_Sigmas3)
     assert np.allclose(ExxnT2, ExxnT3)
 
+    # Plot_the samples vs the smoother
     xs = kalman_info_sample(*info_args)
+
+def test_info_sample(T=100, D=3, N=10, U=3):
+    args = make_lds_parameters(T, D, N, U)
+
+    # Test the standard Kalman filter
+    from pylds.lds_messages_interface import E_step as kalman_smoother_ref
+    ll1, smoothed_mus1, smoothed_Sigmas1, ExnxT1 = kalman_smoother_ref(*args)
+    
+    # Plot_the samples vs the smoother
+    info_args = convert_mean_to_info_args(*args)
+    xs = [kalman_info_sample(*info_args) for _ in range(4)]
+
+    import matplotlib.pyplot as plt
+    for i in range(D):
+        plt.subplot(D, 1, i+1)
+        plt.fill_between(np.arange(T),
+                         smoothed_mus1[:, i] - 2 * np.sqrt(smoothed_Sigmas1[:, i, i]),
+                         smoothed_mus1[:, i] + 2 * np.sqrt(smoothed_Sigmas1[:, i, i]),
+                         color='k', alpha=0.25)
+        plt.plot(smoothed_mus1[:, i], '-k', lw=2)
+        for x in xs:
+            plt.plot(x[:, i])
+    plt.show()
 
 if __name__ == "__main__":
     test_lds()
+    test_info_sample()
