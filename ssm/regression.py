@@ -472,8 +472,6 @@ def generalized_newton_studentst_dof(E_tau, E_logtau, nu0=2, a_nu=3, b_nu=3/2,
         assert a > 0 and b < 0, \
                "generalized_newton_studentst_dof failed due to nonconcave optimization. \
                Try strengthening prior via parameters a_nu and b_nu."
-        if a <= 0 or b >= 0:
-            import pdb; pdb.set_trace()
         dnu = -a / b - nu
         nu = nu + dnu
 
