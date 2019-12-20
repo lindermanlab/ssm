@@ -7,6 +7,7 @@ from functools import partial
 
 from autograd.tracer import getval
 from autograd.extend import primitive, defvjp
+from ssm.util import LOG_EPS, DIV_EPS
 
 to_c = lambda arr: np.copy(getval(arr), 'C') if not arr.flags['C_CONTIGUOUS'] else getval(arr)
 
@@ -53,10 +54,10 @@ def forward_pass(pi0,
     # Check if we have heterogeneous transition matrices.
     # If not, save memory by passing in log_Ps of shape (1, K, K)
     hetero = (Ps.shape[0] == T-1)
-    alphas[0] = np.log(pi0) + log_likes[0]
+    alphas[0] = np.log(pi0 + LOG_EPS) + log_likes[0]
     for t in range(T-1):
         m = np.max(alphas[t])
-        alphas[t+1] = np.log(np.dot(np.exp(alphas[t] - m), Ps[t * hetero])) + m + log_likes[t+1]
+        alphas[t+1] = np.log(np.dot(np.exp(alphas[t] - m), Ps[t * hetero]) + LOG_EPS) + m + log_likes[t+1]
     return logsumexp(alphas[T-1])
 
 
@@ -105,7 +106,7 @@ def backward_pass(Ps,
     for t in range(T-2,-1,-1):
         tmp = log_likes[t+1] + betas[t+1]
         m = np.max(tmp)
-        betas[t] = np.log(np.dot(Ps[t * hetero], np.exp(tmp - m))) + m
+        betas[t] = np.log(np.dot(Ps[t * hetero], np.exp(tmp - m)) + LOG_EPS) + m
 
 
 
@@ -144,7 +145,7 @@ def _compute_stationary_expected_joints(alphas, betas, lls, log_P, E_zzp1):
         # Add to expected joints
         for i in range(K):
             for j in range(K):
-                E_zzp1[i, j] += tmp[i, j] / (tmpsum + 1e-16)
+                E_zzp1[i, j] += tmp[i, j] / (tmpsum + DIV_EPS)
 
 
 def hmm_expected_states(pi0, Ps, ll):
@@ -171,7 +172,7 @@ def hmm_expected_states(pi0, Ps, ll):
     # M-step is the sum of the expected joints.
     stationary = (Ps.shape[0] == 1)
     if not stationary:
-        expected_joints = alphas[:-1,:,None] + betas[1:,None,:] + ll[1:,None,:] + np.log(Ps + 1e-16)
+        expected_joints = alphas[:-1,:,None] + betas[1:,None,:] + ll[1:,None,:] + np.log(Ps + LOG_EPS)
         expected_joints -= expected_joints.max((1,2))[:,None, None]
         expected_joints = np.exp(expected_joints)
         expected_joints /= expected_joints.sum((1,2))[:,None,None]
@@ -179,7 +180,7 @@ def hmm_expected_states(pi0, Ps, ll):
     else:
         # Compute the sum over time axis of the expected joints
         expected_joints = np.zeros((K, K))
-        _compute_stationary_expected_joints(alphas, betas, ll, np.log(Ps[0] + 1e-16), expected_joints)
+        _compute_stationary_expected_joints(alphas, betas, ll, np.log(Ps[0] + LOG_EPS), expected_joints)
         expected_joints = expected_joints[None, :, :]
 
     return expected_states, expected_joints, normalizer
@@ -219,7 +220,7 @@ def backward_sample(Ps, log_likes, alphas, us, zs):
 
         # set the transition potential
         if t > 0:
-            lpzp1 = np.log(Ps[(t-1) * hetero, :, int(zs[t])])
+            lpzp1 = np.log(Ps[(t-1) * hetero, :, int(zs[t])] + LOG_EPS)
 
 
 @numba.jit(nopython=True, cache=True)
@@ -260,14 +261,14 @@ def _viterbi(pi0, Ps, ll):
     scores = np.zeros((T, K))
     args = np.zeros((T, K))
     for t in range(T-2,-1,-1):
-        vals = np.log(Ps[t * hetero]) + scores[t+1] + ll[t+1]
+        vals = np.log(Ps[t * hetero] + LOG_EPS) + scores[t+1] + ll[t+1]
         for k in range(K):
             args[t+1, k] = np.argmax(vals[k])
             scores[t, k] = np.max(vals[k])
 
     # Now maximize forwards
     z = np.zeros(T)
-    z[0] = (scores[0] + np.log(pi0) + ll[0]).argmax()
+    z[0] = (scores[0] + np.log(pi0 + LOG_EPS) + ll[0]).argmax()
     for t in range(1, T):
         z[t] = args[t, int(z[t-1])]
 
@@ -366,15 +367,15 @@ def _make_grad_hmm_normalizer(argnum, ans, pi0, Ps, ll):
     # Forward pass to get alphas
     alphas = np.zeros((T, K))
     forward_pass(pi0, Ps, ll, alphas)
-    grad_hmm_normalizer(np.log(Ps), alphas, dlog_pi0, dlog_Ps, dll)
+    grad_hmm_normalizer(np.log(Ps + LOG_EPS), alphas, dlog_pi0, dlog_Ps, dll)
 
     # Compute necessary gradient
     # Account for the log transformation
     # df/dP = df/dlogP * dlogP/dP = df/dlogP * 1 / P
     if argnum == 0:
-        return lambda g: g * dlog_pi0 / pi0
+        return lambda g: g * dlog_pi0 / (pi0 + DIV_EPS)
     if argnum == 1:
-        return lambda g: g * dlog_Ps / Ps
+        return lambda g: g * dlog_Ps / (Ps + DIV_EPS)
     if argnum == 2:
         return lambda g: g * dll
 

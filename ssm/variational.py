@@ -10,6 +10,7 @@ from ssm.messages import hmm_expected_states, hmm_sample
 from ssm.util import ensure_variational_args_are_lists
 
 from warnings import warn
+from autograd.scipy.special import logsumexp
 
 class VariationalPosterior(object):
     """
@@ -245,9 +246,9 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         K = self.K
         D = self.D
 
-        # Initialize q(z) parameters: log_pi0, log_likes, log_transition_matrices
-        log_pi0 = -np.log(K) * np.ones(K)
-        log_Ps = np.zeros((T-1, K, K))
+        # Initialize q(z) parameters: pi0, log_likes, transition_matrices
+        pi0 = np.ones(K) / K
+        Ps = np.ones((T-1, K, K)) / K
         log_likes = np.zeros((T, K))
 
         # Initialize q(x) = = N(J, h) where J is block tridiagonal precision
@@ -266,8 +267,8 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
                   A random initialization is used.")
             h = (1.0 / self.initial_variance) * npr.randn(data.shape[0], self.D)
 
-        return dict(log_pi0=log_pi0,
-                    log_Ps=log_Ps,
+        return dict(pi0=pi0,
+                    Ps=Ps,
                     log_likes=log_likes,
                     J_diag=J_diag,
                     J_lower_diag=J_lower_diag,
@@ -278,7 +279,7 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         return self._params
 
     def sample_discrete_states(self):
-        return [hmm_sample(prms["log_pi0"], prms["log_Ps"], prms["log_likes"])
+        return [hmm_sample(prms["pi0"], prms["Ps"], prms["log_likes"])
                 for prms in self.params]
 
     def sample_continuous_states(self):
@@ -291,7 +292,7 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
     @property
     def mean_discrete_states(self):
         # Now compute the posterior expectations of z under q(z)
-        return [hmm_expected_states(prms["log_pi0"], prms["log_Ps"], prms["log_likes"])
+        return [hmm_expected_states(prms["pi0"], prms["Ps"], prms["log_likes"])
                 for prms in self.params]
 
     @property
@@ -345,10 +346,12 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
             negentropy += block_tridiagonal_log_probability(s, prms["J_diag"], prms["J_lower_diag"], prms["h"])
 
             # 2. Compute E_{q(z)}[ log q(z) ]
-            (Ez, Ezzp1, normalizer) = hmm_expected_states(prms["log_pi0"], prms["log_Ps"], prms["log_likes"])
+            log_pi0 = np.log(prms["pi0"] + 1e-16) - logsumexp(prms["pi0"])
+            log_Ps = np.log(prms["Ps"] + 1e-16) - logsumexp(prms["Ps"], axis=1, keepdims=True)
+            (Ez, Ezzp1, normalizer) = hmm_expected_states(prms["pi0"], prms["Ps"], prms["log_likes"])
             negentropy -= normalizer # -log Z
-            negentropy += np.sum(Ez[0] * prms["log_pi0"]) # initial factor
+            negentropy += np.sum(Ez[0] * log_pi0) # initial factor
             negentropy += np.sum(Ez * prms["log_likes"]) # unitary factors
-            negentropy += np.sum(Ezzp1 * prms["log_Ps"]) # pairwise factors
+            negentropy += np.sum(Ezzp1 * log_Ps) # pairwise factors
 
         return -negentropy

@@ -1,4 +1,5 @@
 import time
+import ssm
 
 from autograd import elementwise_grad
 import autograd.numpy as np
@@ -95,7 +96,7 @@ def test_transpose_banded():
                    [1,  1,  1,  1,  0]]).astype(float)
 
     abT = transpose_banded((1, 2), ab)
-    
+
     for i in range(l):
         assert np.allclose(abT[l-i-1, l-i:], ab[u+1+i, :-i-1])
 
@@ -120,7 +121,7 @@ def test_lds_log_probability(T=25, D=4):
     for t in range(T-1):
         J_full[t*D:(t+1)*D, (t+1)*D:(t+2)*D] = J_lower_diag[t].T
         J_full[(t+1)*D:(t+2)*D, t*D:(t+1)*D] = J_lower_diag[t]
-    
+
     Sigma = np.linalg.inv(J_full)
     mu = Sigma.dot(h.ravel()).reshape((T, D))
     x = npr.randn(T, D)
@@ -149,11 +150,11 @@ def test_lds_mean(T=25, D=4):
     for t in range(T-1):
         J_full[t*D:(t+1)*D, (t+1)*D:(t+2)*D] = J_lower_diag[t].T
         J_full[(t+1)*D:(t+2)*D, t*D:(t+1)*D] = J_lower_diag[t]
-    
+
     Sigma = np.linalg.inv(J_full)
     mu_true = Sigma.dot(h.ravel()).reshape((T, D))
-    
-    
+
+
     # Solve with the banded solver
     mu_test = lds_mean(As, bs, Qi_sqrts, ms, Ri_sqrts)
 
@@ -175,12 +176,12 @@ def test_lds_sample(T=25, D=4):
     for t in range(T-1):
         J_full[t*D:(t+1)*D, (t+1)*D:(t+2)*D] = J_lower_diag[t].T
         J_full[(t+1)*D:(t+2)*D, t*D:(t+1)*D] = J_lower_diag[t]
-    
+
     z = npr.randn(T*D,)
 
     # Sample directly
     L = np.linalg.cholesky(J_full)
-    xtrue = np.linalg.solve(L.T, z).reshape(T, D) 
+    xtrue = np.linalg.solve(L.T, z).reshape(T, D)
     xtrue += np.linalg.solve(J_full, h.reshape(T*D)).reshape(T, D)
 
     # Solve with the banded solver
@@ -212,7 +213,7 @@ def test_transpose_banded_grad(T=25, D=4):
     J_banded = blocks_to_bands(J_diag, J_lower_diag, lower=True)
 
     check_grads(transpose_banded, argnum=1, modes=['rev'], order=1)((2*D-1, 0), J_banded)
-    
+
 
 def test_cholesky_banded_grad(T=10, D=4):
     """
@@ -242,7 +243,7 @@ def test_solve_banded_grad(T=10, D=4):
     Test solve_banded gradient
     """
     J_diag, J_lower_diag, J_full = make_block_tridiag(T, D)
-    
+
     L_full = np.linalg.cholesky(J_full)
     L_banded = np.vstack([[
         np.concatenate((np.diag(L_full, -d), np.zeros(d))) for d in range(2*D)
@@ -284,11 +285,11 @@ def test_cholesky_lds_grad(T=10, D=4):
     Test cholesky_lds gradient
     """
     As, bs, Qi_sqrts, ms, Ri_sqrts = make_lds_parameters(T, D)
-    
+
     check_grads(cholesky_lds, argnum=0, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts)
     check_grads(cholesky_lds, argnum=2, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts)
     check_grads(cholesky_lds, argnum=4, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts)
-    
+
 
 def test_solve_lds_grad(T=10, D=4):
     """
@@ -306,9 +307,9 @@ def test_solve_lds_grad(T=10, D=4):
 def test_lds_log_probability_grad(T=10, D=2):
     """
     Test lds_log_probability gradient
-    """ 
+    """
     As, bs, Qi_sqrts, ms, Ri_sqrts = make_lds_parameters(T, D)
-    x = npr.randn(T, D)    
+    x = npr.randn(T, D)
 
     check_grads(lds_log_probability, argnum=0, modes=['rev'], order=1)(x, As, bs, Qi_sqrts, ms, Ri_sqrts)
     check_grads(lds_log_probability, argnum=1, modes=['rev'], order=1)(x, As, bs, Qi_sqrts, ms, Ri_sqrts)
@@ -321,9 +322,9 @@ def test_lds_log_probability_grad(T=10, D=2):
 def test_lds_sample_grad(T=10, D=2):
     """
     Test lds_sample gradient
-    """ 
+    """
     As, bs, Qi_sqrts, ms, Ri_sqrts = make_lds_parameters(T, D)
-    z = npr.randn(T, D)    
+    z = npr.randn(T, D)
 
     check_grads(lds_sample, argnum=0, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts, z=z)
     check_grads(lds_sample, argnum=1, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts, z=z)
@@ -339,7 +340,7 @@ def test_lds_log_probability_perf(T=1000, D=10, N_iter=10):
     print("Comparing methods for T={} D={}".format(T, D))
 
     from pylds.lds_messages_interface import kalman_info_filter, kalman_filter
-    
+
     # Convert LDS parameters into info form for pylds
     As, bs, Qi_sqrts, ms, Ri_sqrts = make_lds_parameters(T, D)
     Qis = np.matmul(Qi_sqrts, np.swapaxes(Qi_sqrts, -1, -2))
@@ -367,8 +368,8 @@ def test_lds_log_probability_perf(T=1000, D=10, N_iter=10):
     print("Timing PyLDS message passing (kalman_filter)")
     start = time.time()
     for itr in range(N_iter):
-        kalman_filter(mu_init, sigma_init, 
-            np.concatenate([As, np.eye(D)[None, :, :]]), Bs, np.concatenate([sigma_states, np.eye(D)[None, :, :]]), 
+        kalman_filter(mu_init, sigma_init,
+            np.concatenate([As, np.eye(D)[None, :, :]]), Bs, np.concatenate([sigma_states, np.eye(D)[None, :, :]]),
             Cs, Ds, sigma_obs, inputs, data)
     stop = time.time()
     print("Time per iter: {:.4f}".format((stop - start) / N_iter))
@@ -395,12 +396,96 @@ def test_lds_log_probability_perf(T=1000, D=10, N_iter=10):
     print("Timing PyLDS message passing (kalman_info_filter)")
     start = time.time()
     for itr in range(N_iter):
-        kalman_info_filter(J_init, h_init, log_Z_init, 
+        kalman_info_filter(J_init, h_init, log_Z_init,
             J_pair_11, J_pair_21, J_pair_22, h_pair_1, h_pair_2, log_Z_pair,
             J_node, h_node, log_Z_node)
     stop = time.time()
     print("Time per iter: {:.4f}".format((stop - start) / N_iter))
-   
+
+def test_lds_sample_and_fit(T=100, N=15, K=3, D=10):
+    transition_names = [
+    "standard",
+    "stationary",
+    "sticky",
+    "inputdriven",
+    "recurrent",
+    "recurrent_only",
+    "rbf_recurrent",
+    "nn_recurrent",
+    ]
+
+    dynamics_names = [
+    "none",
+    "gaussian",
+    "diagonal_gaussian",
+    "t",
+    "studentst",
+    "diagonal_t",
+    "diagonal_studentst",
+    ]
+
+    # Exclude the identity emissions (for now)
+    # because they require N == D
+    emission_names = [
+    "gaussian",
+    "gaussian_orthog",
+    "gaussian_nn",
+    "studentst",
+    "studentst_orthog",
+    "studentst_nn",
+    "t",
+    "t_orthog",
+    "t_nn",
+    "poisson",
+    "poisson_orthog",
+    "poisson_nn",
+    "bernoulli",
+    "bernoulli_orthog",
+    "bernoulli_nn",
+    "ar",
+    "ar_orthog",
+    "ar_nn",
+    "autoregressive",
+    "autoregressive_orthog",
+    "autoregressive_nn",
+    ]
+
+    # method_name --> allowable posteriors
+    methods = {
+        "svi": ["mf", "lds"],
+    #    "laplace_em": ["structured_meanfield"]
+    }
+
+    # Test SLDS and RSLDS
+    print("Testing SLDS and RSLDS...")
+    for dynamics in dynamics_names:
+        for emissions in emission_names:
+            for transitions in transition_names:
+                for method in methods:
+                    for posterior in methods[method]:
+                        print("Fitting: "
+                              "dynamics = {}, "
+                              "emissions = {}, "
+                              "method = {}, "
+                              "posterior = {}, ".format(
+                                dynamics,
+                                emissions,
+                                method,
+                                posterior
+                            )
+                        )
+                        true_slds = ssm.SLDS(N, K, D,
+                                            transitions=transitions,
+                                            dynamics=dynamics,
+                                            emissions=emissions)
+                        z, x, y = true_slds.sample(T)
+
+                        fit_slds = ssm.SLDS(N, K, D,
+                                            transitions=transitions,
+                                            dynamics=dynamics,
+                                            emissions=emissions)
+                        fit_slds.fit(y, method=method, variational_posterior=posterior)
+
 
 if __name__ == "__main__":
     test_blocks_to_banded()
@@ -420,4 +505,3 @@ if __name__ == "__main__":
     for D in range(2, 21, 2):
         test_lds_log_probability_perf(T=1000, D=D)
 
-    

@@ -431,8 +431,8 @@ def expected_multivariate_studentst_logpdf(E_xs, E_xxTs, E_mus, E_mumuTs, Sigmas
 
 def independent_studentst_logpdf(data, mus, sigmasqs, nus, mask=None):
     """
-    Compute the log probability density of a Gaussian distribution with
-    a diagonal covariance.  This will broadcast as long as data, mus,
+    Compute the log probability density of a set of independent Student's t 
+    random variables. This will broadcast as long as data, mus, nus, and
     sigmas have the same (or at least compatible) leading dimensions.
 
     Parameters

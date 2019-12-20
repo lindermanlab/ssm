@@ -13,6 +13,7 @@ from ssm.cstats import _blocks_to_bands_lower, _blocks_to_bands_upper, \
                        _vjp_solve_banded_A, _vjp_solveh_banded_A
 
 from ssm.messages import forward_pass, grad_hmm_normalizer
+from ssm.util import LOG_EPS, DIV_EPS
 
 to_c = lambda arr: np.copy(getval(arr), 'C') if not arr.flags['C_CONTIGUOUS'] else getval(arr)
 
@@ -44,15 +45,16 @@ def _make_grad_hmm_normalizer(argnum, ans, pi0, Ps, ll):
     # Forward pass to get alphas
     alphas = np.zeros((T, K))
     forward_pass(pi0, Ps, ll, alphas)
-    grad_hmm_normalizer(np.log(Ps), alphas, dlog_pi0, dlog_Ps, dll)
+    log_Ps = np.log(Ps + LOG_EPS) - logsumexp(Ps, axis=1, keepdims=True)
+    grad_hmm_normalizer(log_Ps, alphas, dlog_pi0, dlog_Ps, dll)
 
     # Compute necessary gradient
     # Account for the log transformation
     # df/dP = df/dlogP * dlogP/dP = df/dlogP * 1 / P
     if argnum == 0:
-        return lambda g: g * dlog_pi0 / pi0
+        return lambda g: g * dlog_pi0 / (pi0 + DIV_EPS)
     if argnum == 1:
-        return lambda g: g * dlog_Ps / Ps
+        return lambda g: g * dlog_Ps / (Ps + DIV_EPS)
     if argnum == 2:
         return lambda g: g * dll
 

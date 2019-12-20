@@ -9,6 +9,7 @@ from ssm.util import ensure_args_are_lists, \
     logistic, logit, softplus, inv_softplus
 from ssm.preprocessing import interpolate_data, pca_with_imputation
 from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
+from ssm.stats import independent_studentst_logpdf
 
 
 # Observation models for SLDS
@@ -42,10 +43,10 @@ class Emissions(object):
         raise NotImplementedError
 
     def forward(self, x, input=None, tag=None):
-        raise NotImplemented
+        raise NotImplementedError
 
     def invert(self, data, input=None, mask=None, tag=None):
-        raise NotImplemented
+        raise NotImplementedError
 
     def sample(self, z, x, input=None, tag=None):
         raise NotImplementedError
@@ -461,14 +462,10 @@ class _StudentsTEmissionsMixin(object):
             self.inv_nus = self.inv_nus[perm]
 
     def log_likelihoods(self, data, input, mask, tag, x):
-        N, etas, nus = self.N, np.exp(self.inv_etas), np.exp(self.inv_nus)
+        etas, nus = np.exp(self.inv_etas), np.exp(self.inv_nus)
         mus = self.forward(x, input, tag)
-
-        resid = data[:, None, :] - mus
-        z = resid / etas
-        return -0.5 * (nus + N) * np.log(1.0 + (resid * z).sum(axis=2) / nus) + \
-            gammaln((nus + N) / 2.0) - gammaln(nus / 2.0) - N / 2.0 * np.log(nus) \
-            -N / 2.0 * np.log(np.pi) - 0.5 * np.sum(np.log(etas), axis=1)
+        return independent_studentst_logpdf(data[:, None, :],
+                                            mus, etas, nus, mask=mask[:, None, :])
 
     def invert(self, data, input=None, mask=None, tag=None):
         return self._invert(data, input=input, mask=mask, tag=tag)
@@ -477,6 +474,7 @@ class _StudentsTEmissionsMixin(object):
         T = z.shape[0]
         z = np.zeros_like(z, dtype=int) if self.single_subspace else z
         mus = self.forward(x, input, tag)
+        nus = np.exp(self.inv_nus)
         etas = np.exp(self.inv_etas)
         taus = npr.gamma(nus[z] / 2.0, 2.0 / nus[z])
         return mus[np.arange(T), z, :] + np.sqrt(etas[z] / taus) * npr.randn(T, self.N)
@@ -602,7 +600,7 @@ class BernoulliNeuralNetworkEmissions(_BernoulliEmissionsMixin, _NeuralNetworkEm
 
 
 class _PoissonEmissionsMixin(object):
-    def __init__(self, N, K, D, M=0, single_subspace=True, link="log", bin_size=1.0, **kwargs):
+    def __init__(self, N, K, D, M=0, single_subspace=True, link="softplus", bin_size=1.0, **kwargs):
         super(_PoissonEmissionsMixin, self).__init__(N, K, D, M, single_subspace=single_subspace, **kwargs)
 
         self.link_name = link
@@ -645,8 +643,15 @@ class _PoissonEmissionsMixin(object):
         lambdas = self.mean(self.forward(variational_mean, input, tag))
         return lambdas[:,0,:] if self.single_subspace else np.sum(lambdas * expected_states[:,:,None], axis=1)
 
-
 class PoissonEmissions(_PoissonEmissionsMixin, _LinearEmissions):
+    def __init__(self, N, K, D, M=0, single_subspace=True, **kwargs):
+        super(PoissonEmissions, self).__init__(N, K, D, M=M, single_subspace=single_subspace, **kwargs)
+        # Scale down the measurement and control matrices so that
+        # rate params don't explode when exponentiated.
+        if self.link_name == "log":
+            self.Cs /= np.exp(np.linalg.norm(self.Cs, axis=2)[:,:,None])
+            self.Fs /= np.exp(np.linalg.norm(self.Fs, axis=2)[:,:,None])
+
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
@@ -725,6 +730,10 @@ class _AutoRegressiveEmissionsMixin(object):
         self.As = npr.randn(1, N) if single_subspace else npr.randn(K, N)
         self.inv_etas = -4 + npr.randn(1, N) if single_subspace else npr.randn(K, N)
 
+        # Shrink the eigenvalues of the A matrices to avoid instability.
+        # Since the As are diagonal, this is just a clip.
+        self.As = np.clip(self.As, -1.0 + 1e-8, 1 - 1e-8)
+
     @property
     def params(self):
         return super(_AutoRegressiveEmissionsMixin, self).params + (self.As, self.inv_etas)
@@ -750,8 +759,9 @@ class _AutoRegressiveEmissionsMixin(object):
         return np.sum(lls * mask[:, None, :], axis=2)
 
     def invert(self, data, input=None, mask=None, tag=None):
-        pad = np.zeros((1, 1, self.N)) if self.single_subspace else np.zeros((1, self.K, self.N))
-        resid = data - np.concatenate((pad, self.As[None, :, :] * data[:-1, None, :]))
+        assert self.single_subspace, "Can only invert with a single emission model"
+        pad = np.zeros((1, self.N))
+        resid = data - np.concatenate((pad, self.As * data[:-1]))
         return self._invert(resid, input=input, mask=mask, tag=tag)
 
     def sample(self, z, x, input=None, tag=None):
