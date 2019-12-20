@@ -435,14 +435,24 @@ def fit_multiclass_logistic_regression(X, y,
     return W
 
 
-def generalized_newton_studentst_dof(E_tau, E_logtau, nu0=1, max_iter=100, nu_min=1e-3, nu_max=20, tol=1e-8, verbose=False):
+def generalized_newton_studentst_dof(E_tau, E_logtau, nu0=2, a_nu=3, b_nu=3/2,
+                                     max_iter=100, nu_min=1e-8, nu_max=100, tol=1e-8,
+                                     verbose=False):
     """
     Generalized Newton's method for the degrees of freedom parameter, nu,
     of a Student's t distribution.  See the notebook in the doc/students_t
     folder for a complete derivation.
+
+    Include a Gamma prior nu ~ Ga(a_nu, b_nu), corresponding to regularizer
+
+    R(nu) = (a_nu - 1) * np.log(nu) - b_nu * nu
+    R'(nu) = (a_nu - 1) / nu - b_nu
+    R''(nu) = (1 - a_nu) / nu**2 
     """
-    delbo = lambda nu: 1/2 * (1 + np.log(nu/2)) - 1/2 * digamma(nu/2) + 1/2 * E_logtau - 1/2 * E_tau
-    ddelbo = lambda nu: 1/(2 * nu) - 1/4 * polygamma(1, nu/2)
+    assert a_nu > 1, "Gamma prior nu ~ Ga(a_nu, b_nu) must be log concave; i.e. a_nu must be > 1."
+    delbo = lambda nu: 1/2 * (1 + np.log(nu/2)) - 1/2 * digamma(nu/2) \
+            + 1/2 * E_logtau - 1/2 * E_tau + (a_nu - 1) / nu - b_nu
+    ddelbo = lambda nu: 1/(2 * nu) - 1/4 * polygamma(1, nu/2) + (1 - a_nu) / nu**2
 
     dnu = np.inf
     nu = nu0
@@ -452,14 +462,18 @@ def generalized_newton_studentst_dof(E_tau, E_logtau, nu0=1, max_iter=100, nu_mi
 
         if nu < nu_min or nu > nu_max:
             warn("generalized_newton_studentst_dof fixed point grew beyond "
-                 "bounds [{},{}].".format(nu_min, nu_max))
+                 "bounds [{},{}] to {}.".format(nu_min, nu_max, nu))
             nu = np.clip(nu, nu_min, nu_max)
             break
 
         # Perform the generalized Newton update
         a = -nu**2 * ddelbo(nu)
         b = delbo(nu) - a / nu
-        assert a > 0 and b < 0, "generalized_newton_studentst_dof encountered invalid values of a,b"
+        assert a > 0 and b < 0, \
+               "generalized_newton_studentst_dof failed due to nonconcave optimization. \
+               Try strengthening prior via parameters a_nu and b_nu."
+        if a <= 0 or b >= 0:
+            import pdb; pdb.set_trace()
         dnu = -a / b - nu
         nu = nu + dnu
 
