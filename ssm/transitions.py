@@ -7,7 +7,7 @@ from autograd.scipy.special import logsumexp
 from autograd.scipy.stats import dirichlet
 from autograd import hessian
 
-from ssm.util import one_hot, logistic, relu, rle, ensure_args_are_lists
+from ssm.util import one_hot, logistic, relu, rle, ensure_args_are_lists, LOG_EPS, DIV_EPS
 from ssm.regression import fit_multiclass_logistic_regression, fit_negative_binomial_integer_r
 from ssm.stats import multivariate_normal_logpdf
 from ssm.optimizers import adam, bfgs, lbfgs, rmsprop, sgd
@@ -116,14 +116,52 @@ class StationaryTransitions(Transitions):
         return log_Ps[None, :, :]
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        P = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations]) + 1e-16
+        P = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations])
         P /= P.sum(axis=-1, keepdims=True)
-        self.log_Ps = np.log(P)
+        self.log_Ps = np.log(P + LOG_EPS)
 
     def hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
         T, D = data.shape
         return np.zeros((T-1, D, D))
+
+
+class ConstrainedStationaryTransitions(StationaryTransitions):
+    """
+    Standard Hidden Markov Model with fixed transition matrix.
+    Allows the user to specify some entries of the transition matrix to be zeros,
+    in order to prohibit certain transitions.
+
+    The user passes an array, `mask`, which must be the same size
+    as the transition matrix. Entries of the mask which are zero
+    correspond to entries in the transition matrix which will be
+    fixed at zero.
+    """
+    def __init__(self, K, D, transition_mask=None, M=0):
+        super(ConstrainedStationaryTransitions, self).__init__(K, D, M=M)
+        Ps = self.transition_matrix
+        if transition_mask is None:
+            transition_mask = np.ones_like(Ps)
+
+        # Validate the transition mask. A valid mask must have be the same shape
+        # as the transition matrix, contain only ones and zeros, and contain at
+        # least one non-zero entry per row.
+        assert transition_mask.shape == Ps.shape, "Mask must be the same size " \
+            "as the transition matrix. Found mask of shape {}".format(mask.shape)
+        assert np.isin(transition_mask,[1,0]).all(), "Mask must contain only 1s and zeros."
+        for i in range(transition_mask.shape[0]):
+            assert transition_mask[i].any(), "Mask must contain at least one " \
+                "nonzero entry per row."
+        
+        self.transition_mask = transition_mask
+        Ps = Ps * transition_mask
+        self.log_Ps = np.log(Ps + LOG_EPS)
+
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        P = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations])
+        P *= self.transition_mask
+        P /= P.sum(axis=-1, keepdims=True)
+        self.log_Ps = np.log(P + LOG_EPS)
 
 class StickyTransitions(StationaryTransitions):
     """
