@@ -51,6 +51,7 @@ class HMM(object):
         transition_classes = dict(
             standard=trans.StationaryTransitions,
             stationary=trans.StationaryTransitions,
+            constrained=trans.ConstrainedStationaryTransitions,
             sticky=trans.StickyTransitions,
             inputdriven=trans.InputDrivenTransitions,
             recurrent=trans.RecurrentTransitions,
