@@ -80,7 +80,7 @@ def hmm_filter(pi0, Ps, ll):
         m = np.max(alphas[t])
         pz_tt[t] = np.exp(alphas[t] - m)
         pz_tt[t] /= np.sum(pz_tt[t])
-        pz_tp1t[t] = pz_tt[t].dot(Ps[hetero*t, :, :])
+        pz_tp1t[t] = pz_tt[t].dot(Ps[hetero*t])
  
     # Include the initial state distribution
     # Numba's version of vstack requires all arrays passed to vstack
