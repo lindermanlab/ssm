@@ -61,7 +61,6 @@ def forward_pass(pi0,
     return logsumexp(alphas[T-1])
 
 
-
 @numba.jit(nopython=True, cache=True)
 def hmm_filter(pi0, Ps, ll):
     T, K = ll.shape
@@ -71,14 +70,30 @@ def hmm_filter(pi0, Ps, ll):
     alphas = np.zeros((T, K))
     forward_pass(pi0, Ps, ll, alphas)
 
+    # Check if using heterogenous transition matrices
+    hetero = (Ps.shape[0] == T-1)
+
     # Predict forward with the transition matrix
-    pz_tt = np.exp(alphas - logsumexp(alphas, axis=1, keepdims=True))
-    pz_tp1t = np.matmul(pz_tt[:-1,None,:], Ps)[:,0,:]
-
+    pz_tt = np.empty((T-1, K))
+    pz_tp1t = np.empty((T-1, K))
+    for t in range(T-1):
+        m = np.max(alphas[t])
+        pz_tt[t] = np.exp(alphas[t] - m)
+        pz_tt[t] /= np.sum(pz_tt[t])
+        pz_tp1t[t] = pz_tt[t].dot(Ps[hetero*t])
+ 
     # Include the initial state distribution
-    pz_tp1t = np.row_stack(pi0, pz_tp1t)
+    # Numba's version of vstack requires all arrays passed to vstack
+    # to have the same number of dimensions.
+    pi0 = np.expand_dims(pi0, axis=0)
+    pz_tp1t = np.vstack((pi0, pz_tp1t))
 
-    assert np.allclose(np.sum(pz_tp1t, axis=1), 1.0)
+    # Numba implementation of np.sum does not allow axis keyword arg,
+    # and does not support np.allclose, so we loop over the time range 
+    # to verify that each sums to 1.
+    for t in range(T):
+        assert np.abs(np.sum(pz_tp1t[t]) - 1.0) < 1e-8
+
     return pz_tp1t
 
 
