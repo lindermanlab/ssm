@@ -155,14 +155,22 @@ class ConstrainedStationaryTransitions(StationaryTransitions):
         
         self.transition_mask = transition_mask
         Ps = Ps * transition_mask
-        Ps /= Ps.sum(axis=-1)
+        Ps /= Ps.sum(axis=-1, keepdims=True)
         self.log_Ps = np.log(Ps)
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        P = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations])
-        P *= self.transition_mask
-        P /= P.sum(axis=-1, keepdims=True)
-        self.log_Ps = np.log(P)
+        super(ConstrainedStationaryTransitions, self).m_step(
+            expectations,
+            datas,
+            inputs,
+            masks,
+            tags,
+            **kwargs
+        )
+        assert np.allclose(self.transition_matrix[~self.transition_mask], 0, 
+                           atol=2 * LOG_EPS)
+        self.log_Ps[~self.transition_mask] = -np.inf
+
 
 class StickyTransitions(StationaryTransitions):
     """

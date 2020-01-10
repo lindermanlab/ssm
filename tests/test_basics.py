@@ -82,7 +82,7 @@ def test_constrained_hmm(T=100, K=3, D=3):
     ]).astype(bool)
     init_Ps = np.random.rand(3, 3)
     init_Ps /= init_Ps.sum(axis=-1, keepdims=True)
-    init_log_Ps = np.log(init_Ps + 1e-16)
+    init_log_Ps = np.log(init_Ps)
     transition_kwargs = dict(
         transition_mask=transition_mask
     )
@@ -90,10 +90,9 @@ def test_constrained_hmm(T=100, K=3, D=3):
                   transitions="constrained",
                   observations="gaussian",
                   transition_kwargs=transition_kwargs)
-    fit_hmm.transitions.log_Ps = init_log_Ps
     fit_hmm.fit(x)
     learned_Ps = fit_hmm.transitions.transition_matrix
-    assert np.allclose(learned_Ps[~transition_mask], 0)
+    assert np.all(learned_Ps[~transition_mask] == 0)
 
 
 def test_hmm_likelihood(T=1000, K=5, D=2):
@@ -310,4 +309,5 @@ def test_hmm_likelihood_perf(T=10000, K=50, D=20):
 
 if __name__ == "__main__":
     # test_hmm_likelihood_perf()
-    test_hmm_mp_perf()
+    # test_hmm_mp_perf()
+    test_constrained_hmm()
