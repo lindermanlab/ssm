@@ -24,11 +24,11 @@ N_em_iters = 100
 
 print("Fitting Gaussian HSMM with EM")
 hsmm = ssm.HSMM(K, D, observations="gaussian")
-hsmm_em_lls = hsmm.fit(y, method="em", num_em_iters=N_em_iters)
+hsmm_em_lls = hsmm.fit(y, method="em", num_iters=N_em_iters)
 
 print("Fitting Gaussian HMM with EM")
 hmm = ssm.HMM(K, D, observations="gaussian")
-hmm_em_lls = hmm.fit(y, method="em", num_em_iters=N_em_iters)
+hmm_em_lls = hmm.fit(y, method="em", num_iters=N_em_iters)
 
 # Plot log likelihoods (fit model is typically better)
 plt.figure()
