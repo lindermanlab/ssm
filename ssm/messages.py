@@ -187,7 +187,7 @@ def hmm_expected_states(pi0, Ps, ll):
     # M-step is the sum of the expected joints.
     stationary = (Ps.shape[0] == 1)
     if not stationary:
-        expected_joints = alphas[:-1,:,None] + betas[1:,None,:] + ll[1:,None,:] + np.log(Ps + LOG_EPS)
+        expected_joints = alphas[:-1,:,None] + betas[1:,None,:] + ll[1:,None,:] + np.log(Ps)
         expected_joints -= expected_joints.max((1,2))[:,None, None]
         expected_joints = np.exp(expected_joints)
         expected_joints /= expected_joints.sum((1,2))[:,None,None]
@@ -195,7 +195,7 @@ def hmm_expected_states(pi0, Ps, ll):
     else:
         # Compute the sum over time axis of the expected joints
         expected_joints = np.zeros((K, K))
-        _compute_stationary_expected_joints(alphas, betas, ll, np.log(Ps[0] + LOG_EPS), expected_joints)
+        _compute_stationary_expected_joints(alphas, betas, ll, np.log(Ps[0]), expected_joints)
         expected_joints = expected_joints[None, :, :]
 
     return expected_states, expected_joints, normalizer

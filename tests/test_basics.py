@@ -14,6 +14,7 @@ def test_sample(T=10, K=4, D=3, M=2):
     transition_names = [
         "standard",
         "sticky",
+        "constrained",
         "inputdriven",
         "recurrent",
         "recurrent_only",
@@ -66,6 +67,32 @@ def test_sample(T=10, K=4, D=3, M=2):
             hmm = ssm.HMM(K, D, M=M, transitions=transitions, observations=observations)
             zpre, xpre = hmm.sample(3, input=npr.randn(3, M))
             zsmpl, xsmpl = hmm.sample(T, prefix=(zpre, xpre), input=npr.randn(T, M), with_noise=False)
+
+
+def test_constrained_hmm(T=100, K=3, D=3):
+    hmm = ssm.HMM(K, D, M=0, 
+                  transitions="constrained",
+                  observations="gaussian")
+    z, x = hmm.sample(T)
+    
+    transition_mask = np.array([
+        [1, 0, 1],
+        [1, 0, 0],
+        [1, 0, 1],
+    ]).astype(bool)
+    init_Ps = np.random.rand(3, 3)
+    init_Ps /= init_Ps.sum(axis=-1, keepdims=True)
+    init_log_Ps = np.log(init_Ps)
+    transition_kwargs = dict(
+        transition_mask=transition_mask
+    )
+    fit_hmm = ssm.HMM(K, D, M=0, 
+                  transitions="constrained",
+                  observations="gaussian",
+                  transition_kwargs=transition_kwargs)
+    fit_hmm.fit(x)
+    learned_Ps = fit_hmm.transitions.transition_matrix
+    assert np.all(learned_Ps[~transition_mask] == 0)
 
 
 def test_hmm_likelihood(T=1000, K=5, D=2):
@@ -282,4 +309,5 @@ def test_hmm_likelihood_perf(T=10000, K=50, D=20):
 
 if __name__ == "__main__":
     # test_hmm_likelihood_perf()
-    test_hmm_mp_perf()
+    # test_hmm_mp_perf()
+    test_constrained_hmm()

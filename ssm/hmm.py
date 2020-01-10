@@ -51,6 +51,7 @@ class HMM(object):
         transition_classes = dict(
             standard=trans.StationaryTransitions,
             stationary=trans.StationaryTransitions,
+            constrained=trans.ConstrainedStationaryTransitions,
             sticky=trans.StickyTransitions,
             inputdriven=trans.InputDrivenTransitions,
             recurrent=trans.RecurrentTransitions,
@@ -477,6 +478,11 @@ class HMM(object):
         if initialize:
             self.initialize(datas, inputs=inputs, masks=masks, tags=tags)
 
+        if isinstance(self.transitions,
+                      trans.ConstrainedStationaryTransitions):
+            if method != "em":
+                raise Exception("Only EM is implemented "
+                                "for Constrained transitions.")
         return _fitting_methods[method](datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
 
 
