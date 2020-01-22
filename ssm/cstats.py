@@ -23,7 +23,6 @@ def _bands_to_blocks_lower(double[:, ::1] A_banded):
     raise NotImplementedError
 
 
-
 def _bands_to_blocks_upper(double[:,::1] A_banded):
     raise NotImplementedError
 
@@ -37,6 +36,7 @@ def vjp_cholesky_banded_lower(double[:, ::1] L_bar,
                                 double[:, ::1] A_banded,
                                 double[:, ::1] A_bar):
     raise NotImplementedError
+
 
 def _vjp_solve_banded_A(double[:, ::1] A_bar,
                           double[:, ::1] b_bar,
