@@ -865,6 +865,18 @@ J
     def approximate_posterior(self, datas, inputs=None, masks=None, tags=None,
                               method="laplace_em", variational_posterior="structured_meanfield",
                               **kwargs):
+        """
+        Fit an approximate posterior to data, without updating model params.
+
+        This function computes the posterior over discrete and continuous states
+        with model parameters fixed. This can be thought of as extending the Kalman
+        Smoother (which computes the state distribution in an LDS) to the SLDS case.
+        If the model is an LDS, and the laplace-em method is used with a structured_meanfield
+        posterior, this function will be equivalent to running a Kalman Smoother.
+
+        Returns: (elbos, posterior)
+                 posterior is a variational posterior object as defined in variational.py
+        """
         # Specify fitting methods
         _fitting_methods = dict(svi=self._fit_svi,
                                 bbvi=self._fit_svi,
