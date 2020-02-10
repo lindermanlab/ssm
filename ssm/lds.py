@@ -877,7 +877,8 @@ J
 
         # Initialize the variational posterior
         posterior = self._make_variational_posterior(variational_posterior, datas, inputs, masks, tags, method)
-        return _fitting_methods[method](posterior, datas, inputs, masks, tags, learning=False, **kwargs)
+        elbos = _fitting_methods[method](posterior, datas, inputs, masks, tags, learning=False, **kwargs)
+        return elbos, posterior
 
 
 class LDS(SLDS):
