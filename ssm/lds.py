@@ -628,16 +628,45 @@ J
             assert np.all(np.isfinite(obj(x)))
             J_diag, J_lower_diag = hessian_neg_expected_log_joint(x, Ez, Ezzp1)
 
-            # Compute the Hessian vector product h = J * x = -H * x
+            # Compute the Hessian vector product h = J * x
             # We can do this without instantiating the full matrix
             h = symm_block_tridiag_matmul(J_diag, J_lower_diag, x)
 
             # update params
-            prms["J_diag"] = J_diag
-            prms["J_lower_diag"] = J_lower_diag
-            prms["h"] = h
+            prms["J_ini"] = np.zeros((D, D))
+            prms["h_ini"] = np.zeros((D,))
+            prms["J_dyn_11"] = np.zeros((D, D))
+            prms["J_dyn_22"] = np.zeros((D, D))
+            prms["J_dyn_21"] = J_lower_diag
+            prms["h_dyn_1"] = np.zeros(D)
+            prms["h_dyn_2"] = np.zeros(D)
+            prms["J_obs"] = J_diag
+            prms["h_obs"] = h
 
-    def _fit_laplace_em_params_update(
+    def _fit_laplace_em_params_update_exact_mstep(
+        self, discrete_expectations, continuous_expectations,
+        datas, inputs, masks, tags,
+        emission_optimizer, emission_optimizer_maxiter, alpha):
+
+        # 3. Update the model parameters.  Replace the expectation wrt x with sample from q(x).
+        # The parameter update is partial and depends on alpha.
+        xmasks = [np.ones_like(x, dtype=bool) for x in continuous_expectations]
+        for distn in [self.init_state_distn, self.transitions, self.dynamics]:
+            curr_prms = copy.deepcopy(distn.params)
+            if curr_prms == tuple(): continue
+            distn.m_step(discrete_expectations, continuous_expectations, inputs, xmasks, tags)
+            distn.params = convex_combination(curr_prms, distn.params, alpha)
+
+        # update emissions params
+        curr_prms = copy.deepcopy(self.emissions.params)
+        self.emissions.m_step(discrete_expectations, continuous_expectations,
+                              datas, inputs, masks, tags,
+                              optimizer=emission_optimizer,
+                              maxiter=emission_optimizer_maxiter)
+        self.emissions.params = convex_combination(curr_prms, self.emissions.params, alpha)
+
+
+    def _fit_laplace_em_params_update_stoch_mstep(
         self, discrete_expectations, continuous_expectations,
         datas, inputs, masks, tags,
         emission_optimizer, emission_optimizer_maxiter, alpha):
@@ -722,7 +751,7 @@ J
                         continuous_maxiter=100,
                         emission_optimizer="lbfgs",
                         emission_optimizer_maxiter=100,
-                        parameters_update="mstep",
+                        parameters_update="stoch_mstep",
                         alpha=0.5,
                         learning=True):
         """
@@ -746,14 +775,20 @@ J
             self._fit_laplace_em_continuous_state_update(
                 discrete_expectations, variational_posterior, datas, inputs, masks, tags,
                 continuous_optimizer, continuous_tolerance, continuous_maxiter)
-            continuous_expectations = variational_posterior.sample_continuous_states()
 
             # 3. Update parameters
+            if learning and parameters_update=="exact_mstep":
+
+                self._fit_laplace_em_params_update_exact_mstep(
+                    )
+
             # Default is partial M-step given a sample from q(x)
-            if learning and parameters_update=="mstep":
-                self._fit_laplace_em_params_update(
-                    discrete_expectations, continuous_expectations, datas, inputs, masks, tags,
+            elif learning and parameters_update=="stoch_mstep":
+                continuous_sample = variational_posterior.sample_continuous_states()
+                self._fit_laplace_em_params_update_stoch_mstep(
+                    discrete_expectations, continuous_sample, datas, inputs, masks, tags,
                     emission_optimizer, emission_optimizer_maxiter, alpha)
+
             # Alternative is SGD on all parameters with samples from q(x)
             elif learning and parameters_update=="sgd":
                 self._fit_laplace_em_params_update_sgd(
@@ -807,7 +842,7 @@ J
     def fit(self, datas, inputs=None, masks=None, tags=None,
             method="laplace_em", variational_posterior="structured_meanfield",
             variational_posterior_kwargs=None,
-            initialize=True, num_init_iters=25, 
+            initialize=True, num_init_iters=25,
             **kwargs):
 
         """
