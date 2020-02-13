@@ -81,7 +81,7 @@ def hmm_filter(pi0, Ps, ll):
         pz_tt[t] = np.exp(alphas[t] - m)
         pz_tt[t] /= np.sum(pz_tt[t])
         pz_tp1t[t] = pz_tt[t].dot(Ps[hetero*t])
- 
+
     # Include the initial state distribution
     # Numba's version of vstack requires all arrays passed to vstack
     # to have the same number of dimensions.
@@ -89,7 +89,7 @@ def hmm_filter(pi0, Ps, ll):
     pz_tp1t = np.vstack((pi0, pz_tp1t))
 
     # Numba implementation of np.sum does not allow axis keyword arg,
-    # and does not support np.allclose, so we loop over the time range 
+    # and does not support np.allclose, so we loop over the time range
     # to verify that each sums to 1.
     for t in range(T):
         assert np.abs(np.sum(pz_tp1t[t]) - 1.0) < 1e-8
@@ -943,7 +943,7 @@ def kalman_info_wrapper(f):
         assert h_dyn_2.shape == (T-1, D) or h_dyn_2.shape == (D,)
         assert np.isscalar(log_Z_dyn) or log_Z_dyn.shape == (T-1,)
         assert J_obs.shape == (T, D, D)
-        assert log_Z_obs.shape == (T,)
+        assert np.isscalar(log_Z_obs) or log_Z_obs.shape == (T,)
 
         # Add extra time dimension if necessary
         J_dyn_11 = J_dyn_11 if J_dyn_11.ndim == 3 else np.reshape(J_dyn_11, (1,) + J_dyn_11.shape)
@@ -953,6 +953,7 @@ def kalman_info_wrapper(f):
         h_dyn_2 = h_dyn_2 if h_dyn_2.ndim == 2 else np.reshape(h_dyn_2, (1,) + h_dyn_2.shape)
         log_Z_dyn = np.array([log_Z_dyn]) if np.isscalar(log_Z_dyn) else log_Z_dyn
         J_obs = J_obs if J_obs.ndim == 3 else np.reshape(J_obs, (1,) + J_obs.shape)
+        log_Z_obs = np.array([log_Z_obs]) if np.isscalar(log_Z_obs) else log_Z_obs
 
         return f(J_ini, h_ini, log_Z_ini,
                  J_dyn_11, J_dyn_21, J_dyn_22, h_dyn_1, h_dyn_2, log_Z_dyn,
@@ -1126,7 +1127,7 @@ def test_info_sample(T=100, D=3, N=10, U=3):
     # Test the standard Kalman filter
     from pylds.lds_messages_interface import E_step as kalman_smoother_ref
     ll1, smoothed_mus1, smoothed_Sigmas1, ExnxT1 = kalman_smoother_ref(*args)
-    
+
     # Plot_the samples vs the smoother
     info_args = convert_mean_to_info_args(*args)
     xs = [kalman_info_sample(*info_args) for _ in range(4)]

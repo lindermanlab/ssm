@@ -19,7 +19,7 @@ class Observations(object):
     # K = number of discrete states
     # D = number of observed dimensions
     # M = exogenous input dimensions (the inputs modulate the probability of discrete state transitions via a multiclass logistic regression)
-    
+
     def __init__(self, K, D, M=0):
         self.K, self.D, self.M = K, D, M
 
@@ -196,7 +196,7 @@ class ExponentialObservations(Observations):
         weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
             self.log_lambdas[k] = -np.log(np.average(x, axis=0, weights=weights[:,k]) + 1e-16)
-                
+
     def smooth(self, expectations, data, input, tag):
         """
         Compute the mean observation under the posterior distribution
@@ -892,56 +892,71 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
         return np.row_stack((ll_init, ll_ar))
 
-    def m_step(self, expectations, datas, inputs, masks, tags, J0=None, h0=None):
+    def m_step(self, expectations, datas, inputs, masks, tags,
+               J0=None, h0=None, continuous_expectations=None):
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
-        # Collect all the data
-        xs, ys, Ezs = [], [], []
-        for (Ez, _, _), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
-            # Only use data if it is complete
-            if not np.all(mask):
-                raise Exception("Encountered missing data in AutoRegressiveObservations!")
+        if continuous_expectations is None:
+            # Collect all the data
+            xs, ys, Ezs = [], [], []
+            for (Ez, _, _), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
+                # Only use data if it is complete
+                if not np.all(mask):
+                    raise Exception("Encountered missing data in AutoRegressiveObservations!")
 
-            xs.append(
-                np.hstack([data[self.lags-l-1:-l-1] for l in range(self.lags)]
-                          + [input[self.lags:, :self.M], np.ones((data.shape[0]-self.lags, 1))]))
-            ys.append(data[self.lags:])
-            Ezs.append(Ez[self.lags:])
+                xs.append(
+                    np.hstack([data[self.lags-l-1:-l-1] for l in range(self.lags)]
+                              + [input[self.lags:, :self.M], np.ones((data.shape[0]-self.lags, 1))]))
+                ys.append(data[self.lags:])
+                Ezs.append(Ez[self.lags:])
 
-        # M step: Fit the weighted linear regressions for each K and D
-        if J0 is None and h0 is None:
-            J_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
-                                 self.l2_penalty_V * np.ones(M),
-                                 self.l2_penalty_b * np.ones(1)))
-            J = np.tile(np.diag(J_diag)[None, :, :], (K, 1, 1))
-            h = np.zeros((K, D * lags + M + 1, D))
+            # M step: Fit the weighted linear regressions for each K and D
+            if J0 is None and h0 is None:
+                J_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
+                                     self.l2_penalty_V * np.ones(M),
+                                     self.l2_penalty_b * np.ones(1)))
+                Ex = np.zeros((K, D * lags + 1))
+                Ey = np.zeros((K, D))
+                ExxT = np.tile(np.diag(J_diag)[None, :, :], (K, 1, 1))
+                ExyT = np.zeros((K, D * lags + M + 1, D))
+                EyyT = np.zeros((K, D, D))
+            else:
+                # Use J0 and h0 as a prior on A, b
+                assert J0.shape == (K, D*lags + M + 1, D*lags + M + 1)
+                assert h0.shape == (K, D*lags + M + 1, D)
+                Ex = np.zeros((K, D * lags + 1))
+                Ey = np.zeros((K, D))
+                ExxT = J0
+                ExyT = h0
+                EyyT = np.zeros((K, D, D))
+
+            for x, y, Ez in zip(xs, ys, Ezs):
+                # Einsum is concise but slow!
+                # J += np.einsum('tk, ti, tj -> kij', Ez, x, x)
+                # h += np.einsum('tk, ti, td -> kid', Ez, x, y)
+                # Do weighted products for each of the k states
+                for k in range(K):
+                    weighted_x = x * Ez[:, k:k+1]
+                    weighted_y = y * Ez[:, k:k+1]
+                    Ex[k] = np.sum(weighted_x, axis=0)
+                    Ey[k] = np.sum(weighted_y, axis=0)
+                    ExxT[k] += np.dot(weighted_x.T, x)
+                    ExyT[k] += np.dot(weighted_x.T, y)
+                    EyyT[k] += np.dot(weighted_y.T, y)
         else:
-            assert J0.shape == (K, D*lags + M + 1, D*lags + M + 1)
-            assert h0.shape == (K, D*lags + M + 1, D)
-            J = J0
-            h = h0
+            # Continuous expectations are given
+            Ex, Ey, ExxT, ExyT, EyyT = continuous_expectations
 
-        J_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
-                                 self.l2_penalty_V * np.ones(M),
-                                 self.l2_penalty_b * np.ones(1)))
-        J = np.tile(np.diag(J_diag)[None, :, :], (K, 1, 1))
-        h = np.zeros((K, D * lags + M + 1, D))
-        for x, y, Ez in zip(xs, ys, Ezs):
-            # Einsum is concise but slow!
-            # J += np.einsum('tk, ti, tj -> kij', Ez, x, x)
-            # h += np.einsum('tk, ti, td -> kid', Ez, x, y)
-            # Do weighted products for each of the k states
-            for k in range(K):
-                weighted_x = x * Ez[:, k:k+1]
-                J[k] += np.dot(weighted_x.T, x)
-                h[k] += np.dot(weighted_x.T, y)
-
-        mus = np.linalg.solve(J, h)
+        # Solve for the linear regression weights
+        mus = np.linalg.solve(ExxT, ExyT)
         self.As = np.swapaxes(mus[:, :D*lags, :], 1, 2)
         self.Vs = np.swapaxes(mus[:, D*lags:D*lags+M, :], 1, 2)
         self.bs = mus[:, -1, :]
 
-        # Update the covariance
+        # TODO: Update the covariance using the expected sufficient statistics
+        # E[(y - Ax - b)(y - Ax - b)^T]
+        # = E[yy^T -2yx^TA^T - 2yb^T +Axx^TA^T + 2Axb^T + bb^T]
+        raise NotImplementedError
         sqerr = np.zeros((K, D, D))
         weight = 1e-8 * np.ones(K)
         for x, y, Ez in zip(xs, ys, Ezs):
