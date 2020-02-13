@@ -337,9 +337,6 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
     def mean_discrete_states(self):
         # Now compute the posterior expectations of z under q(z)
         # NOTE: This returns the log normalizer, E[z_t], E[z_t, z_{t+1}]
-        # TODO: cache expectations and log normalizer here, so that they are
-        # available for computing entropies, but need to be sure that the parameters
-        # haven't changed.
         return [hmm_expected_states(prms["pi0"], prms["Ps"], prms["log_likes"])
                 for prms in self.params]
 
@@ -400,12 +397,8 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
 
             # 1. Compute log q(x) of samples of x
             # TODO: Compute the exact entropy
-            J_diag = prms["J_obs"]
-            J_lower_diag = prms["J_dyn_21"]
-            h = prms["h_obs"]
-            negentropy += block_tridiagonal_log_probability(s,
-                                                            J_diag,
-                                                            J_lower_diag, h)
+            raise NotImplementedError
+            negentropy += block_tridiagonal_log_probability(s, prms["J_diag"], prms["J_lower_diag"], prms["h"])
 
             # 2. Compute E_{q(z)}[ log q(z) ]
             log_pi0 = np.log(prms["pi0"] + 1e-16) - logsumexp(prms["pi0"])
