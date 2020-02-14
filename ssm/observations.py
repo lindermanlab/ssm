@@ -915,7 +915,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 J_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
                                      self.l2_penalty_V * np.ones(M),
                                      self.l2_penalty_b * np.ones(1)))
-                Ex = np.zeros((K, D * lags + 1))
+                Ex = np.zeros((K, D * lags + M + 1))
                 Ey = np.zeros((K, D))
                 ExxT = np.tile(np.diag(J_diag)[None, :, :], (K, 1, 1))
                 ExyT = np.zeros((K, D * lags + M + 1, D))
@@ -924,7 +924,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 # Use J0 and h0 as a prior on A, b
                 assert J0.shape == (K, D*lags + M + 1, D*lags + M + 1)
                 assert h0.shape == (K, D*lags + M + 1, D)
-                Ex = np.zeros((K, D * lags + 1))
+                Ex = np.zeros((K, D * lags + M + 1))
                 Ey = np.zeros((K, D))
                 ExxT = J0
                 ExyT = h0
@@ -956,18 +956,20 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         # TODO: Update the covariance using the expected sufficient statistics
         # E[(y - Ax - b)(y - Ax - b)^T]
         # = E[yy^T -2yx^TA^T - 2yb^T +Axx^TA^T + 2Axb^T + bb^T]
-        raise NotImplementedError
-        sqerr = np.zeros((K, D, D))
-        weight = 1e-8 * np.ones(K)
-        for x, y, Ez in zip(xs, ys, Ezs):
-            yhat = np.matmul(x[None, :, :], mus)
-            resid = y[None, :, :] - yhat
-            sqerr += np.einsum('tk,kti,ktj->kij', Ez, resid, resid)
+        #
+        # In the above, A is a block matrix [A V b] (mus in the code above)
+        
+        A = np.swapaxes(mus, 1, 2) 
+        AT = mus
+        expected_err = EyyT - 2 * A @ ExyT + A @ ExxT @ AT
+        
+        weight = 1e-32 * np.ones(K)
+        for (Ez, _, _) in expectations:
             weight += np.sum(Ez, axis=0)
-        Sigmas = sqerr / weight[:, None, None] + 1e-8 * np.eye(D)
+        Sigmas = expected_err / weight[:, None, None] + 1e-32 * np.eye(D)
 
         # If any states are unused, set their parameters to a perturbation of a used state
-        usage = sum([Ez.sum(0) for Ez in Ezs])
+        usage = sum([Ez.sum(0) for (Ez, _, _) in Ezs])
         unused = np.where(usage < 1)[0]
         used = np.where(usage > 1)[0]
         if len(unused) > 0:
