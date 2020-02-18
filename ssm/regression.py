@@ -42,8 +42,9 @@ model_kwarg_descriptions = dict(
 def fit_linear_regression(Xs, ys,
                           weights=None,
                           fit_intercept=True,
-                          prior_mean=0,
-                          prior_variance=1,
+                          expectations=None,
+                          prior_ExxT=None,
+                          prior_ExyT=None,
                           nu0=1,
                           Psi0=1
                           ):
@@ -63,31 +64,38 @@ def fit_linear_regression(Xs, ys,
     assert all([y.shape[1] == d for y in ys])
     assert all([X.shape[0] == y.shape[0] for X, y in zip(Xs, ys)])
 
-    prior_mean = prior_mean * np.zeros((d, p))
-    prior_variance = prior_variance * np.eye(p)
-
     # Check the weights.  Default to all ones.
     if weights is not None:
         weights = weights if isinstance(weights, (list, tuple)) else [weights]
     else:
         weights = [np.ones(X.shape[0]) for X in Xs]
 
-    # Add weak prior on intercept
-    if fit_intercept:
-        prior_mean = np.column_stack((prior_mean, np.zeros(d)))
-        prior_variance = block_diag(prior_variance, np.eye(1))
+    if expectations is None:
 
-    # Compute the posterior
-    J = np.linalg.inv(prior_variance)
-    h = np.dot(J, prior_mean.T)
+        # Compute the posterior. The priors must include a prior for the
+        # intercept term, if given.
+        x_dim = d + int(fit_intercept)
+        if prior_ExxT is not None and prior_ExyT is not None:
+            assert prior_ExxT.shape == (x_dim, x_dim), "prior_ExxT is wrong"\
+                " shape. Expected ({}, {})".format(x_dim, x_dim)
 
-    for X, y, weight in zip(Xs, ys, weights):
-        X = np.column_stack((X, np.ones(X.shape[0]))) if fit_intercept else X
-        J += np.dot(X.T * weight, X)
-        h += np.dot(X.T * weight, y)
+            assert prior_ExyT.shape == (x_dim, p), "prior_ExyT is wrong"\
+                " shape. Expected ({}, {})".format(x_dim, p)
+            ExxT = prior_ExxT
+            ExyT = prior_ExyT
+        else:
+            ExxT = np.eye(x_dim)
+            ExyT = np.zeros((x_dim, p))
+
+        for X, y, weight in zip(Xs, ys, weights):
+            X = np.column_stack((X, np.ones(X.shape[0]))) if fit_intercept else X
+            ExxT += np.dot(X.T * weight, X)
+            ExyT += np.dot(X.T * weight, y)
+    else:
+        ExxT, ExyT = expectations
 
     # Solve for the MAP estimate
-    W = np.linalg.solve(J, h).T
+    W = np.linalg.solve(ExxT, ExyT).T
     if fit_intercept:
         W, b = W[:, :-1], W[:, -1]
     else:
