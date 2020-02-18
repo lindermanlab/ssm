@@ -92,38 +92,32 @@ def fit_linear_regression(Xs, ys,
     else:
         weights = [np.ones(X.shape[0]) for X in Xs]
 
-    x_dim = d + int(fit_intercept)
-    ExxT = np.zeros((x_dim, x_dim))
-    ExyT = np.zeros((x_dim, p))
-    EyyT = np.zeros((p, p))
-    weight_sum = 0
     if expectations is None:
 
         # Compute the posterior. The priors must include a prior for the
         # intercept term, if given.
+        x_dim = d + int(fit_intercept)
         if prior_ExxT is not None and prior_ExyT is not None:
-            check_shape(prior_ExxT, "prior_ExxT", (x_dim, x_dim))
-            check_shape(prior_ExyT, "prior_ExyT", (x_dim, p))
-            ExxT[:, :] = prior_ExxT
-            ExyT[:, :] = prior_ExyT
+            assert prior_ExxT.shape == (x_dim, x_dim), "prior_ExxT is wrong"\
+                " shape. Expected ({}, {})".format(x_dim, x_dim)
+
+            assert prior_ExyT.shape == (x_dim, p), "prior_ExyT is wrong"\
+                " shape. Expected ({}, {})".format(x_dim, p)
+            ExxT = prior_ExxT
+            ExyT = prior_ExyT
+        else:
+            ExxT = np.eye(x_dim)
+            ExyT = np.zeros((x_dim, p))
 
         for X, y, weight in zip(Xs, ys, weights):
             X = np.column_stack((X, np.ones(X.shape[0]))) if fit_intercept else X
-            weight_sum += np.sum(weight)
-            weight = weight[:, None] if weight.ndim == 1 else weight
-            weighted_x = X * weight
-            weighted_y = y * weight
-            ExxT += weighted_x.T @ X
-            ExyT += weighted_x.T @ y
-            EyyT += weighted_y.T @ y
+            ExxT += np.dot(X.T * weight, X)
+            ExyT += np.dot(X.T * weight, y)
     else:
-        ExxT, ExyT, EyyT, weight_sum = expectations
-        check_shape(ExxT, "ExxT", (x_dim, x_dim))
-        check_shape(ExyT, "ExyT", (x_dim, p))
-        check_shape(EyyT, "EyyT", (p, p))
+        ExxT, ExyT = expectations
 
     # Solve for the MAP estimate
-    W_full = np.linalg.solve(ExxT, ExyT).T
+    W = np.linalg.solve(ExxT, ExyT).T
     if fit_intercept:
         W, b = W_full[:, :-1], W_full[:, -1]
     else:

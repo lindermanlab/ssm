@@ -894,82 +894,89 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
     def m_step(self, expectations, datas, inputs, masks, tags,
                J0=None, h0=None, continuous_expectations=None):
+        """Compute M-step for Gaussian Auto Regressive Observations.
+
+        If `continuous_expectations` is not None, this function will
+        compute an exact M-step using the expected sufficient statistics for the
+        continuous states. In this case, we ignore the prior provided by (J0, h0),
+        because the calculation is exact.
+
+        If `continuous_expectations` is None, we fall back to an approximate M-step,
+        using the prior given by (J0, h0). In this case, we estimate the sufficient
+        statistics using `datas,` which is typically a single sample of the continuous
+        states from the posterior distribution. 
+        """
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
+        As = np.zeros((K, D, D * lags + M))
+        bs = np.zeros((K, D))
+        Sigmas = np.zeros((K, D, D))
+        Ex, Ey, ExxT, ExyT, EyyT = (None, None, None, None, None)
+        xs, ys, Ezs = [], [], []
+        for (Ez, _, _), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
+            if not np.all(mask):
+                raise Exception("Encountered missing data in AutoRegressiveObservations!")
+            # Since the fit_linear_regression function includes an intercept, we
+            # don't need to append the intercept to the xs
+            xs.append(
+                np.hstack([data[self.lags-l-1:-l-1] for l in range(self.lags)]
+                          + [input[self.lags:, :self.M]])
+            )
+            ys.append(data[self.lags:])
+            Ezs.append(Ez[self.lags:])
+
         if continuous_expectations is None:
-            # Collect all the data
-            xs, ys, Ezs = [], [], []
-            for (Ez, _, _), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
-                # Only use data if it is complete
-                if not np.all(mask):
-                    raise Exception("Encountered missing data in AutoRegressiveObservations!")
-
-                xs.append(
-                    np.hstack([data[self.lags-l-1:-l-1] for l in range(self.lags)]
-                              + [input[self.lags:, :self.M], np.ones((data.shape[0]-self.lags, 1))]))
-                ys.append(data[self.lags:])
-                Ezs.append(Ez[self.lags:])
-
-            # M step: Fit the weighted linear regressions for each K and D
-            if J0 is None and h0 is None:
-                J_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
-                                     self.l2_penalty_V * np.ones(M),
-                                     self.l2_penalty_b * np.ones(1)))
-                Ex = np.zeros((K, D * lags + M + 1))
-                Ey = np.zeros((K, D))
-                ExxT = np.tile(np.diag(J_diag)[None, :, :], (K, 1, 1))
-                ExyT = np.zeros((K, D * lags + M + 1, D))
-                EyyT = np.zeros((K, D, D))
+            # We are performing an approximate m-step here. 
+            # Collect all the data and pass it to fit_linear_regression.
+            if J0 is not None:
+                    J = J0
             else:
-                # Use J0 and h0 as a prior on A, b
-                assert J0.shape == (K, D*lags + M + 1, D*lags + M + 1)
-                assert h0.shape == (K, D*lags + M + 1, D)
-                Ex = np.zeros((K, D * lags + M + 1))
-                Ey = np.zeros((K, D))
-                ExxT = J0
-                ExyT = h0
-                EyyT = np.zeros((K, D, D))
+                J_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
+                                        self.l2_penalty_V * np.ones(M),
+                                        self.l2_penalty_b * np.ones(1)))
+                J = np.tile(np.diag(J_diag)[None, :, :], (K, 1, 1))
+            if h0 is not None:
+                h = h0
+            else:
+                h = np.zeros((K, D + M + 1, D))
 
-            for x, y, Ez in zip(xs, ys, Ezs):
-                # Einsum is concise but slow!
-                # J += np.einsum('tk, ti, tj -> kij', Ez, x, x)
-                # h += np.einsum('tk, ti, td -> kid', Ez, x, y)
-                # Do weighted products for each of the k states
-                for k in range(K):
-                    weighted_x = x * Ez[:, k:k+1]
-                    weighted_y = y * Ez[:, k:k+1]
-                    Ex[k] = np.sum(weighted_x, axis=0)
-                    Ey[k] = np.sum(weighted_y, axis=0)
-                    ExxT[k] += np.dot(weighted_x.T, x)
-                    ExyT[k] += np.dot(weighted_x.T, y)
-                    EyyT[k] += np.dot(weighted_y.T, y)
+            for k in range(K):
+                weights_curr = [Ez[:, k] for Ez in Ezs]
+                A_curr, b_curr, sigma_curr = fit_linear_regression(xs, ys,
+                                        weights=weights_curr,
+                                        fit_intercept=True,
+                                        prior_ExxT=J[k],
+                                        prior_ExyT=h[k],
+                                        Psi0=1e-8,
+                                        nu0=1e-8,
+                                    )
+                As[k] = A_curr
+                bs[k] = b_curr
+                Sigmas[k] = sigma_curr
         else:
-            # Continuous expectations are given
+            # Continuous expectations are given. We are performing an exact
+            # m-step. Pass the sufficient statistics to fit_linear_regression
+            # along with the data.
             Ex, Ey, ExxT, ExyT, EyyT = continuous_expectations
+            for k in range(K):
+                weights_curr = [Ez[:, k] for Ez in Ezs]
+                A_curr, b_curr, sigma_curr = fit_linear_regression(
+                                    xs,
+                                    ys,
+                                    weights=weights_curr,
+                                    fit_intercept=True,
+                                    expectations=(ExxT, ExyT)
+                                    )
+                As[k] = A_curr
+                bs[k] = b_curr
+                Sigmas[k] = sigma_curr
 
-        # Solve for the linear regression weights
-        mus = np.linalg.solve(ExxT, ExyT)
-        self.As = np.swapaxes(mus[:, :D*lags, :], 1, 2)
-        self.Vs = np.swapaxes(mus[:, D*lags:D*lags+M, :], 1, 2)
-        self.bs = mus[:, -1, :]
-
-        # TODO: Update the covariance using the expected sufficient statistics
-        # E[(y - Ax - b)(y - Ax - b)^T]
-        # = E[yy^T -2yx^TA^T - 2yb^T +Axx^TA^T + 2Axb^T + bb^T]
-        #
-        # In the above, A is a block matrix [A V b] (mus in the code above)
-        
-        A = np.swapaxes(mus, 1, 2) 
-        AT = mus
-        expected_err = EyyT - 2 * A @ ExyT + A @ ExxT @ AT
-        
-        weight = 1e-32 * np.ones(K)
-        for (Ez, _, _) in expectations:
-            weight += np.sum(Ez, axis=0)
-        Sigmas = expected_err / weight[:, None, None] + 1e-32 * np.eye(D)
+        self.As = As
+        self.bs = bs
+        self.Sigmas = Sigmas
 
         # If any states are unused, set their parameters to a perturbation of a used state
-        usage = sum([Ez.sum(0) for (Ez, _, _) in Ezs])
+        usage = sum([Ez.sum(0) for Ez in Ezs])
         unused = np.where(usage < 1)[0]
         used = np.where(usage > 1)[0]
         if len(unused) > 0:
