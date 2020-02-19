@@ -634,6 +634,7 @@ J
             h = symm_block_tridiag_matmul(J_diag, J_lower_diag, x)
 
             # update params
+            D = self.D
             prms["J_ini"] = np.zeros((D, D))
             prms["h_ini"] = np.zeros((D,))
             prms["J_dyn_11"] = np.zeros((D, D))
@@ -648,6 +649,13 @@ J
         self, discrete_expectations, continuous_expectations,
         datas, inputs, masks, tags,
         emission_optimizer, emission_optimizer_maxiter, alpha):
+        
+        #TODO: Fix this!! Need to unpack the expectations
+        # and form ExxT for the augmented state vector, then call 
+        # the m_step for autoregressive observations. Also need to 
+        # ensure that we actually can perform the exact mstep for the current
+        # dynamics model before running.
+        raise NotImplementedError
 
         # 3. Update the model parameters.  Replace the expectation wrt x with sample from q(x).
         # The parameter update is partial and depends on alpha.
@@ -782,8 +790,32 @@ J
 
             # 3. Update parameters
             if learning and parameters_update=="exact_mstep":
-
+                # Call Kalman smoother to get expectations
+                Ex, ExxT, ExyT = [], [], []
+                for prms in copy.deepcopy(variational_posterior.params):
+                    # Set the log normalizers to zero since we will not use the
+                    # value of the log-normalizer output. Should not affected
+                    # expected state or covariance calculation.
+                    log_Z_dyn, log_Z_ini, log_Z_obs = 0, 0, 0
+                    log_Z, smoothed_mus, smoothed_sigmas, ExxnT = \
+                        kalman_info_smoother(
+                            prms["J_ini"], prms["h_ini"], log_Z_ini,
+                            prms["J_dyn_11"], prms["J_dyn_21"], 
+                            prms["J_dyn_22"], prms["h_dyn_1"], prms["h_dyn_2"], log_Z_dyn,
+                            prms["J_obs"], prms["h_obs"], log_Z_obs
+                        )
+                    Ex.append(smoothed_mus)
+                    ExxT.append(smoothed_sigmas)
+                    ExyT.append(ExxnT)
+                import pdb
+                pdb.set_trace()
                 self._fit_laplace_em_params_update_exact_mstep(
+                    discrete_expectations, # expectations
+                    Ex, # datas
+                    inputs,
+                    masks,
+                    tags,
+                    continuous_expectations = (ExxT, ExyT)
                     )
 
             # Default is partial M-step given a sample from q(x)
