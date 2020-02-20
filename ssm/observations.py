@@ -893,16 +893,17 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         return np.row_stack((ll_init, ll_ar))
 
     def m_step(self, expectations, datas, inputs, masks, tags,
-               J0=None, h0=None, continuous_expectations=None):
+               J0=None, h0=None, continuous_expectations=None, **kwargs):
         """Compute M-step for Gaussian Auto Regressive Observations.
 
         If `continuous_expectations` is not None, this function will
         compute an exact M-step using the expected sufficient statistics for the
         continuous states. In this case, we ignore the prior provided by (J0, h0),
-        because the calculation is exact.
+        because the calculation is exact. `continuous_expectations` should be a tuple of
+        (Ex, Ey, ExxT, ExyT, EyyT). 
 
-        If `continuous_expectations` is None, we fall back to an approximate M-step,
-        using the prior given by (J0, h0). In this case, we estimate the sufficient
+        If `continuous_expectations` is None, we use `datas` and `expectations,
+        and (optionally) the prior given by (J0, h0). In this case, we estimate the sufficient
         statistics using `datas,` which is typically a single sample of the continuous
         states from the posterior distribution. 
         """
@@ -911,7 +912,6 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         As = np.zeros((K, D, D * lags + M))
         bs = np.zeros((K, D))
         Sigmas = np.zeros((K, D, D))
-        Ex, Ey, ExxT, ExyT, EyyT = (None, None, None, None, None)
         xs, ys, Ezs = [], [], []
         for (Ez, _, _), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
             if not np.all(mask):
@@ -924,7 +924,6 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             )
             ys.append(data[self.lags:])
             Ezs.append(Ez[self.lags:])
-
         if continuous_expectations is None:
             # We are performing an approximate m-step here. 
             # Collect all the data and pass it to fit_linear_regression.
@@ -948,7 +947,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                                         prior_ExxT=J[k],
                                         prior_ExyT=h[k],
                                         Psi0=1e-8,
-                                        nu0=1e-8,
+                                        nu0=0,
                                     )
                 As[k] = A_curr
                 bs[k] = b_curr
@@ -956,8 +955,17 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         else:
             # Continuous expectations are given. We are performing an exact
             # m-step. Pass the sufficient statistics to fit_linear_regression
-            # along with the data.
-            Ex, Ey, ExxT, ExyT, EyyT = continuous_expectations
+            # along with the data. 
+            assert self.lags == 1, "Exact parameter update is not yet "\
+                "supported for lags > 1"
+            # TODO: unpack expectations and reformat in order to pass to 
+            # fit_linear regression.
+
+            raise NotImplementedError
+            # We have one expectation for each trial from the kalman filter.
+            # Unpack and reformat them for regression.
+            Exs, ExxTs, ExyTs = continuous_expectations
+
             for k in range(K):
                 weights_curr = [Ez[:, k] for Ez in Ezs]
                 A_curr, b_curr, sigma_curr = fit_linear_regression(
@@ -965,7 +973,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                                     ys,
                                     weights=weights_curr,
                                     fit_intercept=True,
-                                    expectations=(ExxT, ExyT)
+                                    expectations=continuous_expectations
                                     )
                 As[k] = A_curr
                 bs[k] = b_curr

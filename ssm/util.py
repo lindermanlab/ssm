@@ -238,3 +238,7 @@ def collapse(x, state_map, axis=-1):
                                   axis=axis, keepdims=True)
                            for k in range(K)], axis=axis)
 
+
+def check_shape(var, var_name, desired_shape):
+    assert var.shape == desired_shape, "Variable {} is of wrong shape. "\
+        "Expected {}, found {}.".format(var_name, desired_shape, var.shape)
