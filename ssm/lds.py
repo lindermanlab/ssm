@@ -646,29 +646,28 @@ J
             prms["h_obs"] = h
 
     def _fit_laplace_em_params_update_exact_mstep(
-        self, discrete_expectations, continuous_expectations,
-        datas, inputs, masks, tags,
-        emission_optimizer, emission_optimizer_maxiter, alpha):
+            self, expectations, continuous_sample,
+            datas, inputs, masks, tags, continuous_expectations=None):
         
-        #TODO: Fix this!! Need to unpack the expectations
-        # and form ExxT for the augmented state vector, then call 
-        # the m_step for autoregressive observations. Also need to 
-        # ensure that we actually can perform the exact mstep for the current
-        # dynamics model before running.
-        raise NotImplementedError
+        # For now we can only do the exact update with linear-Gaussian dynamics
+        # and lags == 1. This check should pass as long as the dynamics is a
+        # subclass of AutoRegressiveObservations (e.g
+        # AutoRegressiveObservationsNoInput)
+        assert isinstance(self.dynamics, obs.AutoRegressiveObservations), \
+            "We can only do an exact m-step with Linear-Gaussian Dynamics."
 
-        # 3. Update the model parameters.  Replace the expectation wrt x with sample from q(x).
-        # The parameter update is partial and depends on alpha.
-        xmasks = [np.ones_like(x, dtype=bool) for x in continuous_expectations]
+        # 3. Update the model parameters exactly
+        xmasks = [np.ones_like(x, dtype=bool) for x in continuous_sample]
         for distn in [self.init_state_distn, self.transitions, self.dynamics]:
-            curr_prms = copy.deepcopy(distn.params)
-            if curr_prms == tuple(): continue
-            distn.m_step(discrete_expectations, continuous_expectations, inputs, xmasks, tags)
-            distn.params = convex_combination(curr_prms, distn.params, alpha)
+            if distn.params == tuple(): continue
+            distn.m_step(expectations, continuous_sample, inputs, xmasks, tags, 
+                         continuous_expectations=continuous_expectations)
 
-        # update emissions params
+        # update emissions params. For now, the emissions update will be
+        # approximate. TODO: Does using a convex combination mess up the
+        # orthogonal emissions models?
         curr_prms = copy.deepcopy(self.emissions.params)
-        self.emissions.m_step(discrete_expectations, continuous_expectations,
+        self.emissions.m_step(discrete_expectations, continuous_sample,
                               datas, inputs, masks, tags,
                               optimizer=emission_optimizer,
                               maxiter=emission_optimizer_maxiter)
@@ -676,22 +675,22 @@ J
 
 
     def _fit_laplace_em_params_update_stoch_mstep(
-        self, discrete_expectations, continuous_expectations,
+        self, discrete_expectations, continuous_sample,
         datas, inputs, masks, tags,
         emission_optimizer, emission_optimizer_maxiter, alpha):
 
         # 3. Update the model parameters.  Replace the expectation wrt x with sample from q(x).
         # The parameter update is partial and depends on alpha.
-        xmasks = [np.ones_like(x, dtype=bool) for x in continuous_expectations]
+        xmasks = [np.ones_like(x, dtype=bool) for x in continuous_sample]
         for distn in [self.init_state_distn, self.transitions, self.dynamics]:
             curr_prms = copy.deepcopy(distn.params)
             if curr_prms == tuple(): continue
-            distn.m_step(discrete_expectations, continuous_expectations, inputs, xmasks, tags)
+            distn.m_step(discrete_expectations, continuous_sample, inputs, xmasks, tags)
             distn.params = convex_combination(curr_prms, distn.params, alpha)
 
         # update emissions params
         curr_prms = copy.deepcopy(self.emissions.params)
-        self.emissions.m_step(discrete_expectations, continuous_expectations,
+        self.emissions.m_step(discrete_expectations, continuous_sample,
                               datas, inputs, masks, tags,
                               optimizer=emission_optimizer,
                               maxiter=emission_optimizer_maxiter)
@@ -786,12 +785,13 @@ J
                 continuous_optimizer, continuous_tolerance, continuous_maxiter)
 
             # 3. Update parameters
+            continuous_sample = variational_posterior.sample_continuous_states()
             if learning and parameters_update=="exact_mstep":
                 # Call Kalman smoother to get expectations
                 Ex, ExxT, ExyT = [], [], []
                 for prms in copy.deepcopy(variational_posterior.params):
                     # Set the log normalizers to zero since we will not use the
-                    # value of the log-normalizer output. Should not affected
+                    # value of the log-normalizer output. Should not affect
                     # expected state or covariance calculation.
                     log_Z_dyn, log_Z_ini, log_Z_obs = 0, 0, 0
                     log_Z, smoothed_mus, smoothed_sigmas, ExxnT = \
@@ -804,20 +804,23 @@ J
                     Ex.append(smoothed_mus)
                     ExxT.append(smoothed_sigmas)
                     ExyT.append(ExxnT)
-                import pdb
-                pdb.set_trace()
+                    import pdb
+                    pdb.set_trace()
+
                 self._fit_laplace_em_params_update_exact_mstep(
-                    discrete_expectations, # expectations
-                    Ex, # datas
+                    discrete_expectations,
+                    # In the exact, the sample of the continuous sates
+                    # won't be needed, but we pass it for consistency.
+                    continuous_sample,
+                    datas,
                     inputs,
                     masks,
                     tags,
-                    continuous_expectations = (ExxT, ExyT)
+                    continuous_expectations=(Ex, ExxT, ExyT)
                     )
 
             # Default is partial M-step given a sample from q(x)
             elif learning and parameters_update=="stoch_mstep":
-                continuous_sample = variational_posterior.sample_continuous_states()
                 self._fit_laplace_em_params_update_stoch_mstep(
                     discrete_expectations, continuous_sample, datas, inputs, masks, tags,
                     emission_optimizer, emission_optimizer_maxiter, alpha)
