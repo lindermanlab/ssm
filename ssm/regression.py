@@ -92,32 +92,36 @@ def fit_linear_regression(Xs, ys,
     else:
         weights = [np.ones(X.shape[0]) for X in Xs]
 
+    x_dim = d + int(fit_intercept)
+    ExxT = np.zeros((x_dim, x_dim))
+    ExyT = np.zeros((x_dim, p))
+    EyyT = np.zeros((p, p))
     if expectations is None:
 
         # Compute the posterior. The priors must include a prior for the
         # intercept term, if given.
-        x_dim = d + int(fit_intercept)
         if prior_ExxT is not None and prior_ExyT is not None:
-            assert prior_ExxT.shape == (x_dim, x_dim), "prior_ExxT is wrong"\
-                " shape. Expected ({}, {})".format(x_dim, x_dim)
-
-            assert prior_ExyT.shape == (x_dim, p), "prior_ExyT is wrong"\
-                " shape. Expected ({}, {})".format(x_dim, p)
-            ExxT = prior_ExxT
-            ExyT = prior_ExyT
-        else:
-            ExxT = np.eye(x_dim)
-            ExyT = np.zeros((x_dim, p))
+            check_shape(prior_ExxT, "prior_ExxT", (x_dim, x_dim))
+            check_shape(prior_ExyT, "prior_ExyT", (x_dim, p))
+            ExxT[:, :] = prior_ExxT
+            ExyT[:, :] = prior_ExyT
 
         for X, y, weight in zip(Xs, ys, weights):
             X = np.column_stack((X, np.ones(X.shape[0]))) if fit_intercept else X
-            ExxT += np.dot(X.T * weight, X)
-            ExyT += np.dot(X.T * weight, y)
+            weight = weight[:, None] if weight.ndim == 1 else weight
+            weighted_x = X * weight
+            weighted_y = y * weight
+            ExxT += weighted_x.T @ X
+            ExyT += weighted_x.T @ y
+            EyyT += weighted_y.T @ y
     else:
-        ExxT, ExyT = expectations
+        ExxT, ExyT, EyyT = expectations
+        check_shape(ExxT, "ExxT", (x_dim, x_dim))
+        check_shape(ExyT, "ExyT", (x_dim, p))
+        check_shape(EyyT, "EyyT", (p, p))
 
     # Solve for the MAP estimate
-    W = np.linalg.solve(ExxT, ExyT).T
+    W_full = np.linalg.solve(ExxT, ExyT).T
     if fit_intercept:
         W, b = W_full[:, :-1], W_full[:, -1]
     else:
@@ -127,7 +131,10 @@ def fit_linear_regression(Xs, ys,
     # Compute expected error for covariance matrix estimate
     # E[(y - Ax)(y - Ax)^T]
     expected_err = EyyT - 2 * W_full @ ExyT + W_full @ ExxT @ W_full.T
-    nu = nu0 + weight_sum
+
+    nu = nu0
+    for X, y, weight in zip(Xs, ys, weights):
+        nu += np.sum(weight)
 
     # Get MAP estimate of posterior covariance
     Sigma = (expected_err + Psi0 * np.eye(d)) / (nu + d + 1)
