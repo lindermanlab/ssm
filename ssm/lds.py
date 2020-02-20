@@ -646,7 +646,7 @@ J
             prms["h_obs"] = h
 
     def _fit_laplace_em_params_update_exact_mstep(
-            self, expectations, continuous_sample,
+            self, expectations, continuous_samples,
             datas, inputs, masks, tags, continuous_expectations=None):
         
         # For now we can only do the exact update with linear-Gaussian dynamics
@@ -657,17 +657,17 @@ J
             "We can only do an exact m-step with Linear-Gaussian Dynamics."
 
         # 3. Update the model parameters exactly
-        xmasks = [np.ones_like(x, dtype=bool) for x in continuous_sample]
+        xmasks = [np.ones_like(x, dtype=bool) for x in continuous_samples]
         for distn in [self.init_state_distn, self.transitions, self.dynamics]:
             if distn.params == tuple(): continue
-            distn.m_step(expectations, continuous_sample, inputs, xmasks, tags, 
+            distn.m_step(expectations, continuous_samples, inputs, xmasks, tags, 
                          continuous_expectations=continuous_expectations)
 
         # update emissions params. For now, the emissions update will be
         # approximate. TODO: Does using a convex combination mess up the
         # orthogonal emissions models?
         curr_prms = copy.deepcopy(self.emissions.params)
-        self.emissions.m_step(discrete_expectations, continuous_sample,
+        self.emissions.m_step(discrete_expectations, continuous_samples,
                               datas, inputs, masks, tags,
                               optimizer=emission_optimizer,
                               maxiter=emission_optimizer_maxiter)
@@ -675,22 +675,22 @@ J
 
 
     def _fit_laplace_em_params_update_stoch_mstep(
-        self, discrete_expectations, continuous_sample,
+        self, discrete_expectations, continuous_samples,
         datas, inputs, masks, tags,
         emission_optimizer, emission_optimizer_maxiter, alpha):
 
         # 3. Update the model parameters.  Replace the expectation wrt x with sample from q(x).
         # The parameter update is partial and depends on alpha.
-        xmasks = [np.ones_like(x, dtype=bool) for x in continuous_sample]
+        xmasks = [np.ones_like(x, dtype=bool) for x in continuous_samples]
         for distn in [self.init_state_distn, self.transitions, self.dynamics]:
             curr_prms = copy.deepcopy(distn.params)
             if curr_prms == tuple(): continue
-            distn.m_step(discrete_expectations, continuous_sample, inputs, xmasks, tags)
+            distn.m_step(discrete_expectations, continuous_samples, inputs, xmasks, tags)
             distn.params = convex_combination(curr_prms, distn.params, alpha)
 
         # update emissions params
         curr_prms = copy.deepcopy(self.emissions.params)
-        self.emissions.m_step(discrete_expectations, continuous_sample,
+        self.emissions.m_step(discrete_expectations, continuous_samples,
                               datas, inputs, masks, tags,
                               optimizer=emission_optimizer,
                               maxiter=emission_optimizer_maxiter)
@@ -724,14 +724,14 @@ J
         for sample in range(n_samples):
 
             # sample continuous states
-            continuous_samples = variational_posterior.sample_continuous_states()
+            continuous_sampless = variational_posterior.sample_continuous_states()
             discrete_expectations = variational_posterior.mean_discrete_states
 
             # log p(theta)
             elbo += self.log_prior()
 
             for x, (Ez, Ezzp1, _), data, input, mask, tag in \
-                zip(continuous_samples, discrete_expectations, datas, inputs, masks, tags):
+                zip(continuous_sampless, discrete_expectations, datas, inputs, masks, tags):
 
                 # The "mask" for x is all ones
                 x_mask = np.ones_like(x, dtype=bool)
@@ -746,7 +746,7 @@ J
                 elbo += np.sum(Ez * log_likes)
 
             # add entropy of variational posterior
-            elbo += variational_posterior.entropy(continuous_samples)
+            elbo += variational_posterior.entropy(continuous_sampless)
 
         return elbo / n_samples
 
@@ -785,7 +785,7 @@ J
                 continuous_optimizer, continuous_tolerance, continuous_maxiter)
 
             # 3. Update parameters
-            continuous_sample = variational_posterior.sample_continuous_states()
+            continuous_samples = variational_posterior.sample_continuous_states()
             if learning and parameters_update=="exact_mstep":
                 # Call Kalman smoother to get expectations
                 Ex, ExxT, ExyT = [], [], []
@@ -804,14 +804,12 @@ J
                     Ex.append(smoothed_mus)
                     ExxT.append(smoothed_sigmas)
                     ExyT.append(ExxnT)
-                    import pdb
-                    pdb.set_trace()
 
                 self._fit_laplace_em_params_update_exact_mstep(
                     discrete_expectations,
                     # In the exact, the sample of the continuous sates
                     # won't be needed, but we pass it for consistency.
-                    continuous_sample,
+                    continuous_samples,
                     datas,
                     inputs,
                     masks,
@@ -822,7 +820,7 @@ J
             # Default is partial M-step given a sample from q(x)
             elif learning and parameters_update=="stoch_mstep":
                 self._fit_laplace_em_params_update_stoch_mstep(
-                    discrete_expectations, continuous_sample, datas, inputs, masks, tags,
+                    discrete_expectations, continuous_samples, datas, inputs, masks, tags,
                     emission_optimizer, emission_optimizer_maxiter, alpha)
 
             # Alternative is SGD on all parameters with samples from q(x)

@@ -958,27 +958,70 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             # along with the data. 
             assert self.lags == 1, "Exact parameter update is not yet "\
                 "supported for lags > 1"
-            # TODO: unpack expectations and reformat in order to pass to 
-            # fit_linear regression.
 
-            raise NotImplementedError
             # We have one expectation for each trial from the kalman filter.
             # Unpack and reformat them for regression.
-            Exs, ExxTs, ExyTs = continuous_expectations
+            # Each element of ExxTs is a 3D array (T x D x D),
+            # Each element of ExxnTs is a 3D array (T-1 x D x D)
+            # We need to weight the expectations using Ezs, 
+            # each element of Ezs is (T-1 x K), then sum along the T axis.
+            Exs, ExxTs, ExxnTs = continuous_expectations
+            Eu = np.zeros((K, M))
+            Ex = np.zeros((K, D))
+            Ey = np.zeros((K, D))
+            ExxT = np.zeros((K, D, D))
+            ExyT = np.zeros((K, D, D))
+            EyyT = np.zeros((K, D, D))
+            for (ex, ez, exx, exxn) in zip(Exs, Ezs, ExxTs, ExxnTs):
+                for k in range(K):
+                    Eu[k] += np.mean(inputs[:-1] * ez[:, k, None], axis=0)
+                    Ex[k] += np.mean(ex[:-1] * ez[:, k, None], axis=0)
+                    Ey[k] += np.mean(ex[1:] * ez[:, k, None], axis=0)
+                    ExxT[k] += np.mean(exx[:-1, :, :] * ez[:, k, None, None], axis=0)
+                    ExyT[k] += np.mean(exxn * ez[:, k, None, None], axis=0)
+                    EyyT[k] += np.mean(exx[1:, :, :] * ez[:, k, None, None], axis=0)
 
+            # Now we need to handle the "augmented" state vector x which includes
+            # the input and bias x_aug = [x u 1]^T, so E[x_aug x_aug^T] = 
+            # E[ xxT xuT x]
+            #  [ uxT uuT u]
+            #  [ xT   uT 1]
+            # Dimension of ExxT aug should be (K, D+M+1, D+M+1)
+            u = inputs[:-1]
             for k in range(K):
-                weights_curr = [Ez[:, k] for Ez in Ezs]
+                if M > 0:
+                    ExxT_aug = np.block([
+                                        [ExxT[k], Ex[k].T @ Eu[k], Ex[k].T],
+                                        [Eu[k].T @ Ex[k], Eu[k].T @ Eu[k], Eu[k]],
+                                        [Ex[k], Eu[k], 1]
+                                        ])
+                    ExyT_aug = np.block([
+                                        [ExyT[k]],
+                                        [Eu[k] @ Ey[k].T],
+                                        [Ey[k].T]
+                                        ])
+                else:
+                    ExxT_aug = np.block([
+                                        [ExxT[k], Ex[k, None].T],
+                                        [Ex[k, None], 1]
+                                        ])
+                    ExyT_aug = np.block([
+                                        [ExyT[k]],
+                                        [Ey[k].T]
+                                        ])
                 A_curr, b_curr, sigma_curr = fit_linear_regression(
                                     xs,
                                     ys,
-                                    weights=weights_curr,
+                                    weights=None,
                                     fit_intercept=True,
-                                    expectations=continuous_expectations
+                                    expectations=(ExxT_aug / len(ExxTs),
+                                                  ExyT_aug / len(ExxTs),
+                                                  EyyT[k] / len(ExxTs))
                                     )
                 As[k] = A_curr
                 bs[k] = b_curr
                 Sigmas[k] = sigma_curr
-
+            
         self.As = As
         self.bs = bs
         self.Sigmas = Sigmas
