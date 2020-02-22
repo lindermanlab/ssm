@@ -928,7 +928,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             # We are performing an approximate m-step here. 
             # Collect all the data and pass it to fit_linear_regression.
             if J0 is not None:
-                    J = J0
+                J = J0
             else:
                 J_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
                                         self.l2_penalty_V * np.ones(M),
@@ -956,6 +956,8 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             # Continuous expectations are given. We are performing an exact
             # m-step. Pass the sufficient statistics to fit_linear_regression
             # along with the data. 
+            # check instead that the expectations given are sufficient for the
+            # calculation (in practice this will only be used with lags=1)
             assert self.lags == 1, "Exact parameter update is not yet "\
                 "supported for lags > 1"
 
@@ -974,12 +976,12 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             EyyT = np.zeros((K, D, D))
             for (ex, ez, exx, exxn) in zip(Exs, Ezs, ExxTs, ExxnTs):
                 for k in range(K):
-                    Eu[k] += np.mean(inputs[:-1] * ez[:, k, None], axis=0)
-                    Ex[k] += np.mean(ex[:-1] * ez[:, k, None], axis=0)
-                    Ey[k] += np.mean(ex[1:] * ez[:, k, None], axis=0)
-                    ExxT[k] += np.mean(exx[:-1, :, :] * ez[:, k, None, None], axis=0)
-                    ExyT[k] += np.mean(exxn * ez[:, k, None, None], axis=0)
-                    EyyT[k] += np.mean(exx[1:, :, :] * ez[:, k, None, None], axis=0)
+                    Eu[k] += np.sum(inputs[:-1] * ez[:, k, None], axis=0)
+                    Ex[k] += np.sum(ex[:-1] * ez[:, k, None], axis=0)
+                    Ey[k] += np.sum(ex[1:] * ez[:, k, None], axis=0)
+                    ExxT[k] += np.sum(exx[:-1, :, :] * ez[:, k, None, None], axis=0)
+                    ExyT[k] += np.sum(exxn * ez[:, k, None, None], axis=0)
+                    EyyT[k] += np.sum(exx[1:, :, :] * ez[:, k, None, None], axis=0)
 
             # Now we need to handle the "augmented" state vector x which includes
             # the input and bias x_aug = [x u 1]^T, so E[x_aug x_aug^T] = 
@@ -989,11 +991,13 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             # Dimension of ExxT aug should be (K, D+M+1, D+M+1)
             u = inputs[:-1]
             for k in range(K):
+                weights_curr = [Ez[:, k] for Ez in Ezs]
+                pz_equal_k = np.sum(weights_curr)
                 if M > 0:
                     ExxT_aug = np.block([
                                         [ExxT[k], Ex[k].T @ Eu[k], Ex[k].T],
                                         [Eu[k].T @ Ex[k], Eu[k].T @ Eu[k], Eu[k]],
-                                        [Ex[k], Eu[k], 1]
+                                        [Ex[k], Eu[k], pz_equal_k]
                                         ])
                     ExyT_aug = np.block([
                                         [ExyT[k]],
@@ -1003,7 +1007,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 else:
                     ExxT_aug = np.block([
                                         [ExxT[k], Ex[k, None].T],
-                                        [Ex[k, None], 1]
+                                        [Ex[k, None], pz_equal_k]
                                         ])
                     ExyT_aug = np.block([
                                         [ExyT[k]],
@@ -1012,11 +1016,12 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 A_curr, b_curr, sigma_curr = fit_linear_regression(
                                     xs,
                                     ys,
-                                    weights=None,
+                                    weights=weights_curr,
                                     fit_intercept=True,
-                                    expectations=(ExxT_aug / len(ExxTs),
-                                                  ExyT_aug / len(ExxTs),
-                                                  EyyT[k] / len(ExxTs))
+                                    # TODO: Add 4th expectation to account for # of time-steps
+                                    expectations=(ExxT_aug,
+                                                  ExyT_aug,
+                                                  EyyT[k])
                                     )
                 As[k] = A_curr
                 bs[k] = b_curr
