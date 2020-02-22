@@ -647,7 +647,9 @@ J
 
     def _fit_laplace_em_params_update_exact_mstep(
             self, expectations, continuous_samples,
-            datas, inputs, masks, tags, continuous_expectations=None):
+            datas, inputs, masks, tags,
+            emission_optimizer, emission_optimizer_maxiter,
+            alpha, continuous_expectations=None,):
         
         # For now we can only do the exact update with linear-Gaussian dynamics
         # and lags == 1. This check should pass as long as the dynamics is a
@@ -664,10 +666,10 @@ J
                          continuous_expectations=continuous_expectations)
 
         # update emissions params. For now, the emissions update will be
-        # approximate. TODO: Does using a convex combination mess up the
-        # orthogonal emissions models?
+        # approximate.
+        # TODO: check if emissions linear gaussian and do exact m-step if so.
         curr_prms = copy.deepcopy(self.emissions.params)
-        self.emissions.m_step(discrete_expectations, continuous_samples,
+        self.emissions.m_step(expectations, continuous_samples,
                               datas, inputs, masks, tags,
                               optimizer=emission_optimizer,
                               maxiter=emission_optimizer_maxiter)
@@ -804,8 +806,11 @@ J
                             prms["J_dyn_22"], prms["h_dyn_1"], prms["h_dyn_2"], log_Z_dyn,
                             prms["J_obs"], prms["h_obs"], log_Z_obs
                         )
-                    Ex.append(smoothed_mus)
-                    ExxT.append(smoothed_sigmas)
+                    # we should cache everything from the kalman smoother into variational
+                    # posterior
+                    Ex.append(smoothed_mus) 
+                    mumuT = np.swapaxes(smoothed_mus[:, None], 2,1) @ smoothed_mus[:, None]
+                    ExxT.append(smoothed_sigmas + mumuT)
                     ExyT.append(ExxnT)
 
                 self._fit_laplace_em_params_update_exact_mstep(
@@ -817,7 +822,10 @@ J
                     inputs,
                     masks,
                     tags,
-                    continuous_expectations=(Ex, ExxT, ExyT)
+                    emission_optimizer,
+                    emission_optimizer_maxiter,
+                    alpha,
+                    continuous_expectations=(Ex, ExxT, ExyT),
                     )
 
             # Default is partial M-step given a sample from q(x)
