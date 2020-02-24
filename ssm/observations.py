@@ -1016,12 +1016,12 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 A_curr, b_curr, sigma_curr = fit_linear_regression(
                                     xs,
                                     ys,
-                                    weights=weights_curr,
+                                    weights=None,
                                     fit_intercept=True,
-                                    # TODO: Add 4th expectation to account for # of time-steps
                                     expectations=(ExxT_aug,
                                                   ExyT_aug,
-                                                  EyyT[k])
+                                                  EyyT[k],
+                                                  pz_equal_k)
                                     )
                 As[k] = A_curr
                 bs[k] = b_curr
