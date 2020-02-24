@@ -650,7 +650,7 @@ J
             datas, inputs, masks, tags,
             emission_optimizer, emission_optimizer_maxiter,
             alpha, continuous_expectations=None,):
-        
+
         # For now we can only do the exact update with linear-Gaussian dynamics
         # and lags == 1. This check should pass as long as the dynamics is a
         # subclass of AutoRegressiveObservations (e.g
@@ -660,10 +660,12 @@ J
 
         # 3. Update the model parameters exactly
         xmasks = [np.ones_like(x, dtype=bool) for x in continuous_samples]
-        for distn in [self.init_state_distn, self.transitions, self.dynamics]:
+        for distn in [self.init_state_distn, self.transitions]:
             if distn.params == tuple(): continue
-            distn.m_step(expectations, continuous_samples, inputs, xmasks, tags, 
-                         continuous_expectations=continuous_expectations)
+            distn.m_step(expectations, continuous_samples, inputs, xmasks,
+                         tags)
+        self.dynamics.m_step(expectations, continuous_samples, inputs, xmasks,
+                             tags)
 
         # update emissions params. For now, the emissions update will be
         # approximate.
@@ -802,13 +804,13 @@ J
                     log_Z, smoothed_mus, smoothed_sigmas, ExxnT = \
                         kalman_info_smoother(
                             prms["J_ini"], prms["h_ini"], log_Z_ini,
-                            prms["J_dyn_11"], prms["J_dyn_21"], 
+                            prms["J_dyn_11"], prms["J_dyn_21"],
                             prms["J_dyn_22"], prms["h_dyn_1"], prms["h_dyn_2"], log_Z_dyn,
                             prms["J_obs"], prms["h_obs"], log_Z_obs
                         )
                     # we should cache everything from the kalman smoother into variational
                     # posterior
-                    Ex.append(smoothed_mus) 
+                    Ex.append(smoothed_mus)
                     mumuT = np.swapaxes(smoothed_mus[:, None], 2,1) @ smoothed_mus[:, None]
                     ExxT.append(smoothed_sigmas + mumuT)
                     ExyT.append(ExxnT)
