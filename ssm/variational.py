@@ -361,7 +361,7 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
     def mean(self):
         return list(zip(self.mean_discrete_states, self.mean_continuous_states))
 
-    def entropy(self, sample=None):
+    def entropy(self, sample=None, expectations=None):
         """
         Compute the entropy of the variational posterior distirbution.
 
@@ -386,35 +386,41 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         Note
         ----
         We haven't implemented the exact calculations for the continuous states yet,
-        so for now we're approximating the continuous state entropy via samples.
+        but we are totally actually going to do this. No, I swear.
         """
 
-        # Sample the continuous states
-        if sample is None:
-            sample = self.sample_continuous_states()
+        if expectations is None:
+            # Sample the continuous states
+            if sample is None:
+                sample = self.sample_continuous_states()
+            else:
+                assert isinstance(sample, list) and len(sample) == len(self.datas)
+
+            negentropy = 0
+            for s, prms in zip(sample, self.params):
+
+                # 1. Compute log q(x) of samples of x
+                J_diag = prms["J_obs"]
+                J_lower_diag = prms["J_dyn_21"]
+                h = prms["h_obs"]
+                # Approximate ExxT and Exx_{t+1}T via the sample.
+
+                negentropy += block_tridiagonal_log_probability(s,
+                                                                J_diag,
+                                                                J_lower_diag,
+                                                                h)
+
+                # 2. Compute E_{q(z)}[ log q(z) ]
+                log_pi0 = np.log(prms["pi0"] + 1e-16) - logsumexp(prms["pi0"])
+                log_Ps = np.log(prms["Ps"] + 1e-16) - logsumexp(prms["Ps"], axis=1, keepdims=True)
+                (Ez, Ezzp1, normalizer) = hmm_expected_states(prms["pi0"], prms["Ps"], prms["log_likes"])
+
+                negentropy -= normalizer # -log Z
+                negentropy += np.sum(Ez[0] * log_pi0) # initial factor
+                negentropy += np.sum(Ez * prms["log_likes"]) # unitary factors
+                negentropy += np.sum(Ezzp1 * log_Ps) # pairwise factors
         else:
-            assert isinstance(sample, list) and len(sample) == len(self.datas)
-
-        negentropy = 0
-        for s, prms in zip(sample, self.params):
-
-            # 1. Compute log q(x) of samples of x
-            # TODO: Compute the exact entropy
-            J_diag = prms["J_obs"]
-            J_lower_diag = prms["J_dyn_21"]
-            h = prms["h_obs"]
-            negentropy += block_tridiagonal_log_probability(s,
-                                                            J_diag,
-                                                            J_lower_diag, h)
-
-            # 2. Compute E_{q(z)}[ log q(z) ]
-            log_pi0 = np.log(prms["pi0"] + 1e-16) - logsumexp(prms["pi0"])
-            log_Ps = np.log(prms["Ps"] + 1e-16) - logsumexp(prms["Ps"], axis=1, keepdims=True)
-            (Ez, Ezzp1, normalizer) = hmm_expected_states(prms["pi0"], prms["Ps"], prms["log_likes"])
-
-            negentropy -= normalizer # -log Z
-            negentropy += np.sum(Ez[0] * log_pi0) # initial factor
-            negentropy += np.sum(Ez * prms["log_likes"]) # unitary factors
-            negentropy += np.sum(Ezzp1 * log_Ps) # pairwise factors
+            # TODO: Exact entropy calculation goes here.
+            raise NotImplementedError
 
         return -negentropy
