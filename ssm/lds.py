@@ -763,7 +763,7 @@ J
                         continuous_maxiter=100,
                         emission_optimizer="lbfgs",
                         emission_optimizer_maxiter=100,
-                        parameters_update="stoch_mstep",
+                        parameters_update=None,
                         alpha=0.5,
                         learning=True):
         """
@@ -776,6 +776,15 @@ J
         elbos = [self._laplace_em_elbo(variational_posterior, datas, inputs, masks, tags)]
         pbar = trange(num_iters)
         pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
+
+        # Default to an exact parameters update when possible.
+        if parameters_update is None:
+            if isinstance(self.dynamics, obs.AutoRegressiveObservations):
+                if self.dynamics.lags == 1:
+                    parameters_update = "exact_mstep"
+            else:
+                parameters_update = "stoch_mstep"
+
         for itr in pbar:
             # 1. Update the discrete state posterior q(z) if K>1
             if self.K > 1:
@@ -842,6 +851,10 @@ J
                     variational_posterior, datas, inputs, masks, tags,
                     emission_optimizer="adam",
                     emission_optimizer_maxiter=emission_optimizer_maxiter)
+
+            elif learning:
+                raise ValueError("Invalid argument for parameters_update: {}. " \
+                    "Must be one of: stoch_mstep, exact_mstep, sgd.".format(parameters_update))
 
             # 4. Compute ELBO
             elbo = self._laplace_em_elbo(variational_posterior, datas, inputs, masks, tags)
