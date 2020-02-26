@@ -727,42 +727,55 @@ J
                          inputs,
                          masks,
                          tags,
-                         n_samples=10,
+                         n_samples=1,
                          expectations=None):
 
-        elbo = 0.0
-        for sample in range(n_samples):
+        def estimate_expected_log_joint(n_samples):
+            exp_log_joint = 0.0
+            for sample in range(n_samples):
 
-            # sample continuous states
-            continuous_samples = variational_posterior.sample_continuous_states()
-            discrete_expectations = variational_posterior.mean_discrete_states
+                # sample continuous states
+                continuous_samples = variational_posterior.sample_continuous_states()
+                discrete_expectations = variational_posterior.mean_discrete_states
 
-            # log p(theta)
-            elbo += self.log_prior()
+                # log p(theta)
+                exp_log_joint += self.log_prior()
 
-            for x, (Ez, Ezzp1, _), data, input, mask, tag in \
-                zip(continuous_samples, discrete_expectations, datas, inputs, masks, tags):
+                for x, (Ez, Ezzp1, _), data, input, mask, tag in \
+                    zip(continuous_samples, discrete_expectations, datas, inputs, masks, tags):
 
-                # The "mask" for x is all ones
-                x_mask = np.ones_like(x, dtype=bool)
-                log_pi0 = self.init_state_distn.log_initial_state_distn
-                log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
-                log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
-                log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
+                    # The "mask" for x is all ones
+                    x_mask = np.ones_like(x, dtype=bool)
+                    log_pi0 = self.init_state_distn.log_initial_state_distn
+                    log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
+                    log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
+                    log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
 
-                # Compute the expected log probability
-                elbo += np.sum(Ez[0] * log_pi0)
-                elbo += np.sum(Ezzp1 * log_Ps)
-                elbo += np.sum(Ez * log_likes)
+                    # Compute the expected log probability
+                    exp_log_joint += np.sum(Ez[0] * log_pi0)
+                    exp_log_joint += np.sum(Ezzp1 * log_Ps)
+                    exp_log_joint += np.sum(Ez * log_likes)
+            return exp_log_joint / n_samples
 
-            # Add entropy of variational posterior. We approximate the entropy via
-            # sampling if the expectations are not available.
-            if expectations is None:
-                elbo += variational_posterior.entropy(sample=continuous_samples)
-            else:
-                elbo += variational_posterior.entropy(expectations=expectations)
+        def estimate_entropy(n_samples):
+            entropy = 0.0
+            for sample in range(n_samples):
+                continuous_samples = variational_posterior.\
+                    sample_continuous_states()
+                entropy += variational_posterior.entropy(sample=continuous_samples)
+            return entropy / n_samples
 
-        return elbo / n_samples
+        # If expectations are given we can do an exact entropy calculation.
+        # Otherwise, entropy is estimated via samples.
+        elbo = estimate_expected_log_joint(n_samples)
+        if expectations is None:
+            elbo += estimate_entropy(n_samples)
+        else:
+            elbo += variational_posterior.entropy(expectations=expectations)
+
+        return elbo
+
+
 
     def _fit_laplace_em(self, variational_posterior, datas,
                         inputs=None, masks=None, tags=None,
