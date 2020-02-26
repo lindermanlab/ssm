@@ -411,7 +411,6 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
                 J_diag = prms["J_obs"]
                 J_lower_diag = prms["J_dyn_21"]
                 h = prms["h_obs"]
-                # Approximate ExxT and Exx_{t+1}T via the sample.
 
                 negentropy += block_tridiagonal_log_probability(s,
                                                                 J_diag,
@@ -427,7 +426,7 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
 
                 negentropy += np.sum(np.trace(-0.5 * J_diag @ ExxT, axis1=1, axis2=2))
                 negentropy += np.sum(h[:, None, :] @ Ex[:, :, None])
-                negentropy += np.sum(np.trace(-0.5 * J_lower_diag @ ExxnT, axis1=1, axis2=2))
+                negentropy += np.sum(np.trace(-J_lower_diag @ ExxnT, axis1=1, axis2=2))
                 negentropy -= log_Z
 
         # 2. Compute E_{q(z)}[ log q(z) ]
