@@ -721,21 +721,27 @@ J
             optimizer(_objective, self.params, num_iters=emission_optimizer_maxiter,
                       state=optimizer_state, full_output=True, step_size=0.01)
 
-
-    def _laplace_em_elbo(self, variational_posterior, datas, inputs, masks, tags, n_samples=1):
+    def _laplace_em_elbo(self,
+                         variational_posterior,
+                         datas,
+                         inputs,
+                         masks,
+                         tags,
+                         n_samples=10,
+                         expectations=None):
 
         elbo = 0.0
         for sample in range(n_samples):
 
             # sample continuous states
-            continuous_sampless = variational_posterior.sample_continuous_states()
+            continuous_samples = variational_posterior.sample_continuous_states()
             discrete_expectations = variational_posterior.mean_discrete_states
 
             # log p(theta)
             elbo += self.log_prior()
 
             for x, (Ez, Ezzp1, _), data, input, mask, tag in \
-                zip(continuous_sampless, discrete_expectations, datas, inputs, masks, tags):
+                zip(continuous_samples, discrete_expectations, datas, inputs, masks, tags):
 
                 # The "mask" for x is all ones
                 x_mask = np.ones_like(x, dtype=bool)
@@ -749,8 +755,12 @@ J
                 elbo += np.sum(Ezzp1 * log_Ps)
                 elbo += np.sum(Ez * log_likes)
 
-            # add entropy of variational posterior
-            elbo += variational_posterior.entropy(continuous_sampless)
+            # Add entropy of variational posterior. We approximate the entropy via
+            # sampling if the expectations are not available.
+            if expectations is None:
+                elbo += variational_posterior.entropy(sample=continuous_samples)
+            else:
+                elbo += variational_posterior.entropy(expectations=expectations)
 
         return elbo / n_samples
 
@@ -765,7 +775,8 @@ J
                         emission_optimizer_maxiter=100,
                         parameters_update=None,
                         alpha=0.5,
-                        learning=True):
+                        learning=True,
+                        exact_ELBO=True):
         """
         Fit an approximate posterior p(z, x | y) \approx q(z) q(x).
         Perform block coordinate ascent on q(z) followed by q(x).
@@ -800,11 +811,14 @@ J
                 discrete_expectations, variational_posterior, datas, inputs, masks, tags,
                 continuous_optimizer, continuous_tolerance, continuous_maxiter)
 
-            # 3. Update parameters
             continuous_samples = variational_posterior.sample_continuous_states()
+            
+            # Update parameters
             if learning and parameters_update=="exact_mstep":
-                # Call Kalman smoother to get expectations
                 Ex, ExxT, ExyT = [], [], []
+                log_Z = None
+                # Call Kalman smoother to get expectations for params update
+                # and/or entropy calculation in ELBO.
                 for prms in copy.deepcopy(variational_posterior.params):
                     # Set the log normalizers to zero since we will not use the
                     # value of the log-normalizer output. Should not affect
@@ -817,8 +831,6 @@ J
                             prms["J_dyn_22"], prms["h_dyn_1"], prms["h_dyn_2"], log_Z_dyn,
                             prms["J_obs"], prms["h_obs"], log_Z_obs
                         )
-                    # we should cache everything from the kalman smoother into variational
-                    # posterior
                     Ex.append(smoothed_mus)
                     mumuT = np.swapaxes(smoothed_mus[:, None], 2,1) @ smoothed_mus[:, None]
                     ExxT.append(smoothed_sigmas + mumuT)
@@ -856,8 +868,40 @@ J
                 raise ValueError("Invalid argument for parameters_update: {}. " \
                     "Must be one of: stoch_mstep, exact_mstep, sgd.".format(parameters_update))
 
-            # 4. Compute ELBO
-            elbo = self._laplace_em_elbo(variational_posterior, datas, inputs, masks, tags)
+            # 4. Compute ELBO. For now, we are wasting a lot of computation
+            # by re-running the Kalman smoother. This is just a first pass to 
+            # get functionality. TODO: Fix!!
+            Ex, ExxT, ExyT, log_Zs = [], [], [], []
+            for prms in copy.deepcopy(variational_posterior.params):
+                # Set the log normalizers to zero since we will not use the
+                # value of the log-normalizer output. Should not affect
+                # expected state or covariance calculation.
+                log_Z_dyn, log_Z_ini, log_Z_obs = 0, 0, 0
+                log_Z, smoothed_mus, smoothed_sigmas, ExxnT = \
+                    kalman_info_smoother(
+                        prms["J_ini"], prms["h_ini"], log_Z_ini,
+                        prms["J_dyn_11"], prms["J_dyn_21"],
+                        prms["J_dyn_22"], prms["h_dyn_1"], prms["h_dyn_2"], log_Z_dyn,
+                        prms["J_obs"], prms["h_obs"], log_Z_obs
+                    )
+                Ex.append(smoothed_mus)
+                mumuT = np.swapaxes(smoothed_mus[:, None], 2,1) @ smoothed_mus[:, None]
+                ExxT.append(smoothed_sigmas + mumuT)
+                ExyT.append(ExxnT)
+                log_Zs.append(log_Z)
+            if exact_ELBO:
+                elbo = self._laplace_em_elbo(variational_posterior,
+                                            datas,
+                                            inputs,
+                                            masks,
+                                            tags,
+                                            expectations=(Ex, ExxT, ExyT, log_Zs))
+            else:
+                elbo = self._laplace_em_elbo(variational_posterior,
+                                            datas,
+                                            inputs,
+                                            masks,
+                                            tags)
             elbos.append(elbo)
             pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
 

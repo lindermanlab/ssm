@@ -299,6 +299,11 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         J_dyn_22 = np.zeros((T-1, D, D))
         J_obs = np.tile(np.eye(D)[None, :, :], (T, 1, 1))
 
+        # Initialize Expectations. These will be output from the Kalman filter.
+        Exs = np.zeros((T, D))
+        ExxTs = np.zeros((T, D, D))
+        ExxnTs = np.zeros((T, D, D))
+
         return dict(pi0=pi0,
                     Ps=Ps,
                     log_likes=log_likes,
@@ -311,6 +316,9 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
                     h_dyn_2=h_dyn_2,
                     J_obs=J_obs,
                     h_obs=h_obs,
+                    Exs=Exs,
+                    ExxTs=ExxTs,
+                    ExxnTs=ExxnTs
                     )
 
     @property
@@ -389,6 +397,7 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         but we are totally actually going to do this. No, I swear.
         """
 
+        negentropy = 0
         if expectations is None:
             # Sample the continuous states
             if sample is None:
@@ -396,7 +405,6 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
             else:
                 assert isinstance(sample, list) and len(sample) == len(self.datas)
 
-            negentropy = 0
             for s, prms in zip(sample, self.params):
 
                 # 1. Compute log q(x) of samples of x
@@ -409,18 +417,28 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
                                                                 J_diag,
                                                                 J_lower_diag,
                                                                 h)
-
-                # 2. Compute E_{q(z)}[ log q(z) ]
-                log_pi0 = np.log(prms["pi0"] + 1e-16) - logsumexp(prms["pi0"])
-                log_Ps = np.log(prms["Ps"] + 1e-16) - logsumexp(prms["Ps"], axis=1, keepdims=True)
-                (Ez, Ezzp1, normalizer) = hmm_expected_states(prms["pi0"], prms["Ps"], prms["log_likes"])
-
-                negentropy -= normalizer # -log Z
-                negentropy += np.sum(Ez[0] * log_pi0) # initial factor
-                negentropy += np.sum(Ez * prms["log_likes"]) # unitary factors
-                negentropy += np.sum(Ezzp1 * log_Ps) # pairwise factors
         else:
-            # TODO: Exact entropy calculation goes here.
-            raise NotImplementedError
+            Exs, ExxTs, ExxnTs, log_Zs = expectations
+            for prms, Ex, ExxT, ExxnT, log_Z, T in zip(self.params,
+                                                       Exs, ExxTs, ExxnTs,
+                                                       log_Zs, self.Ts):
+                J_diag, J_lower_diag = prms["J_obs"], prms["J_dyn_21"]
+                h = prms["h_obs"]
+
+                negentropy += np.sum(np.trace(-0.5 * J_diag @ ExxT, axis1=1, axis2=2))
+                negentropy += np.sum(h[:, None, :] @ Ex[:, :, None])
+                negentropy += np.sum(np.trace(-0.5 * J_lower_diag @ ExxnT, axis1=1, axis2=2))
+                negentropy -= log_Z
+
+        # 2. Compute E_{q(z)}[ log q(z) ]
+        for prms in self.params:
+            log_pi0 = np.log(prms["pi0"] + 1e-16) - logsumexp(prms["pi0"])
+            log_Ps = np.log(prms["Ps"] + 1e-16) - logsumexp(prms["Ps"], axis=1, keepdims=True)
+            (Ez, Ezzp1, normalizer) = hmm_expected_states(prms["pi0"], prms["Ps"], prms["log_likes"])
+
+            negentropy -= normalizer # -log Z
+            negentropy += np.sum(Ez[0] * log_pi0) # initial factor
+            negentropy += np.sum(Ez * prms["log_likes"]) # unitary factors
+            negentropy += np.sum(Ezzp1 * log_Ps) # pairwise factors
 
         return -negentropy
