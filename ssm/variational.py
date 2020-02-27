@@ -7,7 +7,7 @@ from ssm.primitives import lds_log_probability, lds_sample, lds_mean, block_trid
                            block_tridiagonal_mean, block_tridiagonal_log_probability
 from ssm.messages import hmm_expected_states, hmm_sample, kalman_info_sample, kalman_info_smoother
 
-from ssm.util import ensure_variational_args_are_lists
+from ssm.util import ensure_variational_args_are_lists, trace_product
 
 from autograd.scipy.special import logsumexp
 
@@ -424,9 +424,9 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
                 J_diag, J_lower_diag = prms["J_obs"], prms["J_dyn_21"]
                 h = prms["h_obs"]
 
-                negentropy += np.sum(np.trace(-0.5 * J_diag @ ExxT, axis1=1, axis2=2))
+                negentropy += np.sum(-0.5 * trace_product(J_diag, ExxT))
                 negentropy += np.sum(h[:, None, :] @ Ex[:, :, None])
-                negentropy += np.sum(np.trace(-J_lower_diag @ ExxnT, axis1=1, axis2=2))
+                negentropy += np.sum(-1.0 * trace_product(J_lower_diag, ExxnT))
                 negentropy -= log_Z
 
         # 2. Compute E_{q(z)}[ log q(z) ]

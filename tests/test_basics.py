@@ -307,6 +307,22 @@ def test_hmm_likelihood_perf(T=10000, K=50, D=20):
     print("SSM ARHMM Expectations: ", arhmm_dt, "sec.")
 
 
+def test_trace_product():
+    A = np.random.randn(100, 50, 10)
+    B = np.random.randn(100, 10, 50)
+    assert np.allclose(ssm.util.trace_product(A, B),
+                       np.trace(A @ B, axis1=1, axis2=2))
+
+    A = np.random.randn(50, 10)
+    B = np.random.randn(10, 50)
+    assert np.allclose(ssm.util.trace_product(A, B),
+                       np.trace(A @ B))
+
+    A = np.random.randn(1, 1)
+    B = np.random.randn(1, 1)
+    assert np.allclose(ssm.util.trace_product(A, B),
+                       np.trace(A @ B))
+
 if __name__ == "__main__":
     # test_hmm_likelihood_perf()
     # test_hmm_mp_perf()
