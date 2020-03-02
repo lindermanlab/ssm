@@ -2,6 +2,7 @@ from time import time
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
+import scipy
 
 import ssm
 
@@ -70,11 +71,11 @@ def test_sample(T=10, K=4, D=3, M=2):
 
 
 def test_constrained_hmm(T=100, K=3, D=3):
-    hmm = ssm.HMM(K, D, M=0, 
+    hmm = ssm.HMM(K, D, M=0,
                   transitions="constrained",
                   observations="gaussian")
     z, x = hmm.sample(T)
-    
+
     transition_mask = np.array([
         [1, 0, 1],
         [1, 0, 0],
@@ -86,7 +87,7 @@ def test_constrained_hmm(T=100, K=3, D=3):
     transition_kwargs = dict(
         transition_mask=transition_mask
     )
-    fit_hmm = ssm.HMM(K, D, M=0, 
+    fit_hmm = ssm.HMM(K, D, M=0,
                   transitions="constrained",
                   observations="gaussian",
                   transition_kwargs=transition_kwargs)
@@ -322,6 +323,20 @@ def test_trace_product():
     B = np.random.randn(1, 1)
     assert np.allclose(ssm.util.trace_product(A, B),
                        np.trace(A @ B))
+
+
+def test_SLDSStructuredMeanField_entropy():
+    """Test correctness of the entropy calculation for the
+    SLDSStructuredMeanFieldVariationalPosterior class.
+
+    """
+    def entropy_mv_gaussian(J, h):
+        mu = np.linalg.solve(J, h)
+        sigma = -np.linalg.inv(J)
+        mv_normal = scipy.stats.multivariate_normal(mu, sigma)
+        return mv_normal.entropy()
+    # TODO
+    pass
 
 if __name__ == "__main__":
     # test_hmm_likelihood_perf()
