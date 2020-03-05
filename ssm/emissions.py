@@ -278,8 +278,16 @@ class _IdentityEmissions(Emissions):
         super(_IdentityEmissions, self).__init__(N, K, D, M=M, single_subspace=single_subspace)
         assert N == D
 
-    def forward(self, x, input):
-        return x
+    @property
+    def params(self):
+        return ()
+
+    @params.setter
+    def params(self, value):
+        pass
+
+    def forward(self, x, input, tag):
+        return x[:, None, :]
 
     def _invert(self, data, input=None, mask=None, tag=None):
         """
@@ -434,7 +442,16 @@ class GaussianOrthogonalEmissions(_GaussianEmissionsMixin, _OrthogonalLinearEmis
 
 
 class GaussianIdentityEmissions(_GaussianEmissionsMixin, _IdentityEmissions):
-    pass
+
+    def hessian_log_emissions_prob(self, data, input, mask, tag, x, Ez):
+        # Return (T, D, D) array of blocks for the diagonal of the Hessian
+        T, D = data.shape
+        if self.single_subspace:
+            block = -1.0 * np.diag(1.0 / np.exp(self.inv_etas[0]))
+            hess = np.tile(block[None, :, :], (T, 1, 1))
+        else:
+            raise NotImplementedError
+        return hess
 
 
 class GaussianNeuralNetworkEmissions(_GaussianEmissionsMixin, _NeuralNetworkEmissions):
