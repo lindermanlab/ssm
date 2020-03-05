@@ -854,7 +854,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             km = KMeans(self.K)
             km.fit(np.vstack(datas))
             zs = np.split(km.labels_, np.cumsum(Ts)[:-1])
-            zs = [z[:-self.lags] for z in zs]               # remove the ends
+            zs = [z[self.lags:] for z in zs]               # remove the ends
         else:
             zs = [npr.choice(self.K, size=T-self.lags) for T in Ts]
 
