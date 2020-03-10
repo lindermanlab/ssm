@@ -332,13 +332,136 @@ def test_SLDSStructuredMeanField_entropy():
     """
     def entropy_mv_gaussian(J, h):
         mu = np.linalg.solve(J, h)
-        sigma = -np.linalg.inv(J)
+        sigma = np.linalg.inv(J)
         mv_normal = scipy.stats.multivariate_normal(mu, sigma)
         return mv_normal.entropy()
-    # TODO
-    pass
+
+    def make_lds_parameters(T, D, N, U):
+        m0 = np.zeros(D)
+        S0 = np.eye(D)
+        As = 0.99 * np.eye(D)
+        Bs = np.zeros((D, U))
+        Qs = 0.1 * np.eye(D)
+        Cs = npr.randn(N, D)
+        Ds = np.zeros((N, U))
+        Rs = 0.1 * np.eye(N)
+        us = np.zeros((T, U))
+        ys = np.sin(2 * np.pi * np.arange(T) / 50)[:, None] * npr.randn(1, N) + 0.1 * npr.randn(T, N)
+
+        return m0, S0, As, Bs, Qs, Cs, Ds, Rs, us, ys
+
+    def cumsum(v,strict=False):
+        if not strict:
+            return np.cumsum(v,axis=0)
+        else:
+            out = np.zeros_like(v)
+            out[1:] = np.cumsum(v[:-1],axis=0)
+            return out
+
+    def bmat(blocks):
+        rowsizes = [row[0].shape[0] for row in blocks]
+        colsizes = [col[0].shape[1] for col in zip(*blocks)]
+        rowstarts = cumsum(rowsizes,strict=True)
+        colstarts = cumsum(colsizes,strict=True)
+
+        nrows, ncols = sum(rowsizes), sum(colsizes)
+        out = np.zeros((nrows,ncols))
+
+        for i, (rstart, rsz) in enumerate(zip(rowstarts, rowsizes)):
+            for j, (cstart, csz) in enumerate(zip(colstarts, colsizes)):
+                out[rstart:rstart+rsz,cstart:cstart+csz] = blocks[i][j]
+        return out
+
+    def lds_to_dense_infoparams(params):
+        m0, S0, As, Bs, Qs, Cs, Ds, Rs, us, ys = params
+        mu_init = m0
+        sigma_init = S0
+        A, B, sigma_states = As, Bs, Qs
+        C, D, sigma_obs = Cs, Ds, Rs
+        data = ys
+        inputs = us
+
+        # Copied from PYLDS tests/test_dense.py
+        T, n = data.shape[0], D.shape[0]
+
+        # mu_init, sigma_init = model.mu_init, model.sigma_init
+        # A, B, sigma_states = model.A, model.B,  model.sigma_states
+        # C, D, sigma_obs = model.C, model.D, model.sigma_obs
+        ss_inv = np.linalg.inv(sigma_states)
+
+        h = np.zeros((T,n))
+        h[0] += np.linalg.solve(sigma_init, mu_init)
+
+        # Dynamics
+        h[1:] += inputs[:-1].dot(B.T).dot(ss_inv)
+        h[:-1] += -inputs[:-1].dot(B.T).dot(np.linalg.solve(sigma_states, A))
+
+        # Emissions
+        h += C.T.dot(np.linalg.solve(sigma_obs, data.T)).T
+        h += -inputs.dot(D.T).dot(np.linalg.solve(sigma_obs, C))
+
+        J = np.kron(np.eye(T),C.T.dot(np.linalg.solve(sigma_obs,C)))
+        J[:n,:n] += np.linalg.inv(sigma_init)
+        pairblock = bmat([[A.T.dot(ss_inv).dot(A), -A.T.dot(ss_inv)],
+                        [-ss_inv.dot(A), ss_inv]])
+        for t in range(0,n*(T-1),n):
+            J[t:t+2*n,t:t+2*n] += pairblock
+
+        return J.reshape(T*n,T*n), h.reshape(T*n)
+
+    T, D, N, U = 100, 10, 10, 0
+    params = make_lds_parameters(T, D, N, U)
+    J_full, h_full = lds_to_dense_infoparams(params)
+
+    ref_entropy = entropy_mv_gaussian(J_full, h_full)
+
+    # Calculate entropy using kalman filter and posterior's entropy fn
+    info_args = ssm.messages.convert_mean_to_info_args(*params)
+    log_Z, smoothed_mus, smoothed_Sigmas, ExxnT = ssm.messages.\
+        kalman_info_smoother(*info_args)
+
+    J_ini, h_ini, _, J_dyn_11,\
+        J_dyn_21, J_dyn_22, h_dyn_1,\
+        h_dyn_2, _, J_obs, h_obs, _ = info_args
+
+    # Model is just a dummy model to simplify 
+    # instantiating the posterior object.
+    model = ssm.SLDS(N, 1, D, emissions="gaussian", dynamics="gaussian")
+    datas = params[-1]
+    post = ssm.variational.SLDSStructuredMeanFieldVariationalPosterior(model, datas)
+
+    # hack for now
+    J_obs[0] += J_ini
+    J_obs[:-1] += J_dyn_11
+    J_obs[1:] += J_dyn_22
+
+    h_obs[0] += h_ini
+    h_obs[:-1] += h_dyn_1
+    h_obs[1:] += h_dyn_2
+
+    # Assign posterior to have info params that are the same as the ones used
+    # in the reference entropy calculation.
+    # post.params[0]["J_ini"] = J_ini
+    # post.params[0]["h_ini"] = h_ini
+    # post.params[0]["J_dyn_11"] = J_dyn_11
+    post.params[0]["J_dyn_21"] = J_dyn_21
+    # post.params[0]["J_dyn_22"] = J_dyn_22
+    # post.params[0]["h_dyn_1"] = h_dyn_1
+    # post.params[0]["h_dyn_2"] = h_dyn_2
+    post.params[0]["J_obs"] = J_obs
+    post.params[0]["h_obs"] = h_obs
+
+    mumuT = np.swapaxes(smoothed_mus[:, None], 2,1) @ smoothed_mus[:, None]
+    ExxT = smoothed_Sigmas + mumuT
+
+
+    expectations = ([smoothed_mus], [ExxT], [ExxnT], [log_Z])
+    ssm_entropy = post._continuous_entropy(expectations)
+    print("reference entropy: {}".format(ref_entropy))
+    print("ssm_entropy: {}".format(ssm_entropy))
 
 if __name__ == "__main__":
     # test_hmm_likelihood_perf()
     # test_hmm_mp_perf()
-    test_constrained_hmm()
+    # test_constrained_hmm()
+    test_SLDSStructuredMeanField_entropy()
