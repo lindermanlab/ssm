@@ -586,15 +586,27 @@ J
         grad_neg_expected_log_joint = grad(neg_expected_log_joint)
 
         # We also need the hessian of the of the expected log joint
-        def hessian_neg_expected_log_joint(x, Ez, Ezzp1, scale=1):
+        def hessian_neg_expected_log_joint(x, Ez, Ezzp1, scale=1, return_params=False):
             T, D = np.shape(x)
             x_mask = np.ones((T, D), dtype=bool)
-            hessian_diag, hessian_lower_diag = self.dynamics.hessian_expected_log_dynamics_prob(Ez, x, input, x_mask, tag)
-            hessian_diag[:-1] += self.transitions.hessian_expected_log_trans_prob(x, input, x_mask, tag, Ezzp1)
-            hessian_diag += self.emissions.hessian_log_emissions_prob(data, input, mask, tag, x, Ez)
+            # hessian_diag, hessian_lower_diag = self.dynamics.hessian_expected_log_dynamics_prob(Ez, x, input, x_mask, tag)
+            # hessian_diag[:-1] += self.transitions.hessian_expected_log_trans_prob(x, input, x_mask, tag, Ezzp1)
+            # hessian_diag += self.emissions.hessian_log_emissions_prob(data, input, mask, tag, x, Ez)
+            neg_J_ini, neg_J_dyn_21 = self.dynamics.hessian_expected_log_dynamics_prob(Ez, x, input, x_mask, tag)
+            neg_J_dyn_11 = self.transitions.hessian_expected_log_trans_prob(x, input, x_mask, tag, Ezzp1)
+            neg_J_dyn_22 = self.emissions.hessian_log_emissions_prob(data, input, mask, tag, x, Ez)
+
+            if return_params:
+                return -1 * neg_J_ini,\
+                    -1 * neg_J_dyn_21,\
+                    -1 * neg_J_dyn_11,\
+                    -1 * neg_J_dyn_22
 
             # The Hessian of the log probability should be *negative* definite since we are *maximizing* it.
-            hessian_diag -= 1e-8 * np.eye(D)
+            hessian_diag = neg_J_ini - 1e-8 * np.eye(D)
+            hessian_diag[:-1] -= neg_J_dyn_11
+
+            hessian_lower_diag = 
 
             # Return the scaled negative hessian, which is positive definite
             return -1 * hessian_diag / scale, -1 * hessian_lower_diag / scale
