@@ -587,27 +587,30 @@ J
         grad_neg_expected_log_joint = grad(neg_expected_log_joint)
 
         # We also need the hessian of the of the expected log joint
-        def hessian_neg_expected_log_joint(x, Ez, Ezzp1, scale=1, return_params=False):
+        def hessian_params(x, Ez, Ezzp1, scale=1):
             T, D = np.shape(x)
             x_mask = np.ones((T, D), dtype=bool)
-            # hessian_diag, hessian_lower_diag = self.dynamics.hessian_expected_log_dynamics_prob(Ez, x, input, x_mask, tag)
-            # hessian_diag[:-1] += self.transitions.hessian_expected_log_trans_prob(x, input, x_mask, tag, Ezzp1)
-            # hessian_diag += self.emissions.hessian_log_emissions_prob(data, input, mask, tag, x, Ez)
-            neg_J_ini, neg_J_dyn_21 = self.dynamics.hessian_expected_log_dynamics_prob(Ez, x, input, x_mask, tag)
-            neg_J_dyn_11 = self.transitions.hessian_expected_log_trans_prob(x, input, x_mask, tag, Ezzp1)
-            neg_J_dyn_22 = self.emissions.hessian_log_emissions_prob(data, input, mask, tag, x, Ez)
+            J_dyn_all, J_dyn_21 = self.dynamics.\
+                hessian_expected_log_dynamics_prob(Ez, x, input, x_mask, tag)
+            J_transitions = self.transitions.\
+                hessian_expected_log_trans_prob(x, input, x_mask, tag, Ezzp1)
+            J_obs = self.emissions.\
+                hessian_log_emissions_prob(data, input, mask, tag, x, Ez)
 
-            if return_params:
-                return -1 * neg_J_ini,\
-                    -1 * neg_J_dyn_21,\
-                    -1 * neg_J_dyn_11,\
-                    -1 * neg_J_dyn_22
+            J_ini = J_dyn_all[0]
+            J_dyn_11 = J_dyn_all[1:]
+            J_obs[:-1] += J_transitions
 
-            # The Hessian of the log probability should be *negative* definite since we are *maximizing* it.
-            hessian_diag = neg_J_ini - 1e-8 * np.eye(D)
-            hessian_diag[:-1] -= neg_J_dyn_11
+            return J_ini, J_dyn_11, J_dyn_21, J_obs
 
-            hessian_lower_diag = 
+        def hessian_neg_expected_log_joint(x, Ez, Ezzp1, scale=1):
+            T, D = np.shape(x)
+            J_ini, J_dyn_11, J_dyn_21, J_obs = hessian_params(x, Ez,
+                                                              Ezzp1, scale=1)
+            hessian_diag = J_obs + np.eye(D) * 1e-8
+            hessian_diag[1:] += J_dyn_11
+            hessian_diag[0] += J_ini
+            hessian_lower_diag = J_dyn_21
 
             # Return the scaled negative hessian, which is positive definite
             return -1 * hessian_diag / scale, -1 * hessian_lower_diag / scale
