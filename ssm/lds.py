@@ -599,7 +599,7 @@ J
 
             J_ini = J_dyn_all[0]
             J_dyn_11 = J_dyn_all[1:]
-            J_dyn_11 += J_transitions
+            J_obs[:-1] += J_transitions
 
             return -J_ini, -J_dyn_11, -J_dyn_21, -J_obs
 
