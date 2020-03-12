@@ -607,13 +607,21 @@ J
             T, D = np.shape(x)
             J_ini, J_dyn_11, J_dyn_21, J_obs = hessian_params(x, Ez,
                                                               Ezzp1, scale=1)
-            hessian_diag = J_obs + np.eye(D) * 1e-8
+            hessian_diag = J_obs - np.eye(D) * 1e-8
             hessian_diag[1:] += J_dyn_11
             hessian_diag[0] += J_ini
             hessian_lower_diag = J_dyn_21
 
             # Return the scaled negative hessian, which is positive definite
             return -1 * hessian_diag / scale, -1 * hessian_lower_diag / scale
+
+        def hessian_params_to_hs(x, J_ini, J_dyn_11, J_dyn_21, J_obs):
+            h_ini = -J_ini @ x[0]
+            h_dyn_1 = (np.swapaxes(-J_dyn_21, -1, -2) @ x[1:][:, :, None])[:, :, 0]
+            h_dyn_2 = (-J_dyn_21 @ x[:-1][:, :, None])[:, :, 0]
+            h_dyn_2 += (-J_dyn_11 @ x[1:][:, :, None])[:, :, 0]
+            h_obs = (-J_obs @ x[:, :, None])[:, :, 0]
+            return h_ini, h_obs, h_dyn_1, h_dyn_2
 
         # Run Newton's method for each data array to find a
         # Laplace approximation for q(x)
@@ -643,22 +651,28 @@ J
             # Evaluate the Hessian at the mode
             assert np.all(np.isfinite(obj(x)))
             J_diag, J_lower_diag = hessian_neg_expected_log_joint(x, Ez, Ezzp1)
+            J_ini, J_dyn_11, J_dyn_21, J_obs = hessian_params(x, Ez, Ezzp1)
 
-            # Compute the Hessian vector product h = J * x
-            # We can do this without instantiating the full matrix
-            h = symm_block_tridiag_matmul(J_diag, J_lower_diag, x)
+            h_ini, h_obs, h_dyn_1, h_dyn_2 = hessian_params_to_hs(x,
+                                                                  J_ini,
+                                                                  J_dyn_11,
+                                                                  J_dyn_21,
+                                                                  J_obs)
+            # h_obs
+            h_check = h_obs.copy()
+            h_check[0] += h_ini
+            h_check[1:] += h_dyn_2
+            h_check[:-1] += h_dyn_1
 
             # update params
-            D = self.D
-            prms["J_ini"] = np.zeros((D, D))
-            prms["h_ini"] = np.zeros((D,))
-            prms["J_dyn_11"] = np.zeros((D, D))
-            prms["J_dyn_22"] = np.zeros((D, D))
-            prms["J_dyn_21"] = J_lower_diag
-            prms["h_dyn_1"] = np.zeros(D)
-            prms["h_dyn_2"] = np.zeros(D)
-            prms["J_obs"] = J_diag
-            prms["h_obs"] = h
+            prms["J_ini"] = J_ini
+            prms["h_ini"] = h_ini
+            prms["J_dyn_11"] = J_dyn_11
+            prms["J_dyn_21"] = J_dyn_21
+            prms["h_dyn_1"] = h_dyn_1
+            prms["h_dyn_2"] = h_dyn_2
+            prms["J_obs"] = J_obs
+            prms["h_obs"] = h_obs
 
     def _fit_laplace_em_params_update_exact_mstep(
             self, expectations, continuous_samples,
