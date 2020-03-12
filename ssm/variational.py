@@ -394,7 +394,7 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
                                                     log_Zs, self.Ts):
             J_diag = prms["J_obs"]
             J_diag[0] += prms["J_ini"]
-            J_diag[1:] += prms["J_dyn_11"]
+            J_diag[:-1] += prms["J_dyn_11"]
             J_lower_diag = prms["J_dyn_21"]
 
             J_diag = J_diag

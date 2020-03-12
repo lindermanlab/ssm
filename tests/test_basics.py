@@ -417,12 +417,18 @@ def test_SLDSStructuredMeanField_entropy():
 
     # Calculate entropy using kalman filter and posterior's entropy fn
     info_args = ssm.messages.convert_mean_to_info_args(*params)
-    log_Z, smoothed_mus, smoothed_Sigmas, ExxnT = ssm.messages.\
-        kalman_info_smoother(*info_args)
-
     J_ini, h_ini, _, J_dyn_11,\
         J_dyn_21, J_dyn_22, h_dyn_1,\
         h_dyn_2, _, J_obs, h_obs, _ = info_args
+
+    # This is a bit of a hack -- 
+    # SSM does not use J_dyn_22 so we add that potential to
+    # J_obs.
+    J_obs[1:] += J_dyn_22
+    J_dyn_22[:] = 0
+    log_Z, smoothed_mus, smoothed_Sigmas, ExxnT = ssm.messages.\
+        kalman_info_smoother(*info_args)
+
 
     # Model is just a dummy model to simplify 
     # instantiating the posterior object.
@@ -430,30 +436,21 @@ def test_SLDSStructuredMeanField_entropy():
     datas = params[-1]
     post = ssm.variational.SLDSStructuredMeanFieldVariationalPosterior(model, datas)
 
-    # hack for now
-    J_obs[0] += J_ini
-    J_obs[:-1] += J_dyn_11
-    J_obs[1:] += J_dyn_22
-
-    h_obs[0] += h_ini
-    h_obs[:-1] += h_dyn_1
-    h_obs[1:] += h_dyn_2
-
     # Assign posterior to have info params that are the same as the ones used
     # in the reference entropy calculation.
-    # post.params[0]["J_ini"] = J_ini
-    # post.params[0]["h_ini"] = h_ini
-    # post.params[0]["J_dyn_11"] = J_dyn_11
+    post.params[0]["J_ini"] = J_ini
+    post.params[0]["h_ini"] = h_ini
+    post.params[0]["J_dyn_11"] = J_dyn_11
     post.params[0]["J_dyn_21"] = J_dyn_21
     # post.params[0]["J_dyn_22"] = J_dyn_22
-    # post.params[0]["h_dyn_1"] = h_dyn_1
-    # post.params[0]["h_dyn_2"] = h_dyn_2
+    post.params[0]["h_dyn_1"] = h_dyn_1
+    post.params[0]["h_dyn_2"] = h_dyn_2
     post.params[0]["J_obs"] = J_obs
     post.params[0]["h_obs"] = h_obs
+    print(J_dyn_22)
 
     mumuT = np.swapaxes(smoothed_mus[:, None], 2,1) @ smoothed_mus[:, None]
     ExxT = smoothed_Sigmas + mumuT
-
 
     expectations = ([smoothed_mus], [ExxT], [ExxnT], [log_Z])
     ssm_entropy = post._continuous_entropy(expectations)
