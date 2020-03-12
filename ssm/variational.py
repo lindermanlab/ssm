@@ -392,8 +392,18 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         for prms, Ex, ExxT, ExxnT, log_Z, T in zip(self.params,
                                                     Exs, ExxTs, ExxnTs,
                                                     log_Zs, self.Ts):
-            J_diag, J_lower_diag = prms["J_obs"], prms["J_dyn_21"]
+            J_diag = prms["J_obs"]
+            J_diag[0] += prms["J_ini"]
+            J_diag[1:] += prms["J_dyn_11"]
+            J_lower_diag = prms["J_dyn_21"]
+
+            J_diag = J_diag
+            J_lower_diag = J_lower_diag
+
             h = prms["h_obs"]
+            h[0] += prms["h_ini"]
+            h[:-1] += prms["h_dyn_1"]
+            h[1:] += prms["h_dyn_2"]
 
             negentropy += np.sum(-0.5 * trace_product(J_diag, ExxT))
             negentropy += np.sum(h[:, None, :] @ Ex[:, :, None])
