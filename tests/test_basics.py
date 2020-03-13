@@ -421,11 +421,8 @@ def test_SLDSStructuredMeanField_entropy():
         J_dyn_21, J_dyn_22, h_dyn_1,\
         h_dyn_2, _, J_obs, h_obs, _ = info_args
 
-    # This is a bit of a hack -- 
-    # SSM does not use J_dyn_22 so we add that potential to
-    # J_obs.
-    J_obs[1:] += J_dyn_22
-    J_dyn_22[:] = 0
+    # J_obs[1:] += J_dyn_22
+    # J_dyn_22[:] = 0
     log_Z, smoothed_mus, smoothed_Sigmas, ExxnT = ssm.messages.\
         kalman_info_smoother(*info_args)
 
@@ -442,12 +439,11 @@ def test_SLDSStructuredMeanField_entropy():
     post.params[0]["h_ini"] = h_ini
     post.params[0]["J_dyn_11"] = J_dyn_11
     post.params[0]["J_dyn_21"] = J_dyn_21
-    # post.params[0]["J_dyn_22"] = J_dyn_22
+    post.params[0]["J_dyn_22"] = J_dyn_22
     post.params[0]["h_dyn_1"] = h_dyn_1
     post.params[0]["h_dyn_2"] = h_dyn_2
     post.params[0]["J_obs"] = J_obs
     post.params[0]["h_obs"] = h_obs
-    print(J_dyn_22)
 
     mumuT = np.swapaxes(smoothed_mus[:, None], 2,1) @ smoothed_mus[:, None]
     ExxT = smoothed_Sigmas + mumuT
@@ -456,6 +452,7 @@ def test_SLDSStructuredMeanField_entropy():
     ssm_entropy = post._continuous_entropy(expectations)
     print("reference entropy: {}".format(ref_entropy))
     print("ssm_entropy: {}".format(ssm_entropy))
+    assert np.allclose(ref_entropy, ssm_entropy)
 
 if __name__ == "__main__":
     # test_hmm_likelihood_perf()

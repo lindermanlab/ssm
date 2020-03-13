@@ -392,22 +392,20 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         for prms, Ex, ExxT, ExxnT, log_Z, T in zip(self.params,
                                                     Exs, ExxTs, ExxnTs,
                                                     log_Zs, self.Ts):
-            J_diag = prms["J_obs"]
-            J_diag[0] += prms["J_ini"]
-            J_diag[:-1] += prms["J_dyn_11"]
-            J_lower_diag = prms["J_dyn_21"]
+            # Pairwise terms
+            negentropy += np.sum(-0.5 * trace_product(prms["J_ini"], ExxT[0]))
+            negentropy += np.sum(-0.5 * trace_product(prms["J_dyn_11"], ExxT[:-1]))
+            negentropy += np.sum(-0.5 * trace_product(prms["J_dyn_22"], ExxT[1:]))
+            negentropy += np.sum(-0.5 * trace_product(prms["J_obs"], ExxT))
+            negentropy += np.sum(-1.0 * trace_product(prms["J_dyn_21"], ExxnT))
 
-            J_diag = J_diag
-            J_lower_diag = J_lower_diag
+            # Unary terms
+            negentropy += np.sum(prms["h_ini"] * Ex[0])
+            negentropy += np.sum(prms["h_dyn_1"] * Ex[:-1])
+            negentropy += np.sum(prms["h_dyn_2"] * Ex[1:])
+            negentropy += np.sum(prms["h_obs"] * Ex)
 
-            h = prms["h_obs"]
-            h[0] += prms["h_ini"]
-            h[:-1] += prms["h_dyn_1"]
-            h[1:] += prms["h_dyn_2"]
-
-            negentropy += np.sum(-0.5 * trace_product(J_diag, ExxT))
-            negentropy += np.sum(h[:, None, :] @ Ex[:, :, None])
-            negentropy += np.sum(-1.0 * trace_product(J_lower_diag, ExxnT))
+            # Log normalizer
             negentropy -= log_Z
         return -negentropy
 
