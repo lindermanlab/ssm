@@ -670,7 +670,7 @@ J
                 def _objective(params, itr):
                     x = params
                     return neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
-                x = lbfgs(_objective, x0, num_iters=continuous_maxiter, jac=grad_func,
+                x = lbfgs(_objective, x0, num_iters=continuous_maxiter,
                           tol=continuous_tolerance)
 
             # Evaluate the Hessian at the mode

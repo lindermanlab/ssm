@@ -1,6 +1,7 @@
 import time
 import ssm
 from ssm.util import SEED
+import copy
 
 from autograd import elementwise_grad
 import autograd.numpy as np
@@ -14,6 +15,43 @@ from ssm.primitives import \
     cholesky_lds, solve_lds, lds_sample, lds_mean, \
     convert_lds_to_block_tridiag
 
+TRANSITIONS_NAMES = [
+    "stationary",
+    "sticky",
+    "inputdriven",
+    "recurrent",
+    "recurrent_only",
+    "rbf_recurrent",
+    "nn_recurrent",
+    ]
+
+DYNAMICS_NAMES = [
+    "none",
+    "gaussian",
+    "diagonal_gaussian",
+    "studentst",
+    "diagonal_t",
+    ]
+
+# Exclude the identity emissions (for now)
+# because they require N == D
+EMISSIONS_NAMES = [
+    "gaussian",
+    "gaussian_orthog",
+    "gaussian_nn",
+    "studentst",
+    "studentst_orthog",
+    "studentst_nn",
+    "poisson",
+    "poisson_orthog",
+    "poisson_nn",
+    "bernoulli",
+    "bernoulli_orthog",
+    "bernoulli_nn",
+    "autoregressive",
+    "autoregressive_orthog",
+    "autoregressive_nn",
+    ]
 
 def make_lds_parameters(T=20, D=2):
     As = npr.randn(T-1, D, D)
@@ -404,44 +442,6 @@ def test_lds_log_probability_perf(T=1000, D=10, N_iter=10):
     print("Time per iter: {:.4f}".format((stop - start) / N_iter))
 
 def test_lds_sample_and_fit(T=100, N=15, K=3, D=10):
-    transition_names = [
-    "stationary",
-    "sticky",
-    "inputdriven",
-    "recurrent",
-    "recurrent_only",
-    "rbf_recurrent",
-    "nn_recurrent",
-    ]
-
-    dynamics_names = [
-    "none",
-    "gaussian",
-    "diagonal_gaussian",
-    "studentst",
-    "diagonal_t",
-    ]
-
-    # Exclude the identity emissions (for now)
-    # because they require N == D
-    emission_names = [
-    "gaussian",
-    "gaussian_orthog",
-    "gaussian_nn",
-    "studentst",
-    "studentst_orthog",
-    "studentst_nn",
-    "poisson",
-    "poisson_orthog",
-    "poisson_nn",
-    "bernoulli",
-    "bernoulli_orthog",
-    "bernoulli_nn",
-    "autoregressive",
-    "autoregressive_orthog",
-    "autoregressive_nn",
-    ]
-
     # method_name --> allowable posteriors
     methods = {
         "svi": ["mf", "lds"],
@@ -450,9 +450,9 @@ def test_lds_sample_and_fit(T=100, N=15, K=3, D=10):
 
     # Test SLDS and RSLDS
     print("Testing SLDS and RSLDS...")
-    for dynamics in dynamics_names:
-        for emissions in emission_names:
-            for transitions in transition_names:
+    for dynamics in DYNAMICS_NAMES:
+        for emissions in EMISSIONS_NAMES:
+            for transitions in TRANSITIONS_NAMES:
                 for method in methods:
                     for posterior in methods[method]:
                         npr.seed(seed=SEED)
@@ -486,17 +486,74 @@ def test_lds_sample_and_fit(T=100, N=15, K=3, D=10):
                                      num_iters=2)
 
 
-def test_laplace_em(T=1000, N=15, K=3, D=10):
+def lbfgs_newton_perf_comparison(T=100, N=15, K=3, D=10, ntrials=5, n_iters=20):
+    np.random.seed(seed=123)
     true_slds = ssm.SLDS(N, K, D,
-                        transitions="recurrent",
-                        dynamics="gaussian",
-                        emissions="gaussian")
+                            transitions="recurrent",
+                            dynamics="gaussian",
+                            emissions="gaussian")
     z, x, y = true_slds.sample(T)
+
     fit_slds = ssm.SLDS(N, K, D,
                         transitions="recurrent",
                         dynamics="gaussian",
                         emissions="gaussian")
-    fit_slds.fit(y, initialize=False, num_iters=20)
+    # Make sure all params are starting at the same value
+    newtons_lds = copy.deepcopy(fit_slds)
+    lbfgs_lds = copy.deepcopy(fit_slds)
+
+    newton_time = 0
+    for i in range(ntrials):
+        start = time.time()
+        newtons_lds.fit(y,
+                    initialize=False,
+                    num_iters=n_iters,
+                    continuous_optimizer="newton")
+        end = time.time()
+        newton_time += (end - start) / n_iters
+    newton_time /= ntrials
+    print("Avg time/iter with newton's method: {:.4f}".format(newton_time))
+
+    lbfgs_time = 0
+    for i in range(ntrials):
+        start = time.time()
+        lbfgs_lds.fit(y,
+                    initialize=False,
+                    num_iters=n_iters,
+                    continuous_optimizer="lbfgs")
+        end = time.time()
+        lbfgs_time += (end - start) / n_iters
+    lbfgs_time /= ntrials
+    print("Avg time/iter with lbfgs: {:.4f}".format(lbfgs_time))
+
+def test_laplace_em(T=100, N=15, K=3, D=10):
+    # Check that laplace-em works for each transition and emission model
+    # so long as the dynamics are linear-gaussian.
+    for transitions in TRANSITIONS_NAMES:
+        for emissions in EMISSIONS_NAMES:
+            true_slds = ssm.SLDS(N, K, D,
+                                 transitions=transitions,
+                                 dynamics="gaussian",
+                                 emissions=emissions)
+            z, x, y = true_slds.sample(T)
+            fit_slds = ssm.SLDS(N, K, D,
+                                transitions=transitions,
+                                dynamics="gaussian",
+                                emissions=emissions)
+            try:
+                fit_slds.fit(y,
+                            initialize=True,
+                            num_init_iters=2,
+                            num_iters=5)
+            # So that we can still interrupt the test.
+            except KeyboardInterrupt:
+                raise
+            # So that we know which test case fails...
+            except:
+                print("Error during fit with Laplace-EM. Failed with:")
+                print("Emissions = {}".format(emissions))
+                print("Transitions = {}".format(transitions))
+                # raise
 
 if __name__ == "__main__":
     # test_blocks_to_banded()
@@ -515,4 +572,8 @@ if __name__ == "__main__":
     # test_lds_sample_grad()
     # for D in range(2, 21, 2):
     #     test_lds_log_probability_perf(T=1000, D=D)
-    test_laplace_em()
+    # test_laplace_em()
+    for T in [100, 1000]:
+        print("Performance comparison for LBFGS vs. Newton's method "
+              "with T={}".format(T))
+        lbfgs_newton_perf_comparison(T=1000, N=50, K=5, D=10)
