@@ -75,11 +75,12 @@ class Observations(object):
     def smooth(self, expectations, data, input, tag):
         raise NotImplementedError
 
-    def hessian_expected_log_dynamics_prob(self, Ez, data, input, mask, tag=None):
+    def neg_hessian_expected_log_dynamics_prob(self, Ez, data, input, mask, tag=None):
         # warnings.warn("Analytical Hessian is not implemented for this dynamics class. \
         #                Optimization via Laplace-EM may be slow. Consider using an \
         #                alternative posterior and inference method. ")
         raise NotImplementedError
+
 
 class GaussianObservations(Observations):
     def __init__(self, K, D, M=0):
@@ -1061,35 +1062,29 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             S = np.linalg.cholesky(self.Sigmas[z]) if with_noise else 0
             return mu + np.dot(S, npr.randn(D))
 
-    def hessian_expected_log_dynamics_prob(self, Ez, data, input, mask, tag=None):
-        assert np.all(mask), "Cannot compute Hessian of autoregressive obsevations with missing data."
-        assert self.lags == 1, "Does not compute Hessian of autoregressive observations with lags > 1"
-        T = data.shape[0]
-        K = self.K
-        D = self.D
-
-        # diagonal blocks, size ((T, D, D))
-        diagonal_blocks = np.zeros((T, D, D))
+    def neg_hessian_expected_log_dynamics_prob(self, Ez, data, input, mask, tag=None):
+        assert np.all(mask), "Cannot compute negative Hessian of autoregressive obsevations with missing data."
+        assert self.lags == 1, "Does not compute negative Hessian of autoregressive observations with lags > 1"
 
         # initial distribution contributes a Gaussian term to first diagonal block
-        diagonal_blocks[0] = -1 * np.sum(Ez[0, :, None, None] * np.linalg.inv(self.Sigmas_init), axis=0)
+        J_ini = np.sum(Ez[0, :, None, None] * np.linalg.inv(self.Sigmas_init), axis=0)
 
         # first part is transition dynamics - goes to all terms except final one
         # E_q(z) x_{t} A_{z_t+1}.T Sigma_{z_t+1}^{-1} A_{z_t+1} x_{t}
         inv_Sigmas = np.linalg.inv(self.Sigmas)
         dynamics_terms = np.array([A.T@inv_Sigma@A for A, inv_Sigma in zip(self.As, inv_Sigmas)]) # A^T Qinv A terms
-        diagonal_blocks[:-1] += -1 * np.sum(Ez[1:,:,None,None] * dynamics_terms[None,:], axis=1)
+        J_dyn_11 = np.sum(Ez[1:,:,None,None] * dynamics_terms[None,:], axis=1)
 
         # second part of diagonal blocks are inverse covariance matrices - goes to all but first time bin
         # E_q(z) x_{t+1} Sigma_{z_t+1}^{-1} x_{t+1}
-        diagonal_blocks[1:] += -1 * np.sum(Ez[1:,:,None,None] * inv_Sigmas[None,:], axis=1)
+        J_dyn_22 = np.sum(Ez[1:,:,None,None] * inv_Sigmas[None,:], axis=1)
 
         # lower diagonal blocks are (T-1,D,D):
         # E_q(z) x_{t+1} Sigma_{z_t+1}^{-1} A_{z_t+1} x_t
         off_diag_terms = np.array([inv_Sigma@A for A, inv_Sigma in zip(self.As, inv_Sigmas)])
-        lower_diagonal_blocks = np.sum(Ez[1:,:,None,None] * off_diag_terms[None,:], axis=1)
+        J_dyn_21 = np.sum(Ez[1:,:,None,None] * off_diag_terms[None,:], axis=1)
 
-        return diagonal_blocks, lower_diagonal_blocks
+        return J_ini, J_dyn_11, J_dyn_21, J_dyn_22
 
 
 class AutoRegressiveObservationsNoInput(AutoRegressiveObservations):

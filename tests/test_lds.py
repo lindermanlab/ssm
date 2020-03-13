@@ -486,21 +486,33 @@ def test_lds_sample_and_fit(T=100, N=15, K=3, D=10):
                                      num_iters=2)
 
 
-if __name__ == "__main__":
-    test_blocks_to_banded()
-    test_transpose_banded()
-    test_lds_log_probability()
-    test_lds_mean()
-    test_lds_sample()
-    test_blocks_to_banded_grad()
-    test_transpose_banded_grad()
-    test_cholesky_banded_grad()
-    test_solve_banded_grad()
-    test_solveh_banded_grad()
-    test_cholesky_lds_grad()
-    test_solve_lds_grad()
-    test_lds_log_probability_grad()
-    test_lds_sample_grad()
-    for D in range(2, 21, 2):
-        test_lds_log_probability_perf(T=1000, D=D)
+def test_laplace_em(T=1000, N=15, K=3, D=10):
+    true_slds = ssm.SLDS(N, K, D,
+                        transitions="recurrent",
+                        dynamics="gaussian",
+                        emissions="gaussian")
+    z, x, y = true_slds.sample(T)
+    fit_slds = ssm.SLDS(N, K, D,
+                        transitions="recurrent",
+                        dynamics="gaussian",
+                        emissions="gaussian")
+    fit_slds.fit(y, initialize=False, num_iters=20)
 
+if __name__ == "__main__":
+    # test_blocks_to_banded()
+    # test_transpose_banded()
+    # test_lds_log_probability()
+    # test_lds_mean()
+    # test_lds_sample()
+    # test_blocks_to_banded_grad()
+    # test_transpose_banded_grad()
+    # test_cholesky_banded_grad()
+    # test_solve_banded_grad()
+    # test_solveh_banded_grad()
+    # test_cholesky_lds_grad()
+    # test_solve_lds_grad()
+    # test_lds_log_probability_grad()
+    # test_lds_sample_grad()
+    # for D in range(2, 21, 2):
+    #     test_lds_log_probability_perf(T=1000, D=D)
+    test_laplace_em()
