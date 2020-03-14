@@ -842,7 +842,7 @@ J
                         inputs=None, masks=None, tags=None,
                         num_iters=100,
                         num_samples=1,
-                        continuous_optimizer="newton",
+                        continuous_optimizer="lbfgs",
                         continuous_tolerance=1e-4,
                         continuous_maxiter=100,
                         emission_optimizer="lbfgs",

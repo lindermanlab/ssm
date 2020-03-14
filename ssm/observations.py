@@ -947,8 +947,8 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                                         fit_intercept=True,
                                         prior_ExxT=J[k],
                                         prior_ExyT=h[k],
-                                        Psi0=1e-8,
-                                        nu0=0,
+                                        Psi0=10,
+                                        nu0=10,
                                     )
                 As[k] = A_curr
                 bs[k] = b_curr
