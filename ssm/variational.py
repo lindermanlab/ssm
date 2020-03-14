@@ -292,6 +292,10 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         h_dyn_2 = np.zeros((T-1, D))
         h_obs = np.zeros((T, D))
 
+        if self.model.emissions.single_subspace:
+            h_obs = self.model.emissions.\
+                invert(data, input=input, mask=mask, tag=tag)
+
         # Initialize the posterior variance to self.initial_variance * I
         J_ini = np.zeros((D, D))
         J_dyn_11 = np.zeros((T-1, D, D))
