@@ -576,4 +576,4 @@ if __name__ == "__main__":
     for T in [100, 1000]:
         print("Performance comparison for LBFGS vs. Newton's method "
               "with T={}".format(T))
-        lbfgs_newton_perf_comparison(T=1000, N=50, K=5, D=10)
+        lbfgs_newton_perf_comparison(T=T, N=5, K=1, D=30)

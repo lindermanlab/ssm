@@ -550,13 +550,92 @@ J
                     [self.emissions.log_likelihoods(data, input, mask, tag, x)
                      for x in x_samples], axis=0)
 
-    def _fit_laplace_em_continuous_state_update(
-        self, discrete_expectations, variational_posterior,
-        datas, inputs, masks, tags,
-        continuous_optimizer, continuous_tolerance, continuous_maxiter):
+    # Compute the expected log joint
+    def _laplace_neg_expected_log_joint(self,
+                                        data,
+                                        input,
+                                        mask,
+                                        tag,
+                                        x,
+                                        Ez,
+                                        Ezzp1,
+                                        scale=1):
+        # The "mask" for x is all ones
+        x_mask = np.ones_like(x, dtype=bool)
+        log_pi0 = self.init_state_distn.log_initial_state_distn
+        log_Ps = self.transitions.\
+            log_transition_matrices(x, input, x_mask, tag)
+        log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
+        log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
+
+        # Compute the expected log probability
+        elp = np.sum(Ez[0] * log_pi0)
+        elp += np.sum(Ezzp1 * log_Ps)
+        elp += np.sum(Ez * log_likes)
+        # assert np.all(np.isfinite(elp))
+        return -1 * elp / scale
+
+    # We also need the hessian of the of the expected log joint
+    def _laplace_neg_hessian_params(self, data, input, mask, tag, x, Ez, Ezzp1):
+        T, D = np.shape(x)
+        x_mask = np.ones((T, D), dtype=bool)
+
+        J_ini, J_dyn_11, J_dyn_21, J_dyn_22 = self.dynamics.\
+            neg_hessian_expected_log_dynamics_prob(Ez, x, input, x_mask, tag)
+        J_transitions = self.transitions.\
+            neg_hessian_expected_log_trans_prob(x, input, x_mask, tag, Ezzp1)
+        J_dyn_11 += J_transitions
+
+        J_obs = self.emissions.\
+            neg_hessian_log_emissions_prob(data, input, mask, tag, x, Ez)
+
+        return J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs
+
+    def _laplace_hessian_neg_expected_log_joint(self, data, input, mask, tag, x, Ez, Ezzp1, scale=1):
+        J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs = \
+            self._laplace_neg_hessian_params(data, input, mask, tag, x, Ez, Ezzp1)
+
+        hessian_diag = J_obs
+        hessian_diag[0] += J_ini
+        hessian_diag[:-1] += J_dyn_11
+        hessian_diag[1:] += J_dyn_22
+        hessian_lower_diag = J_dyn_21
+
+        # Return the scaled negative hessian, which is positive definite
+        return hessian_diag / scale, hessian_lower_diag / scale
+
+    def _laplace_neg_hessian_params_to_hs(self,
+                                          x,
+                                          J_ini,
+                                          J_dyn_11,
+                                          J_dyn_21,
+                                          J_dyn_22,
+                                          J_obs):
+        h_ini = J_ini @ x[0]
+
+        h_dyn_1 = (J_dyn_11 @ x[:-1][:, :, None])[:, :, 0]
+        h_dyn_1 += (np.swapaxes(J_dyn_21, -1, -2) @ x[1:][:, :, None])[:, :, 0]
+
+        h_dyn_2 = (J_dyn_22 @ x[1:][:, :, None])[:, :, 0]
+        h_dyn_2 += (J_dyn_21 @ x[:-1][:, :, None])[:, :, 0]
+
+        h_obs = (J_obs @ x[:, :, None])[:, :, 0]
+        return h_ini, h_dyn_1, h_dyn_2, h_obs
+
+    def _fit_laplace_em_continuous_state_update(self,
+                                                discrete_expectations,
+                                                variational_posterior,
+                                                datas,
+                                                inputs,
+                                                masks,
+                                                tags,
+                                                continuous_optimizer,
+                                                continuous_tolerance,
+                                                continuous_maxiter):
 
         # 2. Update the variational posterior q(x) for fixed q(z)
-        #    - Use Newton's method or LBFGS to find the argmax of the expected log joint
+        #    - Use Newton's method or LBFGS to find the argmax of the expected
+        #      log joint
         #       - Compute the gradient g(x) and block tridiagonal Hessian J(x)
         #       - Newton update: x' = x + J(x)^{-1} g(x)
         #       - Check for convergence of x'
@@ -565,82 +644,31 @@ J
         # allow for using Newton's method or LBFGS to find x*
         optimizer = dict(newton="newton", lbfgs="lbfgs")[continuous_optimizer]
 
-        # Compute the expected log joint
-        def neg_expected_log_joint(x, Ez, Ezzp1, scale=1):
-            # The "mask" for x is all ones
-            x_mask = np.ones_like(x, dtype=bool)
-            log_pi0 = self.init_state_distn.log_initial_state_distn
-            log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
-            log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
-            log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
-
-            # Compute the expected log probability
-            elp = np.sum(Ez[0] * log_pi0)
-            elp += np.sum(Ezzp1 * log_Ps)
-            elp += np.sum(Ez * log_likes)
-            # assert np.all(np.isfinite(elp))
-
-            return -1 * elp / scale
-
         # We'll need the gradient of the expected log joint wrt x
-        grad_neg_expected_log_joint = grad(neg_expected_log_joint)
-
-        # We also need the hessian of the of the expected log joint
-        def neg_hessian_params(x, Ez, Ezzp1):
-            T, D = np.shape(x)
-            x_mask = np.ones((T, D), dtype=bool)
-
-            J_ini, J_dyn_11, J_dyn_21, J_dyn_22 = self.dynamics.\
-                neg_hessian_expected_log_dynamics_prob(Ez, x, input, x_mask, tag)
-            J_transitions = self.transitions.\
-                neg_hessian_expected_log_trans_prob(x, input, x_mask, tag, Ezzp1)
-            J_dyn_11 += J_transitions
-
-            J_obs = self.emissions.\
-                neg_hessian_log_emissions_prob(data, input, mask, tag, x, Ez)
-
-            return J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs
-
-        def hessian_neg_expected_log_joint(x, Ez, Ezzp1, scale=1):
-            J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs = \
-                neg_hessian_params(x, Ez, Ezzp1)
-
-            hessian_diag = J_obs
-            hessian_diag[0] += J_ini
-            hessian_diag[:-1] += J_dyn_11
-            hessian_diag[1:] += J_dyn_22
-            hessian_lower_diag = J_dyn_21
-
-            # Return the scaled negative hessian, which is positive definite
-            return hessian_diag / scale, hessian_lower_diag / scale
-
-        def neg_hessian_params_to_hs(x, J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs):
-            h_ini = J_ini @ x[0]
-
-            h_dyn_1 = (J_dyn_11 @ x[:-1][:, :, None])[:, :, 0]
-            h_dyn_1 += (np.swapaxes(J_dyn_21, -1, -2) @ x[1:][:, :, None])[:, :, 0]
-
-            h_dyn_2 = (J_dyn_22 @ x[1:][:, :, None])[:, :, 0]
-            h_dyn_2 += (J_dyn_21 @ x[:-1][:, :, None])[:, :, 0]
-
-            h_obs = (J_obs @ x[:, :, None])[:, :, 0]
-            return h_ini, h_dyn_1, h_dyn_2, h_obs
+        grad_neg_expected_log_joint = grad(self.
+                                           _laplace_neg_expected_log_joint,
+                                           argnum=4)
 
         # ref func for testing
         def hessian_neg_expected_log_joint_ref(x, Ez, Ezzp1, scale=1):
             T, D = np.shape(x)
             x_mask = np.ones((T, D), dtype=bool)
-            J_ini, J_dyn_11, J_dyn_21, J_dyn_22 = self.dynamics.neg_hessian_expected_log_dynamics_prob(Ez, x, input, x_mask, tag)
+            J_ini, J_dyn_11, J_dyn_21, J_dyn_22 = self.dynamics.\
+                neg_hessian_expected_log_dynamics_prob(Ez, x, input, x_mask, tag)
             neg_hessian_diag = np.zeros((T, D, D))
             neg_hessian_diag[0] += J_ini
             neg_hessian_diag[:-1] += J_dyn_11
             neg_hessian_diag[1:] += J_dyn_22
             neg_hessian_lower_diag = J_dyn_21
 
-            neg_hessian_diag[:-1] += self.transitions.neg_hessian_expected_log_trans_prob(x, input, x_mask, tag, Ezzp1)
-            neg_hessian_diag += self.emissions.neg_hessian_log_emissions_prob(data, input, mask, tag, x, Ez)
+            neg_hessian_diag[:-1] += self.transitions.\
+                neg_hessian_expected_log_trans_prob(x, input,
+                                                    x_mask, tag, Ezzp1)
+            neg_hessian_diag += self.emissions.\
+                neg_hessian_log_emissions_prob(data, input, mask, tag, x, Ez)
 
-            # The Hessian of the log probability should be *negative* definite since we are *maximizing* it.
+            # The Hessian of the log probability should be *negative* definite
+            # since we are *maximizing* it.
             neg_hessian_diag += 1e-8 * np.eye(D)
 
             # Return the scaled negative hessian, which is positive definite
@@ -655,11 +683,39 @@ J
 
             # Use Newton's method or LBFGS to find the argmax of the expected log joint
             scale = x0.size
-            obj = lambda x: neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
+
+            def obj(x):
+                return self._laplace_neg_expected_log_joint(data,
+                                                            input,
+                                                            mask,
+                                                            tag,
+                                                            x,
+                                                            Ez,
+                                                            Ezzp1,
+                                                            scale=1)
             if optimizer == "newton":
                 # Run Newtons method
-                grad_func = lambda x: grad_neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
-                hess_func = lambda x: hessian_neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
+
+                def grad_func(x):
+                    return grad_neg_expected_log_joint(data,
+                                                       input, 
+                                                       mask,
+                                                       tag,
+                                                       x,
+                                                       Ez,
+                                                       Ezzp1,
+                                                       scale=scale)
+
+                def hess_func(x):
+                    return self.\
+                        _laplace_hessian_neg_expected_log_joint(data,
+                                                                input,
+                                                                mask,
+                                                                tag,
+                                                                x,
+                                                                Ez,
+                                                                Ezzp1,
+                                                                scale=scale)
                 x = newtons_method_block_tridiag_hessian(
                     x0, obj, grad_func, hess_func,
                     tolerance=continuous_tolerance, maxiter=continuous_maxiter)
@@ -668,32 +724,42 @@ J
                 # use LBFGS
                 def _objective(params, itr):
                     x = params
-                    return neg_expected_log_joint(x, Ez, Ezzp1, scale=scale)
+                    return self._laplace_neg_expected_log_joint(data,
+                                                                input,
+                                                                mask,
+                                                                tag,
+                                                                x,
+                                                                Ez,
+                                                                Ezzp1,
+                                                                scale=1)
+
                 x = lbfgs(_objective, x0, num_iters=continuous_maxiter,
                           tol=continuous_tolerance)
 
             # Evaluate the Hessian at the mode
             assert np.all(np.isfinite(obj(x)))
-            J_diag, J_lower_diag = hessian_neg_expected_log_joint(x, Ez, Ezzp1)
+
+            # TODO: @banting remove before merge
+            J_diag, J_lower_diag = self._laplace_hessian_neg_expected_log_joint(data, input, mask, tag, x, Ez, Ezzp1)
             J_diag_ref, J_lower_diag_ref = hessian_neg_expected_log_joint_ref(x, Ez, Ezzp1)
             assert np.allclose(J_diag, J_diag_ref)
             assert np.allclose(J_lower_diag, J_lower_diag_ref)
-            
 
-            J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs = neg_hessian_params(x, Ez, Ezzp1)
+            J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs = self.\
+                _laplace_neg_hessian_params(data, input, mask, tag, x, Ez, Ezzp1)
             h_ini, h_dyn_1, h_dyn_2, h_obs = \
-                neg_hessian_params_to_hs(x, J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs)
+                self._laplace_neg_hessian_params_to_hs(x, J_ini, J_dyn_11,
+                                              J_dyn_21, J_dyn_22, J_obs)
 
             # Check
+            # TODO: @bantin remove before merge
             h_ref = symm_block_tridiag_matmul(J_diag_ref, J_lower_diag_ref, x)
             h_check = h_obs.copy()
             h_check[0] += h_ini
             h_check[:-1] += h_dyn_1
             h_check[1:] += h_dyn_2
-            assert np.allclose(h_ref, h_check, atol=1e-5)
+            assert np.allclose(h_ref, h_check, atol=1e-3)
 
-            # update params
-            T, D = x.shape
             prms["J_ini"] = J_ini
             prms["J_dyn_11"] = J_dyn_11
             prms["J_dyn_21"] = J_dyn_21
@@ -704,7 +770,6 @@ J
             prms["h_dyn_1"] = h_dyn_1
             prms["h_dyn_2"] = h_dyn_2
             prms["h_obs"] = h_obs
-
 
     def _fit_laplace_em_params_update_exact_mstep(
             self, expectations, continuous_samples,
