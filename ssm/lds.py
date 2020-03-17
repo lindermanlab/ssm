@@ -596,7 +596,8 @@ J
         J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs = \
             self._laplace_neg_hessian_params(data, input, mask, tag, x, Ez, Ezzp1)
 
-        hessian_diag = J_obs
+        hessian_diag = np.zeros_like(J_obs)
+        hessian_diag[:] += J_obs
         hessian_diag[0] += J_ini
         hessian_diag[:-1] += J_dyn_11
         hessian_diag[1:] += J_dyn_22
