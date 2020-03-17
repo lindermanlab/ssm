@@ -694,7 +694,7 @@ J
                                                             x,
                                                             Ez,
                                                             Ezzp1,
-                                                            scale=1)
+                                                            scale=scale)
             if optimizer == "newton":
                 # Run Newtons method
 
@@ -733,7 +733,7 @@ J
                                                                 x,
                                                                 Ez,
                                                                 Ezzp1,
-                                                                scale=1)
+                                                                scale=scale)
 
                 x = lbfgs(_objective, x0, num_iters=continuous_maxiter,
                           tol=continuous_tolerance)
@@ -760,7 +760,7 @@ J
             h_check[0] += h_ini
             h_check[:-1] += h_dyn_1
             h_check[1:] += h_dyn_2
-            assert np.allclose(h_ref, h_check, atol=1e-3)
+            assert np.allclose(h_ref, h_check)
 
             prms["J_ini"] = J_ini
             prms["J_dyn_11"] = J_dyn_11
