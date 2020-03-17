@@ -1082,7 +1082,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         # lower diagonal blocks are (T-1,D,D):
         # E_q(z) x_{t+1} Sigma_{z_t+1}^{-1} A_{z_t+1} x_t
         off_diag_terms = np.array([inv_Sigma@A for A, inv_Sigma in zip(self.As, inv_Sigmas)])
-        J_dyn_21 = np.sum(Ez[1:,:,None,None] * off_diag_terms[None,:], axis=1)
+        J_dyn_21 = -1 * np.sum(Ez[1:,:,None,None] * off_diag_terms[None,:], axis=1)
 
         return J_ini, J_dyn_11, J_dyn_21, J_dyn_22
 
