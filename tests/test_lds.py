@@ -558,53 +558,59 @@ def test_laplace_em(T=100, N=15, K=3, D=10):
                 # raise
 
 def test_laplace_em_hessian(N=20, K=3, D=10, T=200):
-    slds = ssm.SLDS(N, K, D, transitions="recurrent_only",
-                    dynamics="diagonal_gaussian",
-                    emissions="gaussian_orthog")
-    z, x, y = slds.sample(T)
-    new_slds = ssm.SLDS(N, K, D, transitions="recurrent_only",
-                    dynamics="diagonal_gaussian",
-                    emissions="gaussian_orthog") 
+    for transitions in ["standard", "recurrent", "recurrent_only"]:
+        for emissions in ["gaussian_orthog", "gaussian"]:
+            print("Checking analytical hessian for transitions={},  "
+                  "and emissions={}".format(transitions, emissions)
+            )
+            slds = ssm.SLDS(N, K, D, transitions=transitions,
+                            dynamics="gaussian",
+                            emissions=emissions)
+            z, x, y = slds.sample(T)
+            new_slds = ssm.SLDS(N, K, D, transitions="standard",
+                            dynamics="gaussian",
+                            emissions=emissions) 
 
-    inputs = [np.zeros((T, 0))]
-    masks = [np.ones_like(y)]
-    tags = [None]
-    method = "laplace_em"
-    datas = [y]
-    num_samples = 1
+            inputs = [np.zeros((T, 0))]
+            masks = [np.ones_like(y)]
+            tags = [None]
+            method = "laplace_em"
+            datas = [y]
+            num_samples = 1
 
-    def neg_expected_log_joint_wrapper(x_vec, T, D):
-        x = x_vec.reshape(T, D)
-        return new_slds._laplace_neg_expected_log_joint(datas[0],
-                                                        inputs[0],
-                                                        masks[0],
-                                                        tags[0],
-                                                        x,
-                                                        Ez,
-                                                        Ezzp1,
-                                                        scale=scale)
-    variational_posterior = new_slds._make_variational_posterior("structured_meanfield",
-                                                                 datas, inputs, masks, tags, method)
-    new_slds._fit_laplace_em_discrete_state_update(
-                    variational_posterior, datas, inputs, masks, tags, num_samples)
-    Ez, Ezzp1, _ = variational_posterior.mean_discrete_states[0]
+            def neg_expected_log_joint_wrapper(x_vec, T, D):
+                x = x_vec.reshape(T, D)
+                return new_slds._laplace_neg_expected_log_joint(datas[0],
+                                                                inputs[0],
+                                                                masks[0],
+                                                                tags[0],
+                                                                x,
+                                                                Ez,
+                                                                Ezzp1,
+                                                                scale=scale)
+            variational_posterior = new_slds._make_variational_posterior("structured_meanfield",
+                                                                        datas, inputs, masks, tags, method)
+            new_slds._fit_laplace_em_discrete_state_update(
+                            variational_posterior, datas, inputs, masks, tags, num_samples)
+            Ez, Ezzp1, _ = variational_posterior.mean_discrete_states[0]
 
-    x = variational_posterior.mean_continuous_states[0]
-    scale = x.size
-    J_diag, J_lower_diag = new_slds._laplace_hessian_neg_expected_log_joint(datas[0],
-                                                        inputs[0],
-                                                        masks[0],
-                                                        tags[0],
-                                                        x,
-                                                        Ez,
-                                                        Ezzp1,
-                                                        scale=scale)
-    dense_hessian = scipy.linalg.block_diag(*[x for x in J_diag])
-    dense_hessian[D:, :-D] += scipy.linalg.block_diag(*[x for x in J_lower_diag])
-    dense_hessian[:-D, D:] += scipy.linalg.block_diag(*[x.T for x in J_lower_diag])
+            x = variational_posterior.mean_continuous_states[0]
+            scale = x.size
+            J_diag, J_lower_diag = new_slds._laplace_hessian_neg_expected_log_joint(datas[0],
+                                                                inputs[0],
+                                                                masks[0],
+                                                                tags[0],
+                                                                x,
+                                                                Ez,
+                                                                Ezzp1,
+                                                                scale=scale)
+            dense_hessian = scipy.linalg.block_diag(*[x for x in J_diag])
+            dense_hessian[D:, :-D] += scipy.linalg.block_diag(*[x for x in J_lower_diag])
+            dense_hessian[:-D, D:] += scipy.linalg.block_diag(*[x.T for x in J_lower_diag])
 
-    true_hess = hessian(neg_expected_log_joint_wrapper)(x.reshape(-1), T, D)
-    assert np.allclose(true_hess, dense_hessian)
+            true_hess = hessian(neg_expected_log_joint_wrapper)(x.reshape(-1), T, D)
+            assert np.allclose(true_hess, dense_hessian)
+            print("passed.")
 
 
 if __name__ == "__main__":
