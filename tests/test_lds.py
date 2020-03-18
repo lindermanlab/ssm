@@ -610,7 +610,30 @@ def test_laplace_em_hessian(N=20, K=3, D=10, T=200):
 
             true_hess = hessian(neg_expected_log_joint_wrapper)(x.reshape(-1), T, D)
             assert np.allclose(true_hess, dense_hessian)
-            print("passed.")
+            print("Hessian passed.")
+
+            # Also check that computation of H works.
+            h_dense = dense_hessian @ x.reshape(-1)
+            h_dense = h_dense.reshape(T, D)
+
+            J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs = new_slds._laplace_neg_hessian_params(datas[0],
+                                                                inputs[0],
+                                                                masks[0],
+                                                                tags[0],
+                                                                x,
+                                                                Ez,
+                                                                Ezzp1,
+                                                                scale=scale)
+            h_ini, h_dyn_1, h_dyn_2, h_obs = new_slds._laplace_neg_hessian_params_to_hs(x,
+                J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs
+            )
+
+            h = h_obs.copy()
+            h[0] += h_ini
+            h[:-1] += h_dyn_1
+            h[1:] += h_dyn_2
+
+            assert np.allclose(h, h_dense)
 
 
 if __name__ == "__main__":
