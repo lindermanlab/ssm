@@ -207,6 +207,7 @@ class SLDS(object):
                self.emissions.log_prior()
 
     def sample(self, T, input=None, tag=None, prefix=None, with_noise=True):
+        N = self.N
         K = self.K
         D = (self.D,) if isinstance(self.D, int) else self.D
         M = (self.M,) if isinstance(self.M, int) else self.M
