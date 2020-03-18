@@ -586,8 +586,7 @@ def test_laplace_em_hessian(N=20, K=3, D=10, T=200):
                                                                 tags[0],
                                                                 x,
                                                                 Ez,
-                                                                Ezzp1,
-                                                                scale=scale)
+                                                                Ezzp1)
             variational_posterior = new_slds._make_variational_posterior("structured_meanfield",
                                                                         datas, inputs, masks, tags, method)
             new_slds._fit_laplace_em_discrete_state_update(
@@ -602,8 +601,7 @@ def test_laplace_em_hessian(N=20, K=3, D=10, T=200):
                                                                 tags[0],
                                                                 x,
                                                                 Ez,
-                                                                Ezzp1,
-                                                                scale=scale)
+                                                                Ezzp1)
             dense_hessian = scipy.linalg.block_diag(*[x for x in J_diag])
             dense_hessian[D:, :-D] += scipy.linalg.block_diag(*[x for x in J_lower_diag])
             dense_hessian[:-D, D:] += scipy.linalg.block_diag(*[x.T for x in J_lower_diag])
@@ -622,8 +620,7 @@ def test_laplace_em_hessian(N=20, K=3, D=10, T=200):
                                                                 tags[0],
                                                                 x,
                                                                 Ez,
-                                                                Ezzp1,
-                                                                scale=scale)
+                                                                Ezzp1)
             h_ini, h_dyn_1, h_dyn_2, h_obs = new_slds._laplace_neg_hessian_params_to_hs(x,
                 J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs
             )
