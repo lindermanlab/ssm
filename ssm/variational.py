@@ -393,9 +393,11 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
     def _continuous_entropy(self, expectations):
         negentropy = 0
         Exs, ExxTs, ExxnTs, log_Zs = expectations
-        for prms, Ex, ExxT, ExxnT, log_Z, T in zip(self.params,
-                                                    Exs, ExxTs, ExxnTs,
-                                                    log_Zs, self.Ts):
+        for prms, Ex, ExxT, ExxnT, log_Z in zip(self.params,
+                                                Exs,
+                                                ExxTs,
+                                                ExxnTs,
+                                                log_Zs):
             # Pairwise terms
             negentropy += np.sum(-0.5 * trace_product(prms["J_ini"], ExxT[0]))
             negentropy += np.sum(-0.5 * trace_product(prms["J_dyn_11"], ExxT[:-1]))

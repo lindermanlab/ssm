@@ -219,7 +219,6 @@ class SLDS(object):
             pad = 1
             z = np.zeros(T+1, dtype=int)
             x = np.zeros((T+1,) + D)
-            data = np.zeros((T+1,) + D)
             # input = np.zeros((T+1,) + M) if input is None else input
             input = np.zeros((T+1,) + M) if input is None else np.concatenate((np.zeros((1,) + M), input))
             xmask = np.ones((T+1,) + D, dtype=bool)
@@ -650,31 +649,6 @@ J
         grad_neg_expected_log_joint = grad(self.
                                            _laplace_neg_expected_log_joint,
                                            argnum=4)
-
-        # ref func for testing
-        def hessian_neg_expected_log_joint_ref(x, Ez, Ezzp1, scale=1):
-            T, D = np.shape(x)
-            x_mask = np.ones((T, D), dtype=bool)
-            J_ini, J_dyn_11, J_dyn_21, J_dyn_22 = self.dynamics.\
-                neg_hessian_expected_log_dynamics_prob(Ez, x, input, x_mask, tag)
-            neg_hessian_diag = np.zeros((T, D, D))
-            neg_hessian_diag[0] += J_ini
-            neg_hessian_diag[:-1] += J_dyn_11
-            neg_hessian_diag[1:] += J_dyn_22
-            neg_hessian_lower_diag = J_dyn_21
-
-            neg_hessian_diag[:-1] += self.transitions.\
-                neg_hessian_expected_log_trans_prob(x, input,
-                                                    x_mask, tag, Ezzp1)
-            neg_hessian_diag += self.emissions.\
-                neg_hessian_log_emissions_prob(data, input, mask, tag, x, Ez)
-
-            # The Hessian of the log probability should be *negative* definite
-            # since we are *maximizing* it.
-            neg_hessian_diag += 1e-8 * np.eye(D)
-
-            # Return the scaled negative hessian, which is positive definite
-            return neg_hessian_diag / scale, neg_hessian_lower_diag / scale
 
         # Run Newton's method for each data array to find a
         # Laplace approximation for q(x)
