@@ -739,28 +739,13 @@ J
                           tol=continuous_tolerance)
 
             # Evaluate the Hessian at the mode
-            assert np.all(np.isfinite(obj(x)))
-
-            # TODO: @banting remove before merge
-            J_diag, J_lower_diag = self._laplace_hessian_neg_expected_log_joint(data, input, mask, tag, x, Ez, Ezzp1)
-            J_diag_ref, J_lower_diag_ref = hessian_neg_expected_log_joint_ref(x, Ez, Ezzp1)
-            assert np.allclose(J_diag, J_diag_ref)
-            assert np.allclose(J_lower_diag, J_lower_diag_ref)
+            assert np.all(np.isfinite(obj(x))) 
 
             J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs = self.\
                 _laplace_neg_hessian_params(data, input, mask, tag, x, Ez, Ezzp1)
             h_ini, h_dyn_1, h_dyn_2, h_obs = \
                 self._laplace_neg_hessian_params_to_hs(x, J_ini, J_dyn_11,
                                               J_dyn_21, J_dyn_22, J_obs)
-
-            # Check
-            # TODO: @bantin remove before merge
-            h_ref = symm_block_tridiag_matmul(J_diag_ref, J_lower_diag_ref, x)
-            h_check = h_obs.copy()
-            h_check[0] += h_ini
-            h_check[:-1] += h_dyn_1
-            h_check[1:] += h_dyn_2
-            assert np.allclose(h_ref, h_check)
 
             prms["J_ini"] = J_ini
             prms["J_dyn_11"] = J_dyn_11
