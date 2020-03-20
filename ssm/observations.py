@@ -948,7 +948,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                                         prior_ExxT=J[k],
                                         prior_ExyT=h[k],
                                         Psi0=1,
-                                        nu0=1,
+                                        nu0=1
                                     )
                 As[k] = A_curr
                 bs[k] = b_curr
@@ -1022,7 +1022,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                                     expectations=(ExxT_aug,
                                                   ExyT_aug,
                                                   EyyT[k],
-                                                  pz_equal_k)
+                                                  pz_equal_k),
                                     Psi0=1,
                                     nu0=1
                                     )
