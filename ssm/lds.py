@@ -752,7 +752,7 @@ J
             distn.m_step(expectations, continuous_samples, inputs, xmasks,
                          tags)
         self.dynamics.m_step(expectations, continuous_samples, inputs, xmasks,
-                             tags)
+                             tags, continuous_expectations=continuous_expectations)
 
         # update emissions params. For now, the emissions update will be
         # approximate.
