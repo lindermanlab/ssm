@@ -169,6 +169,24 @@ def ensure_slds_args_not_none(f):
         return f(self, variational_mean, data, input=input, mask=mask, tag=tag, **kwargs)
     return wrapper
 
+def cache_variational_posterior_expectations(f):
+    """Wrapper for ensuring that variational params have not changed.
+
+    Meant only for use with the SLDSStructuredMeanfieldVariationalPosterior.
+    Each of self._params and self._prev_params is a list of dictionaries, one
+    dictionary for each trial. Within each dictionary are keys and values which
+    hold the variational params.
+    """
+    def wrapper(self, **kwargs):
+        for prm_curr, prm_prev in zip(self._params, self._prev_params):
+            for key in prm_curr:
+                val_a = prm_curr[key]
+                val_b = prm_prev.get(key, None)
+                if val_b is None or not np.all(val_a == val_b):
+                    self._cache_expectations()
+                    break
+        return f(self, **kwargs)
+    return wrapper
 
 def logistic(x):
     return 1. / (1 + np.exp(-x))

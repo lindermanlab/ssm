@@ -7,9 +7,12 @@ from ssm.primitives import lds_log_probability, lds_sample, lds_mean, block_trid
                            block_tridiagonal_mean, block_tridiagonal_log_probability
 from ssm.messages import hmm_expected_states, hmm_sample, kalman_info_sample, kalman_info_smoother
 
-from ssm.util import ensure_variational_args_are_lists, trace_product
+from ssm.util import ensure_variational_args_are_lists, trace_product,\
+    cache_variational_posterior_expectations
 
 from autograd.scipy.special import logsumexp
+from warnings import warn
+from copy import deepcopy
 
 
 class VariationalPosterior(object):
@@ -240,6 +243,8 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         self.initial_variance = initial_variance
         self._params = [self._initialize_variational_params(data, input, mask, tag)
                        for data, input, mask, tag in zip(datas, inputs, masks, tags)]
+        self._cache_expectations()
+
 
     def _initialize_variational_params(self, data, input, mask, tag):
         T = data.shape[0]
@@ -256,17 +261,7 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         # mu = J^{-1} h and Sigma = J^{-1}.  Initialize J to inverse of
         # initial variance and scale h accordingly, so the mean is the output
         # of the emissions invert function.
-        # J_diag = np.tile(1.0 / self.initial_variance * np.eye(D)[None, :, :], (T, 1, 1))
-        # J_lower_diag = np.zeros((T-1, D, D))
-        # if self.model.emissions.single_subspace:
-        #     h = (1.0 / self.initial_variance) \
-        #         * self.model.emissions.invert(data, input=input, mask=mask, tag=tag)
-        # else:
-        #     # TODO smarter inversion with multiple subspace!
-        #     warn("Posterior initialization is not implemented for multiple subspaces. \
-        #           A random initialization is used.")
-        #     h = (1.0 / self.initial_variance) * npr.randn(data.shape[0], self.D)
-
+        
         # Initialize q(x) = N(J, h) where J is a block tridiagonal precision matrix
         # and h is the linear potential.  The mapping to mean parameters is
         # mu = J^{-1} h and Sigma = J^{-1}.  We will represent J and h in terms of
@@ -293,20 +288,20 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         h_obs = np.zeros((T, D))
 
         if self.model.emissions.single_subspace:
-            h_obs = self.model.emissions.\
+            h_obs = (1.0 / self.initial_variance) * self.model.emissions.\
                 invert(data, input=input, mask=mask, tag=tag)
+        else:
+            warn("Posterior initialization is not implemented for multiple subspaces. \
+                  A random initialization is used.")
+            h_obs = (1.0 / self.initial_variance) * np.random.randn(data.shape[0], self.D)
+
 
         # Initialize the posterior variance to self.initial_variance * I
         J_ini = np.zeros((D, D))
         J_dyn_11 = np.zeros((T-1, D, D))
         J_dyn_21 = np.zeros((T-1, D, D))
         J_dyn_22 = np.zeros((T-1, D, D))
-        J_obs = np.tile(np.eye(D)[None, :, :], (T, 1, 1))
-
-        # Initialize Expectations. These will be output from the Kalman filter.
-        Exs = np.zeros((T, D))
-        ExxTs = np.zeros((T, D, D))
-        ExxnTs = np.zeros((T, D, D))
+        J_obs = np.tile(1 / self.initial_variance * np.eye(D)[None, :, :], (T, 1, 1))
 
         return dict(pi0=pi0,
                     Ps=Ps,
@@ -320,9 +315,6 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
                     h_dyn_2=h_dyn_2,
                     J_obs=J_obs,
                     h_obs=h_obs,
-                    Exs=Exs,
-                    ExxTs=ExxTs,
-                    ExxnTs=ExxnTs
                     )
 
     @property
@@ -340,64 +332,71 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
                                    prms["J_obs"], prms["h_obs"], 0)
                 for prms in self.params]
 
-
-
     def sample(self):
         return list(zip(self.sample_discrete_states(), self.sample_continuous_states()))
 
-    @property
-    def mean_discrete_states(self):
-        # Now compute the posterior expectations of z under q(z)
-        # NOTE: This returns the log normalizer, E[z_t], E[z_t, z_{t+1}]
-        # TODO: cache expectations and log normalizer here, so that they are
-        # available for computing entropies, but need to be sure that the parameters
-        # haven't changed.
-        return [hmm_expected_states(prms["pi0"], prms["Ps"], prms["log_likes"])
+    def _cache_expectations(self):
+        """Cache continuous and discrete expectations.
+
+        Discrete states are stored as _mean_discrete_states and continuous states
+        as _continuous_expectations. This is so we can re-use the output of hmm_discrete_states()
+        and kalman_info_smoother() if the parameters used to calculate them have not changed.
+        """
+        self._mean_discrete_states = [hmm_expected_states(prms["pi0"], prms["Ps"], prms["log_likes"])
                 for prms in self.params]
+        self._continuous_expectations = [kalman_info_smoother(prms["J_ini"], prms["h_ini"], 0,
+                                     prms["J_dyn_11"], prms["J_dyn_21"], prms["J_dyn_22"],
+                                     prms["h_dyn_1"], prms["h_dyn_2"], 0,
+                                     prms["J_obs"], prms["h_obs"], 0)
+                for prms in self.params]
+        self._prev_params = deepcopy(self._params)
+        
 
     @property
+    @cache_variational_posterior_expectations
+    def mean_discrete_states(self):
+        return self._mean_discrete_states
+
+    @property
+    @cache_variational_posterior_expectations
     def mean_continuous_states(self):
         # Now compute the posterior expectations of z under q(z)
         full_expectations = self.continuous_expectations
         return [exp[1] for exp in full_expectations]
 
     @property
+    @cache_variational_posterior_expectations
     def continuous_expectations(self):
-        return [kalman_info_smoother(prms["J_ini"], prms["h_ini"], 0,
-                                     prms["J_dyn_11"], prms["J_dyn_21"], prms["J_dyn_22"],
-                                     prms["h_dyn_1"], prms["h_dyn_2"], 0,
-                                     prms["J_obs"], prms["h_obs"], 0)
-                for prms in self.params]
+        return self._continuous_expectations
 
     @property
+    @cache_variational_posterior_expectations
     def mean(self):
         return list(zip(self.mean_discrete_states, self.mean_continuous_states))
 
     def _discrete_entropy(self):
         negentropy = 0
-        for prms in self.params:
+        discrete_expectations = self.mean_discrete_states
+        for prms, (Ez, Ezzp1, normalizer) in zip(self.params, discrete_expectations):
             log_pi0 = np.log(prms["pi0"] + 1e-16) - logsumexp(prms["pi0"])
             log_Ps = np.log(prms["Ps"] + 1e-16) - logsumexp(prms["Ps"],
                                                             axis=1,
                                                             keepdims=True)
-            (Ez, Ezzp1, normalizer) = hmm_expected_states(prms["pi0"],
-                                                          prms["Ps"],
-                                                          prms["log_likes"])
-
             negentropy -= normalizer  # -log Z
             negentropy += np.sum(Ez[0] * log_pi0)  # initial factor
             negentropy += np.sum(Ez * prms["log_likes"])  # unitary factors
             negentropy += np.sum(Ezzp1 * log_Ps)  # pairwise factors
         return -negentropy
 
-    def _continuous_entropy(self, expectations):
+    def _continuous_entropy(self):
         negentropy = 0
-        Exs, ExxTs, ExxnTs, log_Zs = expectations
-        for prms, Ex, ExxT, ExxnT, log_Z in zip(self.params,
-                                                Exs,
-                                                ExxTs,
-                                                ExxnTs,
-                                                log_Zs):
+        continuous_expectations = self.continuous_expectations
+        for prms, (log_Z, Ex, smoothed_sigmas, ExxnT) in zip(self.params, continuous_expectations):
+            # Kalman smoother outputs the smoothed covariance matrices. Add 
+            # back the mean to get E[x_t x_{t+1}^T]
+            mumuT = np.swapaxes(Ex[:, None], 2,1) @ Ex[:, None]
+            ExxT = smoothed_sigmas + mumuT
+
             # Pairwise terms
             negentropy += np.sum(-0.5 * trace_product(prms["J_ini"], ExxT[0]))
             negentropy += np.sum(-0.5 * trace_product(prms["J_dyn_11"], ExxT[:-1]))
@@ -415,28 +414,7 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
             negentropy -= log_Z
         return -negentropy
 
-    def _approx_continuous_entropy(self, sample):
-        """Return approximate entropy of the continuous posterior q(x) via sampling.
-
-        This can lead to a lower variance estimate of the gradient of ELBO. See
-        e.g "Sticking the Landing: Simple, Lower-Variance Gradient Estimators
-        for Variational Inference" https://arxiv.org/pdf/1703.09194.pdf
-        """
-        assert isinstance(sample, list) and len(sample) == len(self.datas)
-        negentropy = 0
-        for s, prms in zip(sample, self.params):
-            J_diag = prms["J_obs"]
-            J_lower_diag = prms["J_dyn_21"]
-            h = prms["h_obs"]
-            negentropy += block_tridiagonal_log_probability(
-                s,
-                J_diag,
-                J_lower_diag,
-                h
-            )
-        return -negentropy
-
-    def entropy(self, expectations=None, sample=None):
+    def entropy(self):
         """
         Compute the entropy of the variational posterior distirbution.
 
@@ -460,12 +438,6 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         normalizer of the distribution.
 
         """
-        assert expectations is not None or sample is not None,\
-            "Must provide either sample or expectations to calculate entropy."
-        if expectations is None:
-            continuous_entropy = self._approx_continuous_entropy(sample)
-        else:
-            continuous_entropy = self._continuous_entropy(expectations)
-
+        continuous_entropy = self._continuous_entropy()
         discrete_entropy = self._discrete_entropy()
         return discrete_entropy + continuous_entropy
