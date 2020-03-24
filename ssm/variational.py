@@ -370,7 +370,6 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         return self._continuous_expectations
 
     @property
-    @cache_variational_posterior_expectations
     def mean(self):
         return list(zip(self.mean_discrete_states, self.mean_continuous_states))
 

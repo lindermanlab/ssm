@@ -901,12 +901,12 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         compute an exact M-step using the expected sufficient statistics for the
         continuous states. In this case, we ignore the prior provided by (J0, h0),
         because the calculation is exact. `continuous_expectations` should be a tuple of
-        (Ex, Ey, ExxT, ExyT, EyyT). 
+        (Ex, Ey, ExxT, ExyT, EyyT).
 
         If `continuous_expectations` is None, we use `datas` and `expectations,
         and (optionally) the prior given by (J0, h0). In this case, we estimate the sufficient
         statistics using `datas,` which is typically a single sample of the continuous
-        states from the posterior distribution. 
+        states from the posterior distribution.
         """
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
@@ -926,7 +926,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             ys.append(data[self.lags:])
             Ezs.append(Ez[self.lags:])
         if continuous_expectations is None:
-            # We are performing an approximate m-step here. 
+            # We are performing an approximate m-step here.
             # Collect all the data and pass it to fit_linear_regression.
             if J0 is not None:
                 J = J0
@@ -956,7 +956,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         else:
             # Continuous expectations are given. We are performing an exact
             # m-step. Pass the sufficient statistics to fit_linear_regression
-            # along with the data. 
+            # along with the data.
             # check instead that the expectations given are sufficient for the
             # calculation (in practice this will only be used with lags=1)
             assert self.lags == 1, "Exact parameter update is not yet "\
@@ -966,17 +966,18 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             # Unpack and reformat them for regression.
             # Each element of ExxTs is a 3D array (T x D x D),
             # Each element of ExxnTs is a 3D array (T-1 x D x D)
-            # We need to weight the expectations using Ezs, 
+            # We need to weight the expectations using Ezs,
             # each element of Ezs is (T-1 x K), then sum along the T axis.
-            Exs, ExxTs, ExxnTs = continuous_expectations
             Eu = np.zeros((K, M))
             Ex = np.zeros((K, D))
             Ey = np.zeros((K, D))
             ExxT = np.zeros((K, D, D))
             ExyT = np.zeros((K, D, D))
             EyyT = np.zeros((K, D, D))
-            for (ex, ez, exx, exxn) in zip(Exs, Ezs, ExxTs, ExxnTs):
+            for (ez, (_, ex, smoothed_sigmas, exxn)) in zip(Ezs, continuous_expectations):
                 for k in range(K):
+                    exx = smoothed_sigmas + np.swapaxes(ex[:, None], 2,1) @ ex[:, None]
+
                     Eu[k] += np.sum(inputs[:-1] * ez[:, k, None], axis=0)
                     Ex[k] += np.sum(ex[:-1] * ez[:, k, None], axis=0)
                     Ey[k] += np.sum(ex[1:] * ez[:, k, None], axis=0)
@@ -985,7 +986,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                     EyyT[k] += np.sum(exx[1:, :, :] * ez[:, k, None, None], axis=0)
 
             # Now we need to handle the "augmented" state vector x which includes
-            # the input and bias x_aug = [x u 1]^T, so E[x_aug x_aug^T] = 
+            # the input and bias x_aug = [x u 1]^T, so E[x_aug x_aug^T] =
             # E[ xxT xuT x]
             #  [ uxT uuT u]
             #  [ xT   uT 1]
@@ -1029,7 +1030,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 As[k] = A_curr
                 bs[k] = b_curr
                 Sigmas[k] = sigma_curr
-            
+
         self.As = As
         self.bs = bs
         self.Sigmas = Sigmas

@@ -445,11 +445,7 @@ def test_SLDSStructuredMeanField_entropy():
     post.params[0]["J_obs"] = J_obs
     post.params[0]["h_obs"] = h_obs
 
-    mumuT = np.swapaxes(smoothed_mus[:, None], 2,1) @ smoothed_mus[:, None]
-    ExxT = smoothed_Sigmas + mumuT
-
-    expectations = ([smoothed_mus], [ExxT], [ExxnT], [log_Z])
-    ssm_entropy = post._continuous_entropy(expectations)
+    ssm_entropy = post._continuous_entropy()
     print("reference entropy: {}".format(ref_entropy))
     print("ssm_entropy: {}".format(ssm_entropy))
     assert np.allclose(ref_entropy, ssm_entropy)

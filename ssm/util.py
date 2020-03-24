@@ -275,7 +275,5 @@ def trace_product(A, B):
     assert ndimsA <= 3, "A and B must have 3 or fewer dimensions"
 
     # We'll take the trace along the last two dimensions.
-    dim1 = ndimsA - 1
-    dim2 = ndimsA - 2
-    BT = np.swapaxes(B, dim2, dim1)
-    return np.sum(A*BT, axis=(dim1, dim2))
+    BT = np.swapaxes(B, -1, -2)
+    return np.sum(A*BT, axis=(-1, -2))

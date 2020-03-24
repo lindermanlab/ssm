@@ -659,61 +659,23 @@ J
 
             # Use Newton's method or LBFGS to find the argmax of the expected log joint
             scale = x0.size
+            kwargs = dict(data=data, input=input, mask=mask, tag=tag, Ez=Ez, Ezzp1=Ezzp1, scale=scale)
 
-            def obj(x):
-                return self._laplace_neg_expected_log_joint(data,
-                                                            input,
-                                                            mask,
-                                                            tag,
-                                                            x,
-                                                            Ez,
-                                                            Ezzp1,
-                                                            scale=scale)
+            def _objective(x, iter): return self._laplace_neg_expected_log_joint(x=x, **kwargs)
+            def _grad_obj(x): return grad_neg_expected_log_joint(x=x, **kwargs)
+            def _hess_obj(x): return self._laplace_hessian_neg_expected_log_joint(x=x, **kwargs)
+
             if optimizer == "newton":
-                # Run Newtons method
-
-                def grad_func(x):
-                    return grad_neg_expected_log_joint(data,
-                                                       input, 
-                                                       mask,
-                                                       tag,
-                                                       x,
-                                                       Ez,
-                                                       Ezzp1,
-                                                       scale=scale)
-
-                def hess_func(x):
-                    return self.\
-                        _laplace_hessian_neg_expected_log_joint(data,
-                                                                input,
-                                                                mask,
-                                                                tag,
-                                                                x,
-                                                                Ez,
-                                                                Ezzp1,
-                                                                scale=scale)
                 x = newtons_method_block_tridiag_hessian(
-                    x0, obj, grad_func, hess_func,
+                    x0, lambda x: _objective(x, None), grad_func, hess_func,
                     tolerance=continuous_tolerance, maxiter=continuous_maxiter)
 
             elif optimizer == "lbfgs":
-                # use LBFGS
-                def _objective(params, itr):
-                    x = params
-                    return self._laplace_neg_expected_log_joint(data,
-                                                                input,
-                                                                mask,
-                                                                tag,
-                                                                x,
-                                                                Ez,
-                                                                Ezzp1,
-                                                                scale=scale)
-
                 x = lbfgs(_objective, x0, num_iters=continuous_maxiter,
                           tol=continuous_tolerance)
 
             # Evaluate the Hessian at the mode
-            assert np.all(np.isfinite(obj(x))) 
+            assert np.all(np.isfinite(_objective(x, -1)))
 
             J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs = self.\
                 _laplace_neg_hessian_params(data, input, mask, tag, x, Ez, Ezzp1)
@@ -726,60 +688,45 @@ J
             prms["J_dyn_21"] = J_dyn_21
             prms["J_dyn_22"] = J_dyn_22
             prms["J_obs"] = J_obs
-            
+
             prms["h_ini"] = h_ini
             prms["h_dyn_1"] = h_dyn_1
             prms["h_dyn_2"] = h_dyn_2
             prms["h_obs"] = h_obs
 
-    def _fit_laplace_em_params_update_exact_mstep(
-            self, expectations, continuous_samples,
-            datas, inputs, masks, tags,
-            emission_optimizer, emission_optimizer_maxiter,
-            alpha, continuous_expectations=None,):
+    def _fit_laplace_em_params_update(
+        self, variational_posterior, discrete_expectations, continuous_samples,
+        datas, inputs, masks, tags, emission_optimizer, emission_optimizer_maxiter, alpha
+        ):
 
-        # For now we can only do the exact update with linear-Gaussian dynamics
-        # and lags == 1. This check should pass as long as the dynamics is a
-        # subclass of AutoRegressiveObservations (e.g
-        # AutoRegressiveObservationsNoInput)
-        assert isinstance(self.dynamics, obs.AutoRegressiveObservations), \
-            "We can only do an exact m-step with Linear-Gaussian Dynamics."
-
-        # 3. Update the model parameters exactly
+        # Approximate update of initial distribution  and transition params.
+        # Replace the expectation wrt x with sample from q(x). The parameter
+        # update is partial and depends on alpha.
         xmasks = [np.ones_like(x, dtype=bool) for x in continuous_samples]
         for distn in [self.init_state_distn, self.transitions]:
-            if distn.params == tuple(): continue
-            distn.m_step(expectations, continuous_samples, inputs, xmasks,
-                         tags)
-        self.dynamics.m_step(expectations, continuous_samples, inputs, xmasks,
-                             tags, continuous_expectations=continuous_expectations)
-
-        # update emissions params. For now, the emissions update will be
-        # approximate.
-        # TODO: check if emissions linear gaussian and do exact m-step if so.
-        curr_prms = copy.deepcopy(self.emissions.params)
-        self.emissions.m_step(expectations, continuous_samples,
-                              datas, inputs, masks, tags,
-                              optimizer=emission_optimizer,
-                              maxiter=emission_optimizer_maxiter)
-        self.emissions.params = convex_combination(curr_prms, self.emissions.params, alpha)
-
-
-    def _fit_laplace_em_params_update_stoch_mstep(
-        self, discrete_expectations, continuous_samples,
-        datas, inputs, masks, tags,
-        emission_optimizer, emission_optimizer_maxiter, alpha):
-
-        # 3. Update the model parameters.  Replace the expectation wrt x with sample from q(x).
-        # The parameter update is partial and depends on alpha.
-        xmasks = [np.ones_like(x, dtype=bool) for x in continuous_samples]
-        for distn in [self.init_state_distn, self.transitions, self.dynamics]:
             curr_prms = copy.deepcopy(distn.params)
             if curr_prms == tuple(): continue
             distn.m_step(discrete_expectations, continuous_samples, inputs, xmasks, tags)
             distn.params = convex_combination(curr_prms, distn.params, alpha)
 
-        # update emissions params
+        kwargs = dict(expectations=discrete_expectations,
+                      datas=continuous_samples,
+                      inputs=inputs,
+                      masks=xmasks,
+                      tags=tags
+        )
+        if isinstance(self.dynamics, obs.AutoRegressiveObservations) and self.dynamics.lags == 1:
+            # In this case, we can do an exact M-step on the dynamics by passing
+            # in the true sufficient statistics for the continuous state.
+            kwargs["continuous_expectations"] = variational_posterior.continuous_expectations
+            self.dynamics.m_step(**kwargs)
+        else:
+            # Otherwise, do an approximate m-step by sampling.
+            curr_prms = copy.deepcopy(self.dynamics.params)
+            self.dynamics.m_step(**kwargs)
+            self.dynamics.params = convex_combination(curr_prms, self.dynamics.params, alpha)
+
+        # Update emissions params. This is always approximate (at least for now).
         curr_prms = copy.deepcopy(self.emissions.params)
         self.emissions.m_step(discrete_expectations, continuous_samples,
                               datas, inputs, masks, tags,
@@ -787,35 +734,13 @@ J
                               maxiter=emission_optimizer_maxiter)
         self.emissions.params = convex_combination(curr_prms, self.emissions.params, alpha)
 
-    def _fit_laplace_em_params_update_sgd(
-        self, variational_posterior, datas, inputs, masks, tags,
-        emission_optimizer="adam", emission_optimizer_maxiter=20):
-
-        # 3. Update the model parameters.
-        continuous_expectations = variational_posterior.mean_continuous_states
-        xmasks = [np.ones_like(x, dtype=bool) for x in continuous_expectations]
-
-        T = sum([data.shape[0] for data in datas])
-        def _objective(params, itr):
-            self.params = params
-            obj = self._laplace_em_elbo(variational_posterior, datas, inputs, masks, tags)
-            return -obj / T
-
-        # Optimize parameters
-        optimizer = dict(sgd=sgd, adam=adam, rmsprop=rmsprop, bfgs=bfgs, lbfgs=lbfgs)[emission_optimizer]
-        optimizer_state = self.p_optimizer_state if hasattr(self, "p_optimizer_state") else None
-        self.params, self.p_optimizer_state = \
-            optimizer(_objective, self.params, num_iters=emission_optimizer_maxiter,
-                      state=optimizer_state, full_output=True, step_size=0.01)
-
     def _laplace_em_elbo(self,
                          variational_posterior,
                          datas,
                          inputs,
                          masks,
                          tags,
-                         n_samples=1,
-                         expectations=None):
+                         n_samples=1):
 
         def estimate_expected_log_joint(n_samples):
             exp_log_joint = 0.0
@@ -844,12 +769,7 @@ J
                     exp_log_joint += np.sum(Ez * log_likes)
             return exp_log_joint / n_samples
 
-        # If expectations are given we can do an exact entropy calculation.
-        # Otherwise, entropy is estimated via samples.
-        elbo = estimate_expected_log_joint(n_samples)
-        elbo += variational_posterior.entropy()
-
-        return elbo
+        return estimate_expected_log_joint(n_samples) + variational_posterior.entropy()
 
 
 
@@ -862,10 +782,8 @@ J
                         continuous_maxiter=100,
                         emission_optimizer="lbfgs",
                         emission_optimizer_maxiter=100,
-                        parameters_update=None,
                         alpha=0.5,
-                        learning=True,
-                        exact_ELBO=True):
+                        learning=True):
         """
         Fit an approximate posterior p(z, x | y) \approx q(z) q(x).
         Perform block coordinate ascent on q(z) followed by q(x).
@@ -877,14 +795,6 @@ J
         pbar = trange(num_iters)
         pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
 
-        # Default to an exact parameters update when possible.
-        if parameters_update is None:
-            if isinstance(self.dynamics, obs.AutoRegressiveObservations):
-                if self.dynamics.lags == 1:
-                    parameters_update = "exact_mstep"
-            else:
-                parameters_update = "stoch_mstep"
-
         for itr in pbar:
             # 1. Update the discrete state posterior q(z) if K>1
             if self.K > 1:
@@ -893,42 +803,17 @@ J
             discrete_expectations = variational_posterior.mean_discrete_states
 
             # 2. Update the continuous state posterior q(x)
-            #    TODO: We are throwing away the log-normalizer from
-            #    variational_posterior.mean_discrete_states() when we coud be
-            #    using it in the ELBO calculations.
             self._fit_laplace_em_continuous_state_update(
                 discrete_expectations, variational_posterior, datas, inputs, masks, tags,
                 continuous_optimizer, continuous_tolerance, continuous_maxiter)
 
             continuous_samples = variational_posterior.sample_continuous_states()
-            
-            # Update parameters
-            if learning and parameters_update=="exact_mstep":
-                Ex, ExxT, ExyT = [], [], []
-                log_Z = None
-                # Call Kalman smoother to get expectations for params update
-                # and/or entropy calculation in ELBO.
-                for prms in copy.deepcopy(variational_posterior.params):
-                    # Set the log normalizers to zero since we will not use the
-                    # value of the log-normalizer output. Should not affect
-                    # expected state or covariance calculation.
-                    log_Z_dyn, log_Z_ini, log_Z_obs = 0, 0, 0
-                    log_Z, smoothed_mus, smoothed_sigmas, ExxnT = \
-                        kalman_info_smoother(
-                            prms["J_ini"], prms["h_ini"], log_Z_ini,
-                            prms["J_dyn_11"], prms["J_dyn_21"],
-                            prms["J_dyn_22"], prms["h_dyn_1"], prms["h_dyn_2"], log_Z_dyn,
-                            prms["J_obs"], prms["h_obs"], log_Z_obs
-                        )
-                    Ex.append(smoothed_mus)
-                    mumuT = np.swapaxes(smoothed_mus[:, None], 2,1) @ smoothed_mus[:, None]
-                    ExxT.append(smoothed_sigmas + mumuT)
-                    ExyT.append(ExxnT)
 
-                self._fit_laplace_em_params_update_exact_mstep(
+            # Update parameters
+            if learning:
+                self._fit_laplace_em_params_update(
+                    variational_posterior,
                     discrete_expectations,
-                    # In the exact, the sample of the continuous sates
-                    # won't be needed, but we pass it for consistency.
                     continuous_samples,
                     datas,
                     inputs,
@@ -936,61 +821,13 @@ J
                     tags,
                     emission_optimizer,
                     emission_optimizer_maxiter,
-                    alpha,
-                    continuous_expectations=(Ex, ExxT, ExyT),
-                    )
+                    alpha)
 
-            # Default is partial M-step given a sample from q(x)
-            elif learning and parameters_update=="stoch_mstep":
-                self._fit_laplace_em_params_update_stoch_mstep(
-                    discrete_expectations, continuous_samples, datas, inputs, masks, tags,
-                    emission_optimizer, emission_optimizer_maxiter, alpha)
-
-            # Alternative is SGD on all parameters with samples from q(x)
-            elif learning and parameters_update=="sgd":
-                self._fit_laplace_em_params_update_sgd(
-                    variational_posterior, datas, inputs, masks, tags,
-                    emission_optimizer="adam",
-                    emission_optimizer_maxiter=emission_optimizer_maxiter)
-
-            elif learning:
-                raise ValueError("Invalid argument for parameters_update: {}. " \
-                    "Must be one of: stoch_mstep, exact_mstep, sgd.".format(parameters_update))
-
-            # 4. Compute ELBO. For now, we are wasting a lot of computation
-            # by re-running the Kalman smoother. This is just a first pass to 
-            # get functionality. TODO: Fix!!
-            Ex, ExxT, ExyT, log_Zs = [], [], [], []
-            for prms in copy.deepcopy(variational_posterior.params):
-                # Set the log normalizers to zero since we will not use the
-                # value of the log-normalizer output. Should not affect
-                # expected state or covariance calculation.
-                log_Z_dyn, log_Z_ini, log_Z_obs = 0, 0, 0
-                log_Z, smoothed_mus, smoothed_sigmas, ExxnT = \
-                    kalman_info_smoother(
-                        prms["J_ini"], prms["h_ini"], log_Z_ini,
-                        prms["J_dyn_11"], prms["J_dyn_21"],
-                        prms["J_dyn_22"], prms["h_dyn_1"], prms["h_dyn_2"], log_Z_dyn,
-                        prms["J_obs"], prms["h_obs"], log_Z_obs
-                    )
-                Ex.append(smoothed_mus)
-                mumuT = np.swapaxes(smoothed_mus[:, None], 2,1) @ smoothed_mus[:, None]
-                ExxT.append(smoothed_sigmas + mumuT)
-                ExyT.append(ExxnT)
-                log_Zs.append(log_Z)
-            if exact_ELBO:
-                elbo = self._laplace_em_elbo(variational_posterior,
-                                            datas,
-                                            inputs,
-                                            masks,
-                                            tags,
-                                            expectations=(Ex, ExxT, ExyT, log_Zs))
-            else:
-                elbo = self._laplace_em_elbo(variational_posterior,
-                                            datas,
-                                            inputs,
-                                            masks,
-                                            tags)
+            elbo = self._laplace_em_elbo(variational_posterior,
+                                        datas,
+                                        inputs,
+                                        masks,
+                                        tags)
             elbos.append(elbo)
             pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
 
