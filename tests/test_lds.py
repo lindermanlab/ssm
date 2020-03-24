@@ -446,8 +446,8 @@ def test_lds_log_probability_perf(T=1000, D=10, N_iter=10):
 def test_lds_sample_and_fit(T=100, N=15, K=3, D=10):
     # method_name --> allowable posteriors
     methods = {
-        "svi": ["mf", "lds"],
-    #    "laplace_em": ["structured_meanfield"]
+        "bbvi": ["mf", "lds"],
+        "laplace_em": ["structured_meanfield"]
     }
 
     # Test SLDS and RSLDS
