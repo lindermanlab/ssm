@@ -844,21 +844,10 @@ J
                     exp_log_joint += np.sum(Ez * log_likes)
             return exp_log_joint / n_samples
 
-        def estimate_entropy(n_samples):
-            entropy = 0.0
-            for sample in range(n_samples):
-                continuous_samples = variational_posterior.\
-                    sample_continuous_states()
-                entropy += variational_posterior.entropy(sample=continuous_samples)
-            return entropy / n_samples
-
         # If expectations are given we can do an exact entropy calculation.
         # Otherwise, entropy is estimated via samples.
         elbo = estimate_expected_log_joint(n_samples)
-        if expectations is None:
-            elbo += estimate_entropy(n_samples)
-        else:
-            elbo += variational_posterior.entropy(expectations=expectations)
+        elbo += variational_posterior.entropy()
 
         return elbo
 
