@@ -397,6 +397,7 @@ class GaussianEmissions(_GaussianEmissionsMixin, _LinearEmissions):
     def m_step(self, discrete_expectations, continuous_expectations,
                datas, inputs, masks, tags,
                optimizer="bfgs", maxiter=100, **kwargs):
+
         if self.single_subspace:
             # Return exact m-step updates for C, F, d, and inv_etas
             # stack across all datas

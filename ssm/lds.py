@@ -4,15 +4,12 @@ from tqdm.auto import trange
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
-from autograd.tracer import getval
-from autograd.misc import flatten
 from autograd import value_and_grad, grad
 
-from ssm.optimizers import adam_step, rmsprop_step, sgd_step, lbfgs, bfgs, \
-    convex_combination, adam, sgd, rmsprop, \
-    newtons_method_block_tridiag_hessian
-from ssm.primitives import hmm_normalizer, symm_block_tridiag_matmul
-from ssm.messages import hmm_expected_states, viterbi, kalman_info_smoother
+from ssm.optimizers import adam_step, rmsprop_step, sgd_step, lbfgs, \
+    convex_combination, newtons_method_block_tridiag_hessian
+from ssm.primitives import hmm_normalizer
+from ssm.messages import hmm_expected_states, viterbi
 from ssm.util import ensure_args_are_lists, \
     ensure_slds_args_not_none, ensure_variational_args_are_lists
 
@@ -280,12 +277,11 @@ class SLDS(object):
 
     @ensure_args_are_lists
     def log_probability(self, datas, inputs=None, masks=None, tags=None):
-        warnings.warn("Cannot compute exact marginal log probability for the SLDS. "
-                      "the ELBO instead.")
+        warnings.warn("Cannot compute exact marginal log probability for the SLDS.")
         return np.nan
 
     @ensure_variational_args_are_lists
-    def elbo(self, variational_posterior, datas, inputs=None, masks=None, tags=None, n_samples=1):
+    def _bbvi_elbo(self, variational_posterior, datas, inputs=None, masks=None, tags=None, n_samples=1):
         """
         Lower bound on the marginal likelihood p(y | theta)
         using variational posterior q(x; phi) where phi = variational_params
@@ -316,88 +312,11 @@ class SLDS(object):
 
         return elbo / n_samples
 
-    @ensure_variational_args_are_lists
-    def _surrogate_elbo(self, variational_posterior, datas, inputs=None, masks=None, tags=None,
-        alpha=0.75, **kwargs):
+    def _fit_bbvi(self, variational_posterior, datas, inputs, masks, tags,
+                  learning=True, optimizer="adam", num_iters=100, **kwargs):
         """
-        Lower bound on the marginal likelihood p(y | gamma)
-        using variational posterior q(x; phi) where phi = variational_params
-        and gamma = emission parameters.  As part of computing this objective,
-        we optimize q(z | x) and take a natural gradient step wrt theta, the
-        parameters of the dynamics model.
-
-        Note that the surrogate ELBO is a lower bound on the ELBO above.
-           E_p(z | x, y)[log p(z, x, y)]
-           = E_p(z | x, y)[log p(z, x, y) - log p(z | x, y) + log p(z | x, y)]
-           = E_p(z | x, y)[log p(x, y) + log p(z | x, y)]
-           = log p(x, y) + E_p(z | x, y)[log p(z | x, y)]
-           = log p(x, y) -H[p(z | x, y)]
-          <= log p(x, y)
-        with equality only when p(z | x, y) is atomic.  The gap equals the
-        entropy of the posterior on z.
-        """
-        # log p(theta)
-        elbo = self.log_prior()
-
-        # Sample x from the variational posterior
-        xs = variational_posterior.sample()
-
-        # Inner optimization: find the true posterior p(z | x, y; theta).
-        # Then maximize the inner ELBO wrt theta,
-        #
-        #    E_p(z | x, y; theta_fixed)[log p(z, x, y; theta).
-        #
-        # This can be seen as a natural gradient step in theta
-        # space.  Note: we do not want to compute gradients wrt x or the
-        # emissions parameters backward throgh this optimization step,
-        # so we unbox them first.
-        xs_unboxed = [getval(x) for x in xs]
-        emission_params_boxed = self.emissions.params
-        flat_emission_params_boxed, unflatten = flatten(emission_params_boxed)
-        self.emissions.params = unflatten(getval(flat_emission_params_boxed))
-
-        # E step: compute the true posterior p(z | x, y, theta_fixed) and
-        # the necessary expectations under this posterior.
-        expectations = [self.expected_states(x, data, input, mask, tag)
-                        for x, data, input, mask, tag
-                        in zip(xs_unboxed, datas, inputs, masks, tags)]
-
-        # M step: maximize expected log joint wrt parameters
-        # Note: Only do a partial update toward the M step for this sample of xs
-        x_masks = [np.ones_like(x, dtype=bool) for x in xs_unboxed]
-        for distn in [self.init_state_distn, self.transitions, self.dynamics]:
-            curr_prms = copy.deepcopy(distn.params)
-            distn.m_step(expectations, xs_unboxed, inputs, x_masks, tags, **kwargs)
-            distn.params = convex_combination(curr_prms, distn.params, alpha)
-
-        # Box up the emission parameters again before computing the ELBO
-        self.emissions.params = emission_params_boxed
-
-        # Compute expected log likelihood E_q(z | x, y) [log p(z, x, y; theta)]
-        for (Ez, Ezzp1, _), x, x_mask, data, mask, input, tag in \
-            zip(expectations, xs, x_masks, datas, masks, inputs, tags):
-
-            # Compute expected log likelihood (inner ELBO)
-            log_pi0 = self.init_state_distn.log_initial_state_distn
-            log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
-            log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
-            log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
-
-            elbo += np.sum(Ez[0] * log_pi0)
-            elbo += np.sum(Ezzp1 * log_Ps)
-            elbo += np.sum(Ez * log_likes)
-
-        # -log q(x)
-        elbo -= variational_posterior.log_density(xs)
-        assert np.isfinite(elbo)
-
-        return elbo
-
-    def _fit_svi(self, variational_posterior, datas, inputs, masks, tags,
-                 learning=True, optimizer="adam", num_iters=100, **kwargs):
-        """
-        Fit with stochastic variational inference using a
-        mean field Gaussian approximation for the latent states x_{1:T}.
+        Fit with black box variational inference using a
+        Gaussian approximation for the latent states x_{1:T}.
         """
         # Define the objective (negative ELBO)
         T = sum([data.shape[0] for data in datas])
@@ -407,7 +326,7 @@ class SLDS(object):
             else:
                 variational_posterior.params = params
 
-            obj = self.elbo(variational_posterior, datas, inputs, masks, tags)
+            obj = self._bbvi_elbo(variational_posterior, datas, inputs, masks, tags)
             return -obj / T
 
         # Initialize the parameters
@@ -442,75 +361,6 @@ class SLDS(object):
 
         return elbos
 
-    def _fit_variational_em(self, variational_posterior, datas, inputs, masks, tags,
-                 learning=True, alpha=.75, optimizer="adam", num_iters=100, **kwargs):
-        """
-        Let gamma denote the emission parameters and theta denote the transition
-        and initial discrete state parameters. This is a mix of EM and SVI:
-            1. Sample x ~ q(x; phi)
-            2. Compute L(x, theta') = E_p(z | x, theta)[log p(x, z; theta')]
-            3. Set theta = (1 - alpha) theta + alpha * argmax L(x, theta')
-            4. Set gamma = gamma + eps * nabla log p(y | x; gamma)
-            5. Set phi = phi + eps * dx/dphi * d/dx [L(x, theta) + log p(y | x; gamma) - log q(x; phi)]
-        """
-        # Optimize the standard ELBO when updating gamma (emissions params)
-        # and phi (variational params)
-        T = sum([data.shape[0] for data in datas])
-        def _objective(params, itr):
-            if learning:
-                self.emissions.params, variational_posterior.params = params
-            else:
-                variational_posterior.params = params
-
-            obj = self._surrogate_elbo(variational_posterior, datas, inputs, masks, tags, **kwargs)
-            return -obj / T
-
-        # Initialize the parameters
-        if learning:
-            params = (self.emissions.params, variational_posterior.params)
-        else:
-            params = variational_posterior.params
-
-        # Set up the progress bar
-        elbos = [-_objective(params, 0) * T]
-        pbar = trange(num_iters)
-        pbar.set_description("Surrogate ELBO: {:.1f}".format(elbos[0]))
-
-        # Run the optimizer
-        step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
-        state = None
-        for itr in pbar:
-            # Update the emission and variational posterior parameters
-            params, val, g, state = step(value_and_grad(_objective), params, itr, state)
-            elbos.append(-val * T)
-
-            # Update progress bar
-            pbar.set_description("Surrogate ELBO: {:.1f}".format(elbos[-1]))
-            pbar.update()
-
-        # Save the final emission and variational parameters
-        if learning:
-            self.emissions.params, variational_posterior.params = params
-        else:
-            variational_posterior.params = params
-
-        return elbos
-
-    def _fit_variational_em_with_conjugate_updates(\
-            self, variational_posterior, datas, inputs, masks, tags,
-            learning=True, alpha=.75, optimizer="adam", num_iters=100, **kwargs):
-        """
-        In the special case where the dynamics and observations are both linear
-        Gaussian, we can perform mean field coordinate ascent in a posterior
-        approximation of the form,
-
-            p(x, z | y) \approx q(x) q(z)
-J
-        where q(x) is a linear Gaussian dynamical system and q(z) is a hidden
-        Markov model.
-        """
-        raise NotImplementedError
-
     def _fit_laplace_em_discrete_state_update(
         self, variational_posterior, datas,
         inputs, masks, tags,
@@ -526,29 +376,37 @@ J
         #    - Monte Carlo approximate the log transition matrices
         #    - Compute the expected log likelihoods (i.e. log dynamics probs)
         #    - If emissions depend on z, compute expected emission likelihoods
-        for prms, x_samples, data, input, mask, tag in \
-            zip(variational_posterior.params, x_sampless, datas, inputs, masks, tags):
+        discrete_state_params = []
+        for x_samples, data, input, mask, tag in \
+            zip(x_sampless, datas, inputs, masks, tags):
 
             # Make a mask for the continuous states
             x_mask = np.ones_like(x_samples[0], dtype=bool)
 
             # Compute expected log initial distribution, transition matrices, and likelihoods
-            prms["pi0"] = np.mean(
+            pi0 = np.mean(
                 [self.init_state_distn.initial_state_distn
                  for x in x_samples], axis=0)
 
-            prms["Ps"] = np.mean(
+            Ps = np.mean(
                 [self.transitions.transition_matrices(x, input, x_mask, tag)
                  for x in x_samples], axis=0)
 
-            prms["log_likes"] = np.mean(
+            log_likes = np.mean(
                 [self.dynamics.log_likelihoods(x, input, x_mask, tag)
                  for x in x_samples], axis=0)
 
             if not self.emissions.single_subspace:
-                prms["log_likes"] += np.mean(
+                log_likes += np.mean(
                     [self.emissions.log_likelihoods(data, input, mask, tag, x)
                      for x in x_samples], axis=0)
+
+            discrete_state_params.append(dict(pi0=pi0,
+                                              Ps=Ps,
+                                              log_likes=log_likes))
+
+        # Update the variational parameters
+        variational_posterior.discrete_state_params = discrete_state_params
 
     # Compute the expected log joint
     def _laplace_neg_expected_log_joint(self,
@@ -624,7 +482,6 @@ J
         return h_ini, h_dyn_1, h_dyn_2, h_obs
 
     def _fit_laplace_em_continuous_state_update(self,
-                                                discrete_expectations,
                                                 variational_posterior,
                                                 datas,
                                                 inputs,
@@ -642,37 +499,35 @@ J
         #       - Check for convergence of x'
         #    - Evaluate the J(x*) at the optimal x*
 
-        # allow for using Newton's method or LBFGS to find x*
-        optimizer = dict(newton="newton", lbfgs="lbfgs")[continuous_optimizer]
-
-        # We'll need the gradient of the expected log joint wrt x
-        grad_neg_expected_log_joint = grad(self.
-                                           _laplace_neg_expected_log_joint,
-                                           argnum=4)
-
-        # Run Newton's method for each data array to find a
-        # Laplace approximation for q(x)
+        # Optimize the expected log joint for each data array to find the mode
+        # and the curvature around the mode.  This gives a  Laplace approximation
+        # for q(x).
+        continuous_state_params = []
         x0s = variational_posterior.mean_continuous_states
         for prms, (Ez, Ezzp1, _), x0, data, input, mask, tag in \
-            zip(variational_posterior.params, discrete_expectations, x0s,
-                datas, inputs, masks, tags):
+            zip(variational_posterior.params,
+                variational_posterior.discrete_expectations,
+                x0s, datas, inputs, masks, tags):
 
             # Use Newton's method or LBFGS to find the argmax of the expected log joint
             scale = x0.size
             kwargs = dict(data=data, input=input, mask=mask, tag=tag, Ez=Ez, Ezzp1=Ezzp1, scale=scale)
 
             def _objective(x, iter): return self._laplace_neg_expected_log_joint(x=x, **kwargs)
-            def _grad_obj(x): return grad_neg_expected_log_joint(x=x, **kwargs)
+            def _grad_obj(x): return grad(self._laplace_neg_expected_log_joint, argnum=4)(x=x, **kwargs)
             def _hess_obj(x): return self._laplace_hessian_neg_expected_log_joint(x=x, **kwargs)
 
-            if optimizer == "newton":
+            if continuous_optimizer == "newton":
                 x = newtons_method_block_tridiag_hessian(
-                    x0, lambda x: _objective(x, None), grad_func, hess_func,
+                    x0, lambda x: _objective(x, None), _grad_obj, _hess_obj,
                     tolerance=continuous_tolerance, maxiter=continuous_maxiter)
 
-            elif optimizer == "lbfgs":
+            elif continuous_optimizer  == "lbfgs":
                 x = lbfgs(_objective, x0, num_iters=continuous_maxiter,
                           tol=continuous_tolerance)
+
+            else:
+                raise Exception("Invalid continuous_optimizer: {}".format(continuous_optimizer ))
 
             # Evaluate the Hessian at the mode
             assert np.all(np.isfinite(_objective(x, -1)))
@@ -683,21 +538,32 @@ J
                 self._laplace_neg_hessian_params_to_hs(x, J_ini, J_dyn_11,
                                               J_dyn_21, J_dyn_22, J_obs)
 
-            prms["J_ini"] = J_ini
-            prms["J_dyn_11"] = J_dyn_11
-            prms["J_dyn_21"] = J_dyn_21
-            prms["J_dyn_22"] = J_dyn_22
-            prms["J_obs"] = J_obs
+            continuous_state_params.append(dict(J_ini=J_ini,
+                                                J_dyn_11=J_dyn_11,
+                                                J_dyn_21=J_dyn_21,
+                                                J_dyn_22=J_dyn_22,
+                                                J_obs=J_obs,
+                                                h_ini=h_ini,
+                                                h_dyn_1=h_dyn_1,
+                                                h_dyn_2=h_dyn_2,
+                                                h_obs=h_obs))
 
-            prms["h_ini"] = h_ini
-            prms["h_dyn_1"] = h_dyn_1
-            prms["h_dyn_2"] = h_dyn_2
-            prms["h_obs"] = h_obs
+        # Update the variational posterior params
+        variational_posterior.continuous_state_params = continuous_state_params
 
-    def _fit_laplace_em_params_update(
-        self, variational_posterior, discrete_expectations, continuous_samples,
-        datas, inputs, masks, tags, emission_optimizer, emission_optimizer_maxiter, alpha
-        ):
+    def _fit_laplace_em_params_update(self,
+                                      variational_posterior,
+                                      datas,
+                                      inputs,
+                                      masks,
+                                      tags,
+                                      emission_optimizer,
+                                      emission_optimizer_maxiter,
+                                      alpha):
+
+        # Compute necessary expectations either analytically or via samples
+        continuous_samples = variational_posterior.sample_continuous_states()
+        discrete_expectations = variational_posterior.discrete_expectations
 
         # Approximate update of initial distribution  and transition params.
         # Replace the expectation wrt x with sample from q(x). The parameter
@@ -748,7 +614,7 @@ J
 
                 # sample continuous states
                 continuous_samples = variational_posterior.sample_continuous_states()
-                discrete_expectations = variational_posterior.mean_discrete_states
+                discrete_expectations = variational_posterior.discrete_expectations
 
                 # log p(theta)
                 exp_log_joint += self.log_prior()
@@ -770,8 +636,6 @@ J
             return exp_log_joint / n_samples
 
         return estimate_expected_log_joint(n_samples) + variational_posterior.entropy()
-
-
 
     def _fit_laplace_em(self, variational_posterior, datas,
                         inputs=None, masks=None, tags=None,
@@ -800,35 +664,20 @@ J
             if self.K > 1:
                 self._fit_laplace_em_discrete_state_update(
                     variational_posterior, datas, inputs, masks, tags, num_samples)
-            discrete_expectations = variational_posterior.mean_discrete_states
 
             # 2. Update the continuous state posterior q(x)
             self._fit_laplace_em_continuous_state_update(
-                discrete_expectations, variational_posterior, datas, inputs, masks, tags,
+                variational_posterior, datas, inputs, masks, tags,
                 continuous_optimizer, continuous_tolerance, continuous_maxiter)
-
-            continuous_samples = variational_posterior.sample_continuous_states()
 
             # Update parameters
             if learning:
                 self._fit_laplace_em_params_update(
-                    variational_posterior,
-                    discrete_expectations,
-                    continuous_samples,
-                    datas,
-                    inputs,
-                    masks,
-                    tags,
-                    emission_optimizer,
-                    emission_optimizer_maxiter,
-                    alpha)
+                    variational_posterior, datas, inputs, masks, tags,
+                    emission_optimizer, emission_optimizer_maxiter, alpha)
 
-            elbo = self._laplace_em_elbo(variational_posterior,
-                                        datas,
-                                        inputs,
-                                        masks,
-                                        tags)
-            elbos.append(elbo)
+            elbos.append(self._laplace_em_elbo(
+                variational_posterior, datas, inputs, masks, tags))
             pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
 
         return elbos
@@ -876,42 +725,24 @@ J
             **kwargs):
 
         """
-        Fitting methods for an arbitrary switching LDS:
+        There are many possible algorithms one could run.  We have only implemented
+        two here:
+            - Laplace variational EM, i.e. a structured mean field algorithm where
+              we approximate the posterior on continuous states with a Gaussian
+              using the mode of the expected log likelihood and the curvature around
+              the mode.  This seems to work well for a variety of nonconjugate models,
+              and it has the advantage of relaxing to exact EM for the case of
+              Gaussian linear dynamical systems.
 
-        1. Black box variational inference (bbvi/svi): stochastic gradient ascent
-           on the evidence lower bound, collapsing out the discrete states and
-           maintaining a variational posterior over the continuous states only.
-
-           Pros: simple and broadly applicable.  easy to implement.
-           Cons: doesn't leverage model structure.  slow to converge.
-
-        2. Structured mean field: Maintain variational factors q(z) and q(x).
-           Update them using block mean field coordinate ascent, if we have a
-           Gaussian emission model and linear Gaussian dynamics, or using
-           a Laplace approximation for nonconjugate models.
-
-        In the future, we could also consider some other possibilities, like:
-
-        3. Particle EM: run a (Rao-Blackwellized) particle filter targeting
-           the posterior distribution of the continuous latent states and
-           use its weighted trajectories to get the discrete states and perform
-           a Monte Carlo M-step.
-
-        4. Gibbs sampling: As above, if we have a conjugate emission and
-           dynamics model we can do block Gibbs sampling of the discrete and
-           continuous states.
+            - Black box variational inference (BBVI) with mean field or structured
+              mean field variational posteriors.  This doesn't seem like a very
+              effective fitting algorithm, but it is quite general.
         """
-
         # Specify fitting methods
-        _fitting_methods = dict(svi=self._fit_svi,
-                                bbvi=self._fit_svi,
-                                laplace_em=self._fit_laplace_em)
+        _fitting_methods = dict(laplace_em=self._fit_laplace_em,
+                                bbvi=self._fit_bbvi)
 
         # Deprecate "svi" as a method
-        if method == "svi":
-            warnings.warn("SLDS fitting method 'svi' will be renamed 'bbvi' in future releases.",
-                          category=DeprecationWarning)
-
         if method not in _fitting_methods:
             raise Exception("Invalid method: {}. Options are {}".\
                             format(method, _fitting_methods.keys()))
@@ -943,9 +774,7 @@ J
                  posterior is a variational posterior object as defined in variational.py
         """
         # Specify fitting methods
-        _fitting_methods = dict(svi=self._fit_svi,
-                                bbvi=self._fit_svi,
-                                vem=self._fit_variational_em,
+        _fitting_methods = dict(bbvi=self._fit_bbvi,
                                 laplace_em=self._fit_laplace_em)
 
         if method not in _fitting_methods:
@@ -1066,32 +895,6 @@ class LDS(SLDS):
     def log_probability(self, datas, inputs=None, masks=None, tags=None):
         warnings.warn("Log probability of LDS is not yet implemented.")
         return np.nan
-
-    @ensure_variational_args_are_lists
-    def elbo(self, variational_posterior, datas, inputs=None, masks=None, tags=None, n_samples=1):
-        """
-        Lower bound on the marginal likelihood p(y | theta)
-        using variational posterior q(x; phi) where phi = variational_params
-        """
-        elbo = 0
-        for sample in range(n_samples):
-            # Sample x from the variational posterior
-            xs = variational_posterior.sample()
-
-            # log p(theta)
-            elbo += self.log_prior()
-
-            # Compute log p(y, x | theta)
-            for x, data, input, mask, tag in zip(xs, datas, inputs, masks, tags):
-                x_mask = np.ones_like(x, dtype=bool)
-                elbo += np.sum(self.dynamics.log_likelihoods(x, input, x_mask, tag))
-                elbo += np.sum(self.emissions.log_likelihoods(data, input, mask, tag, x))
-
-            # -log q(x)
-            elbo -= variational_posterior.log_density(xs)
-            assert np.isfinite(elbo)
-
-        return elbo / n_samples
 
     def sample(self, T, input=None, tag=None, prefix=None, with_noise=True):
         (_, x, y) = super().sample(T, input=input, tag=tag, prefix=prefix, with_noise=with_noise)

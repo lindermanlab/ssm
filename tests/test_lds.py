@@ -591,7 +591,7 @@ def test_laplace_em_hessian(N=20, K=3, D=10, T=200):
                                                                         datas, inputs, masks, tags, method)
             new_slds._fit_laplace_em_discrete_state_update(
                             variational_posterior, datas, inputs, masks, tags, num_samples)
-            Ez, Ezzp1, _ = variational_posterior.mean_discrete_states[0]
+            Ez, Ezzp1, _ = variational_posterior.discrete_expectations[0]
 
             x = variational_posterior.mean_continuous_states[0]
             scale = x.size

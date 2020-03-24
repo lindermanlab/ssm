@@ -1,18 +1,13 @@
 import autograd.numpy as np
 import autograd.numpy.random as npr
 
-from ssm.emissions import _LinearEmissions
-from ssm.preprocessing import interpolate_data
-from ssm.primitives import lds_log_probability, lds_sample, lds_mean, block_tridiagonal_sample, \
-                           block_tridiagonal_mean, block_tridiagonal_log_probability
+from ssm.primitives import lds_log_probability, lds_sample, lds_mean
 from ssm.messages import hmm_expected_states, hmm_sample, kalman_info_sample, kalman_info_smoother
 
-from ssm.util import ensure_variational_args_are_lists, trace_product,\
-    cache_variational_posterior_expectations
+from ssm.util import ensure_variational_args_are_lists, trace_product
 
 from autograd.scipy.special import logsumexp
 from warnings import warn
-from copy import deepcopy
 
 
 class VariationalPosterior(object):
@@ -224,9 +219,37 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
     """
     p(z, x | y) \approx q(z) q(x).
 
+
+    Assume q(z) is a chain-structured discrete graphical model,
+
+        q(z) = exp{log_pi0[z_1] +
+                   \sum_{t=2}^T log_Ps[z_{t-1}, z_t] +
+                   \sum_{t=1}^T log_likes[z_t]
+
+    parameterized by pi0, Ps, and log_likes.
+
     Assume q(x) is a Gaussian with a block tridiagonal precision matrix,
-    and that we update q(x) via Laplace approximation.
-    Assume q(z) is a chain-structured discrete graphical model.
+    and that we update q(x) via Laplace approximation. Specifically,
+
+        q(x) = N(J, h)
+
+    where J is block tridiagonal precision and h is the linear potential.
+    The mapping to mean parameters is mu = J^{-1} h and Sigma = J^{-1}.
+
+    Initial distribution parameters:
+    J_ini:     (D, D)       initial state precision
+    h_ini:     (D,)         initial state bias
+
+    If time-varying dynamics:
+    J_dyn_11:  (T-1, D, D)  upper left block of dynamics precision
+    J_dyn_21:  (T-1, D, D)  lower left block of dynamics precision
+    J_dyn_22:  (T-1, D, D)  lower right block of dynamics precision
+    h_dyn_1:   (T-1, D)     upper block of dynamics bias
+    h_dyn_2:   (T-1, D)     lower block of dynamics bias
+
+    Observation distribution parameters
+    J_obs:     (T, D, D)    observation precision
+    h_obs:     (T, D)       observation bias
     """
     @ensure_variational_args_are_lists
     def __init__(self, model, datas,
@@ -241,72 +264,99 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         self.K = model.K
         self.Ts = [data.shape[0] for data in datas]
         self.initial_variance = initial_variance
-        self._params = [self._initialize_variational_params(data, input, mask, tag)
-                       for data, input, mask, tag in zip(datas, inputs, masks, tags)]
-        self._cache_expectations()
+
+        self._discrete_state_params = None
+        self._discrete_expectations = None
+        self.discrete_state_params = \
+            [self._initialize_discrete_state_params(data, input, mask, tag)
+             for data, input, mask, tag in zip(datas, inputs, masks, tags)]
+
+        self._continuous_state_params = None
+        self._continuous_expectations = None
+        self.continuous_state_params = \
+            [self._initialize_continuous_state_params(data, input, mask, tag)
+             for data, input, mask, tag in zip(datas, inputs, masks, tags)]
+
+    # Parameters
+    @property
+    def params(self):
+        return self.discrete_state_params, self.continuous_state_params
+
+    @property
+    def discrete_state_params(self):
+        return self._discrete_state_params
+
+    @discrete_state_params.setter
+    def discrete_state_params(self, value):
+        assert isinstance(value, list) and len(value) == len(self.datas)
+        for prms in value:
+            for key in ["pi0", "Ps", "log_likes"]:
+                assert key in prms
+        self._discrete_state_params = value
+
+        # Rerun the HMM smoother with the updated parameters
+        self._discrete_expectations = \
+            [hmm_expected_states(prms["pi0"], prms["Ps"], prms["log_likes"])
+             for prms in self._discrete_state_params]
+
+    @property
+    def continuous_state_params(self):
+        return self._continuous_state_params
+
+    @continuous_state_params.setter
+    def continuous_state_params(self, value):
+        assert isinstance(value, list) and len(value) == len(self.datas)
+        for prms in value:
+            for key in ["J_ini", "J_dyn_11", "J_dyn_21", "J_dyn_22", "J_obs",
+                        "h_ini", "h_dyn_1", "h_dyn_2", "h_obs"]:
+                assert key in prms
+        self._continuous_state_params = value
+
+        # Rerun the Kalman smoother with the updated parameters
+        self._continuous_expectations = \
+            [kalman_info_smoother(prms["J_ini"], prms["h_ini"], 0,
+                                  prms["J_dyn_11"], prms["J_dyn_21"], prms["J_dyn_22"],
+                                  prms["h_dyn_1"], prms["h_dyn_2"], 0,
+                                  prms["J_obs"], prms["h_obs"], 0)
+             for prms in self._continuous_state_params]
 
 
-    def _initialize_variational_params(self, data, input, mask, tag):
+    def _initialize_discrete_state_params(self, data, input, mask, tag):
         T = data.shape[0]
         K = self.K
-        D = self.D
 
         # Initialize q(z) parameters: pi0, log_likes, transition_matrices
         pi0 = np.ones(K) / K
         Ps = np.ones((T-1, K, K)) / K
         log_likes = np.zeros((T, K))
+        return dict(pi0=pi0, Ps=Ps, log_likes=log_likes)
 
-        # Initialize q(x) = = N(J, h) where J is block tridiagonal precision
-        # and h is the linear potential.  The mapping to mean parameters is
-        # mu = J^{-1} h and Sigma = J^{-1}.  Initialize J to inverse of
-        # initial variance and scale h accordingly, so the mean is the output
-        # of the emissions invert function.
-        
-        # Initialize q(x) = N(J, h) where J is a block tridiagonal precision matrix
-        # and h is the linear potential.  The mapping to mean parameters is
-        # mu = J^{-1} h and Sigma = J^{-1}.  We will represent J and h in terms of
-        #
-        # Initial distribution parameters:
-        # J_ini:     (D, D)       initial state precision
-        # h_ini:     (D,)         initial state bias
+    def _initialize_continuous_state_params(self, data, input, mask, tag):
+        T = data.shape[0]
+        D = self.D
 
-        # If time-varying dynamics:
-        # J_dyn_11:  (T-1, D, D)  upper left block of dynamics precision
-        # J_dyn_21:  (T-1, D, D)  lower left block of dynamics precision
-        # J_dyn_22:  (T-1, D, D)  lower right block of dynamics precision
-        # h_dyn_1:   (T-1, D)     upper block of dynamics bias
-        # h_dyn_2:   (T-1, D)     lower block of dynamics bias
-        #
-        # Observation distribution parameters
-        # J_obs:     (T, D, D)    observation precision
-        # h_obs:     (T, D)       observation bias
-        #
-        # Initialize the posterior to mean zero
+        # Initialize the linear terms
         h_ini = np.zeros(D)
-        h_dyn_1 = np.zeros((T-1, D))
-        h_dyn_2 = np.zeros((T-1, D))
-        h_obs = np.zeros((T, D))
+        h_dyn_1 = np.zeros((T - 1, D))
+        h_dyn_2 = np.zeros((T - 1, D))
 
+        # Set the posterior mean based on the emission model, if possible.
         if self.model.emissions.single_subspace:
-            h_obs = (1.0 / self.initial_variance) * self.model.emissions.\
+            h_obs = (1.0 / self.initial_variance) * self.model.emissions. \
                 invert(data, input=input, mask=mask, tag=tag)
         else:
             warn("Posterior initialization is not implemented for multiple subspaces. \
                   A random initialization is used.")
             h_obs = (1.0 / self.initial_variance) * np.random.randn(data.shape[0], self.D)
 
-
         # Initialize the posterior variance to self.initial_variance * I
         J_ini = np.zeros((D, D))
-        J_dyn_11 = np.zeros((T-1, D, D))
-        J_dyn_21 = np.zeros((T-1, D, D))
-        J_dyn_22 = np.zeros((T-1, D, D))
+        J_dyn_11 = np.zeros((T - 1, D, D))
+        J_dyn_21 = np.zeros((T - 1, D, D))
+        J_dyn_22 = np.zeros((T - 1, D, D))
         J_obs = np.tile(1 / self.initial_variance * np.eye(D)[None, :, :], (T, 1, 1))
 
-        return dict(pi0=pi0,
-                    Ps=Ps,
-                    log_likes=log_likes,
-                    J_ini=J_ini,
+        return dict(J_ini=J_ini,
                     h_ini=h_ini,
                     J_dyn_11=J_dyn_11,
                     J_dyn_21=J_dyn_21,
@@ -314,73 +364,55 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
                     h_dyn_1=h_dyn_1,
                     h_dyn_2=h_dyn_2,
                     J_obs=J_obs,
-                    h_obs=h_obs,
-                    )
+                    h_obs=h_obs)
+
+    # Posterior expectations
+    @property
+    def discrete_expectations(self):
+        return self._discrete_expectations
 
     @property
-    def params(self):
-        return self._params
+    def continuous_expectations(self):
+        return self._continuous_expectations
 
+    @property
+    def mean_discrete_states(self):
+        full_expectations = self.discrete_expectations
+        return [exp[0] for exp in full_expectations]
+
+    @property
+    def mean_continuous_states(self):
+        full_expectations = self.continuous_expectations
+        return [exp[1] for exp in full_expectations]
+
+    @property
+    def mean(self):
+        return list(zip(self.discrete_expectations, self.mean_continuous_states))
+
+    # Sample
     def sample_discrete_states(self):
         return [hmm_sample(prms["pi0"], prms["Ps"], prms["log_likes"])
-                for prms in self.params]
+                for prms in self._discrete_state_params]
 
     def sample_continuous_states(self):
         return [kalman_info_sample(prms["J_ini"], prms["h_ini"], 0,
                                    prms["J_dyn_11"], prms["J_dyn_21"], prms["J_dyn_22"],
                                    prms["h_dyn_1"], prms["h_dyn_2"], 0,
                                    prms["J_obs"], prms["h_obs"], 0)
-                for prms in self.params]
+                for prms in self._continuous_state_params]
 
     def sample(self):
         return list(zip(self.sample_discrete_states(), self.sample_continuous_states()))
 
-    def _cache_expectations(self):
-        """Cache continuous and discrete expectations.
-
-        Discrete states are stored as _mean_discrete_states and continuous states
-        as _continuous_expectations. This is so we can re-use the output of hmm_discrete_states()
-        and kalman_info_smoother() if the parameters used to calculate them have not changed.
-        """
-        self._mean_discrete_states = [hmm_expected_states(prms["pi0"], prms["Ps"], prms["log_likes"])
-                for prms in self.params]
-        self._continuous_expectations = [kalman_info_smoother(prms["J_ini"], prms["h_ini"], 0,
-                                     prms["J_dyn_11"], prms["J_dyn_21"], prms["J_dyn_22"],
-                                     prms["h_dyn_1"], prms["h_dyn_2"], 0,
-                                     prms["J_obs"], prms["h_obs"], 0)
-                for prms in self.params]
-        self._prev_params = deepcopy(self._params)
-        
-
-    @property
-    @cache_variational_posterior_expectations
-    def mean_discrete_states(self):
-        return self._mean_discrete_states
-
-    @property
-    @cache_variational_posterior_expectations
-    def mean_continuous_states(self):
-        # Now compute the posterior expectations of z under q(z)
-        full_expectations = self.continuous_expectations
-        return [exp[1] for exp in full_expectations]
-
-    @property
-    @cache_variational_posterior_expectations
-    def continuous_expectations(self):
-        return self._continuous_expectations
-
-    @property
-    def mean(self):
-        return list(zip(self.mean_discrete_states, self.mean_continuous_states))
-
+    # Entropy
     def _discrete_entropy(self):
         negentropy = 0
-        discrete_expectations = self.mean_discrete_states
-        for prms, (Ez, Ezzp1, normalizer) in zip(self.params, discrete_expectations):
+        discrete_expectations = self.discrete_expectations
+        for prms, (Ez, Ezzp1, normalizer) in \
+                zip(self.discrete_state_params, discrete_expectations):
+
             log_pi0 = np.log(prms["pi0"] + 1e-16) - logsumexp(prms["pi0"])
-            log_Ps = np.log(prms["Ps"] + 1e-16) - logsumexp(prms["Ps"],
-                                                            axis=1,
-                                                            keepdims=True)
+            log_Ps = np.log(prms["Ps"] + 1e-16) - logsumexp(prms["Ps"], axis=1, keepdims=True)
             negentropy -= normalizer  # -log Z
             negentropy += np.sum(Ez[0] * log_pi0)  # initial factor
             negentropy += np.sum(Ez * prms["log_likes"])  # unitary factors
@@ -390,7 +422,9 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
     def _continuous_entropy(self):
         negentropy = 0
         continuous_expectations = self.continuous_expectations
-        for prms, (log_Z, Ex, smoothed_sigmas, ExxnT) in zip(self.params, continuous_expectations):
+        for prms, (log_Z, Ex, smoothed_sigmas, ExxnT) in \
+                zip(self.continuous_state_params, continuous_expectations):
+
             # Kalman smoother outputs the smoothed covariance matrices. Add 
             # back the mean to get E[x_t x_{t+1}^T]
             mumuT = np.swapaxes(Ex[:, None], 2,1) @ Ex[:, None]

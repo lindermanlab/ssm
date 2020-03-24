@@ -435,15 +435,16 @@ def test_SLDSStructuredMeanField_entropy():
 
     # Assign posterior to have info params that are the same as the ones used
     # in the reference entropy calculation.
-    post.params[0]["J_ini"] = J_ini
-    post.params[0]["h_ini"] = h_ini
-    post.params[0]["J_dyn_11"] = J_dyn_11
-    post.params[0]["J_dyn_21"] = J_dyn_21
-    post.params[0]["J_dyn_22"] = J_dyn_22
-    post.params[0]["h_dyn_1"] = h_dyn_1
-    post.params[0]["h_dyn_2"] = h_dyn_2
-    post.params[0]["J_obs"] = J_obs
-    post.params[0]["h_obs"] = h_obs
+    continuous_state_params = [dict(J_ini=J_ini,
+                                    J_dyn_11=J_dyn_11,
+                                    J_dyn_21=J_dyn_21,
+                                    J_dyn_22=J_dyn_22,
+                                    J_obs=J_obs,
+                                    h_ini=h_ini,
+                                    h_dyn_1=h_dyn_1,
+                                    h_dyn_2=h_dyn_2,
+                                    h_obs=h_obs)]
+    post.continuous_state_params = continuous_state_params
 
     ssm_entropy = post._continuous_entropy()
     print("reference entropy: {}".format(ref_entropy))
