@@ -19,7 +19,7 @@ class Observations(object):
     # K = number of discrete states
     # D = number of observed dimensions
     # M = exogenous input dimensions (the inputs modulate the probability of discrete state transitions via a multiclass logistic regression)
-    
+
     def __init__(self, K, D, M=0):
         self.K, self.D, self.M = K, D, M
 
@@ -57,7 +57,7 @@ class Observations(object):
         # expected log joint
         def _expected_log_joint(expectations):
             elbo = self.log_prior()
-            for data, input, mask, tag, (expected_states, expected_joints, _) \
+            for data, input, mask, tag, (expected_states, _, _) \
                 in zip(datas, inputs, masks, tags, expectations):
                 lls = self.log_likelihoods(data, input, mask, tag)
                 elbo += np.sum(expected_states * lls)
@@ -75,11 +75,12 @@ class Observations(object):
     def smooth(self, expectations, data, input, tag):
         raise NotImplementedError
 
-    def hessian_expected_log_dynamics_prob(self, Ez, data, input, mask, tag=None):
+    def neg_hessian_expected_log_dynamics_prob(self, Ez, data, input, mask, tag=None):
         # warnings.warn("Analytical Hessian is not implemented for this dynamics class. \
         #                Optimization via Laplace-EM may be slow. Consider using an \
         #                alternative posterior and inference method. ")
         raise NotImplementedError
+
 
 class GaussianObservations(Observations):
     def __init__(self, K, D, M=0):
@@ -196,7 +197,7 @@ class ExponentialObservations(Observations):
         weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
             self.log_lambdas[k] = -np.log(np.average(x, axis=0, weights=weights[:,k]) + 1e-16)
-                
+
     def smooth(self, expectations, data, input, tag):
         """
         Compute the mean observation under the posterior distribution
@@ -892,64 +893,147 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
         return np.row_stack((ll_init, ll_ar))
 
-    def m_step(self, expectations, datas, inputs, masks, tags, J0=None, h0=None):
+    def m_step(self, expectations, datas, inputs, masks, tags,
+               J0=None, h0=None, continuous_expectations=None, **kwargs):
+        """Compute M-step for Gaussian Auto Regressive Observations.
+
+        If `continuous_expectations` is not None, this function will
+        compute an exact M-step using the expected sufficient statistics for the
+        continuous states. In this case, we ignore the prior provided by (J0, h0),
+        because the calculation is exact. `continuous_expectations` should be a tuple of
+        (Ex, Ey, ExxT, ExyT, EyyT).
+
+        If `continuous_expectations` is None, we use `datas` and `expectations,
+        and (optionally) the prior given by (J0, h0). In this case, we estimate the sufficient
+        statistics using `datas,` which is typically a single sample of the continuous
+        states from the posterior distribution.
+        """
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
-        # Collect all the data
+        As = np.zeros((K, D, D * lags + M))
+        bs = np.zeros((K, D))
+        Sigmas = np.zeros((K, D, D))
         xs, ys, Ezs = [], [], []
         for (Ez, _, _), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
-            # Only use data if it is complete
             if not np.all(mask):
                 raise Exception("Encountered missing data in AutoRegressiveObservations!")
-
+            # Since the fit_linear_regression function includes an intercept, we
+            # don't need to append the intercept to the xs
             xs.append(
                 np.hstack([data[self.lags-l-1:-l-1] for l in range(self.lags)]
-                          + [input[self.lags:, :self.M], np.ones((data.shape[0]-self.lags, 1))]))
+                          + [input[self.lags:, :self.M]])
+            )
             ys.append(data[self.lags:])
             Ezs.append(Ez[self.lags:])
+        if continuous_expectations is None:
+            # We are performing an approximate m-step here.
+            # Collect all the data and pass it to fit_linear_regression.
+            if J0 is not None:
+                J = J0
+            else:
+                J_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
+                                        self.l2_penalty_V * np.ones(M),
+                                        self.l2_penalty_b * np.ones(1)))
+                J = np.tile(np.diag(J_diag)[None, :, :], (K, 1, 1))
+            if h0 is not None:
+                h = h0
+            else:
+                h = np.zeros((K, D + M + 1, D))
 
-        # M step: Fit the weighted linear regressions for each K and D
-        if J0 is None and h0 is None:
-            J_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
-                                 self.l2_penalty_V * np.ones(M),
-                                 self.l2_penalty_b * np.ones(1)))
-            J = np.tile(np.diag(J_diag)[None, :, :], (K, 1, 1))
-            h = np.zeros((K, D * lags + M + 1, D))
-        else:
-            assert J0.shape == (K, D*lags + M + 1, D*lags + M + 1)
-            assert h0.shape == (K, D*lags + M + 1, D)
-            J = J0
-            h = h0
-
-        J_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
-                                 self.l2_penalty_V * np.ones(M),
-                                 self.l2_penalty_b * np.ones(1)))
-        J = np.tile(np.diag(J_diag)[None, :, :], (K, 1, 1))
-        h = np.zeros((K, D * lags + M + 1, D))
-        for x, y, Ez in zip(xs, ys, Ezs):
-            # Einsum is concise but slow!
-            # J += np.einsum('tk, ti, tj -> kij', Ez, x, x)
-            # h += np.einsum('tk, ti, td -> kid', Ez, x, y)
-            # Do weighted products for each of the k states
             for k in range(K):
-                weighted_x = x * Ez[:, k:k+1]
-                J[k] += np.dot(weighted_x.T, x)
-                h[k] += np.dot(weighted_x.T, y)
+                weights_curr = [Ez[:, k] for Ez in Ezs]
+                A_curr, b_curr, sigma_curr = fit_linear_regression(xs, ys,
+                                        weights=weights_curr,
+                                        fit_intercept=True,
+                                        prior_ExxT=J[k],
+                                        prior_ExyT=h[k],
+                                        Psi0=1,
+                                        nu0=1
+                                    )
+                As[k] = A_curr
+                bs[k] = b_curr
+                Sigmas[k] = sigma_curr
+        else:
+            # Continuous expectations are given. We are performing an exact
+            # m-step. Pass the sufficient statistics to fit_linear_regression
+            # along with the data.
+            # check instead that the expectations given are sufficient for the
+            # calculation (in practice this will only be used with lags=1)
+            assert self.lags == 1, "Exact parameter update is not yet "\
+                "supported for lags > 1"
 
-        mus = np.linalg.solve(J, h)
-        self.As = np.swapaxes(mus[:, :D*lags, :], 1, 2)
-        self.Vs = np.swapaxes(mus[:, D*lags:D*lags+M, :], 1, 2)
-        self.bs = mus[:, -1, :]
+            # We have one expectation for each trial from the kalman filter.
+            # Unpack and reformat them for regression.
+            # Each element of ExxTs is a 3D array (T x D x D),
+            # Each element of ExxnTs is a 3D array (T-1 x D x D)
+            # We need to weight the expectations using Ezs,
+            # each element of Ezs is (T-1 x K), then sum along the T axis.
+            Eu = np.zeros((K, M))
+            Ex = np.zeros((K, D))
+            Ey = np.zeros((K, D))
+            ExxT = np.zeros((K, D, D))
+            ExyT = np.zeros((K, D, D))
+            EyyT = np.zeros((K, D, D))
+            for (ez, (_, ex, smoothed_sigmas, exxn)) in zip(Ezs, continuous_expectations):
+                for k in range(K):
+                    exx = smoothed_sigmas + np.swapaxes(ex[:, None], 2,1) @ ex[:, None]
 
-        # Update the covariance
-        sqerr = np.zeros((K, D, D))
-        weight = 1e-8 * np.ones(K)
-        for x, y, Ez in zip(xs, ys, Ezs):
-            yhat = np.matmul(x[None, :, :], mus)
-            resid = y[None, :, :] - yhat
-            sqerr += np.einsum('tk,kti,ktj->kij', Ez, resid, resid)
-            weight += np.sum(Ez, axis=0)
-        Sigmas = sqerr / weight[:, None, None] + 1e-8 * np.eye(D)
+                    Eu[k] += np.sum(inputs[:-1] * ez[:, k, None], axis=0)
+                    Ex[k] += np.sum(ex[:-1] * ez[:, k, None], axis=0)
+                    Ey[k] += np.sum(ex[1:] * ez[:, k, None], axis=0)
+                    ExxT[k] += np.sum(exx[:-1, :, :] * ez[:, k, None, None], axis=0)
+                    ExyT[k] += np.sum(exxn * ez[:, k, None, None], axis=0)
+                    EyyT[k] += np.sum(exx[1:, :, :] * ez[:, k, None, None], axis=0)
+
+            # Now we need to handle the "augmented" state vector x which includes
+            # the input and bias x_aug = [x u 1]^T, so E[x_aug x_aug^T] =
+            # E[ xxT xuT x]
+            #  [ uxT uuT u]
+            #  [ xT   uT 1]
+            # Dimension of ExxT aug should be (K, D+M+1, D+M+1)
+            u = inputs[:-1]
+            for k in range(K):
+                weights_curr = [Ez[:, k] for Ez in Ezs]
+                pz_equal_k = np.sum(weights_curr)
+                if M > 0:
+                    ExxT_aug = np.block([
+                                        [ExxT[k], Ex[k].T @ Eu[k], Ex[k].T],
+                                        [Eu[k].T @ Ex[k], Eu[k].T @ Eu[k], Eu[k]],
+                                        [Ex[k], Eu[k], pz_equal_k]
+                                        ])
+                    ExyT_aug = np.block([
+                                        [ExyT[k]],
+                                        [Eu[k] @ Ey[k].T],
+                                        [Ey[k].T]
+                                        ])
+                else:
+                    ExxT_aug = np.block([
+                                        [ExxT[k], Ex[k, None].T],
+                                        [Ex[k, None], pz_equal_k]
+                                        ])
+                    ExyT_aug = np.block([
+                                        [ExyT[k]],
+                                        [Ey[k].T]
+                                        ])
+                A_curr, b_curr, sigma_curr = fit_linear_regression(
+                                    xs,
+                                    ys,
+                                    weights=None,
+                                    fit_intercept=True,
+                                    expectations=(ExxT_aug,
+                                                  ExyT_aug,
+                                                  EyyT[k],
+                                                  pz_equal_k),
+                                    Psi0=1,
+                                    nu0=1
+                                    )
+                As[k] = A_curr
+                bs[k] = b_curr
+                Sigmas[k] = sigma_curr
+
+        self.As = As
+        self.bs = bs
+        self.Sigmas = Sigmas
 
         # If any states are unused, set their parameters to a perturbation of a used state
         usage = sum([Ez.sum(0) for Ez in Ezs])
@@ -961,10 +1045,8 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 self.As[k] = self.As[i] + 0.01 * npr.randn(*self.As[i].shape)
                 self.Vs[k] = self.Vs[i] + 0.01 * npr.randn(*self.Vs[i].shape)
                 self.bs[k] = self.bs[i] + 0.01 * npr.randn(*self.bs[i].shape)
-                Sigmas[k] = Sigmas[i]
+                self.Sigmas[k] = Sigmas[i]
 
-        # Store the updated covariances
-        self.Sigmas = Sigmas
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, As, bs, Vs = self.D, self.As, self.bs, self.Vs
@@ -983,35 +1065,29 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             S = np.linalg.cholesky(self.Sigmas[z]) if with_noise else 0
             return mu + np.dot(S, npr.randn(D))
 
-    def hessian_expected_log_dynamics_prob(self, Ez, data, input, mask, tag=None):
-        assert np.all(mask), "Cannot compute Hessian of autoregressive obsevations with missing data."
-        assert self.lags == 1, "Does not compute Hessian of autoregressive observations with lags > 1"
-        T = data.shape[0]
-        K = self.K
-        D = self.D
-
-        # diagonal blocks, size ((T, D, D))
-        diagonal_blocks = np.zeros((T, D, D))
+    def neg_hessian_expected_log_dynamics_prob(self, Ez, data, input, mask, tag=None):
+        assert np.all(mask), "Cannot compute negative Hessian of autoregressive obsevations with missing data."
+        assert self.lags == 1, "Does not compute negative Hessian of autoregressive observations with lags > 1"
 
         # initial distribution contributes a Gaussian term to first diagonal block
-        diagonal_blocks[0] = -1 * np.sum(Ez[0, :, None, None] * np.linalg.inv(self.Sigmas_init), axis=0)
+        J_ini = np.sum(Ez[0, :, None, None] * np.linalg.inv(self.Sigmas_init), axis=0)
 
         # first part is transition dynamics - goes to all terms except final one
         # E_q(z) x_{t} A_{z_t+1}.T Sigma_{z_t+1}^{-1} A_{z_t+1} x_{t}
         inv_Sigmas = np.linalg.inv(self.Sigmas)
         dynamics_terms = np.array([A.T@inv_Sigma@A for A, inv_Sigma in zip(self.As, inv_Sigmas)]) # A^T Qinv A terms
-        diagonal_blocks[:-1] += -1 * np.sum(Ez[1:,:,None,None] * dynamics_terms[None,:], axis=1)
+        J_dyn_11 = np.sum(Ez[1:,:,None,None] * dynamics_terms[None,:], axis=1)
 
         # second part of diagonal blocks are inverse covariance matrices - goes to all but first time bin
         # E_q(z) x_{t+1} Sigma_{z_t+1}^{-1} x_{t+1}
-        diagonal_blocks[1:] += -1 * np.sum(Ez[1:,:,None,None] * inv_Sigmas[None,:], axis=1)
+        J_dyn_22 = np.sum(Ez[1:,:,None,None] * inv_Sigmas[None,:], axis=1)
 
         # lower diagonal blocks are (T-1,D,D):
         # E_q(z) x_{t+1} Sigma_{z_t+1}^{-1} A_{z_t+1} x_t
         off_diag_terms = np.array([inv_Sigma@A for A, inv_Sigma in zip(self.As, inv_Sigmas)])
-        lower_diagonal_blocks = np.sum(Ez[1:,:,None,None] * off_diag_terms[None,:], axis=1)
+        J_dyn_21 = -1 * np.sum(Ez[1:,:,None,None] * off_diag_terms[None,:], axis=1)
 
-        return diagonal_blocks, lower_diagonal_blocks
+        return J_ini, J_dyn_11, J_dyn_21, J_dyn_22
 
 
 class AutoRegressiveObservationsNoInput(AutoRegressiveObservations):

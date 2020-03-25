@@ -2,6 +2,7 @@ from time import time
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
+import scipy
 
 import ssm
 
@@ -70,11 +71,11 @@ def test_sample(T=10, K=4, D=3, M=2):
 
 
 def test_constrained_hmm(T=100, K=3, D=3):
-    hmm = ssm.HMM(K, D, M=0, 
+    hmm = ssm.HMM(K, D, M=0,
                   transitions="constrained",
                   observations="gaussian")
     z, x = hmm.sample(T)
-    
+
     transition_mask = np.array([
         [1, 0, 1],
         [1, 0, 0],
@@ -86,7 +87,7 @@ def test_constrained_hmm(T=100, K=3, D=3):
     transition_kwargs = dict(
         transition_mask=transition_mask
     )
-    fit_hmm = ssm.HMM(K, D, M=0, 
+    fit_hmm = ssm.HMM(K, D, M=0,
                   transitions="constrained",
                   observations="gaussian",
                   transition_kwargs=transition_kwargs)
@@ -307,7 +308,151 @@ def test_hmm_likelihood_perf(T=10000, K=50, D=20):
     print("SSM ARHMM Expectations: ", arhmm_dt, "sec.")
 
 
+def test_trace_product():
+    A = np.random.randn(100, 50, 10)
+    B = np.random.randn(100, 10, 50)
+    assert np.allclose(ssm.util.trace_product(A, B),
+                       np.trace(A @ B, axis1=1, axis2=2))
+
+    A = np.random.randn(50, 10)
+    B = np.random.randn(10, 50)
+    assert np.allclose(ssm.util.trace_product(A, B),
+                       np.trace(A @ B))
+
+    A = np.random.randn(1, 1)
+    B = np.random.randn(1, 1)
+    assert np.allclose(ssm.util.trace_product(A, B),
+                       np.trace(A @ B))
+
+
+def test_SLDSStructuredMeanField_entropy():
+    """Test correctness of the entropy calculation for the
+    SLDSStructuredMeanFieldVariationalPosterior class.
+
+    """
+    def entropy_mv_gaussian(J, h):
+        mu = np.linalg.solve(J, h)
+        sigma = np.linalg.inv(J)
+        mv_normal = scipy.stats.multivariate_normal(mu, sigma)
+        return mv_normal.entropy()
+
+    def make_lds_parameters(T, D, N, U):
+        m0 = np.zeros(D)
+        S0 = np.eye(D)
+        As = 0.99 * np.eye(D)
+        Bs = np.zeros((D, U))
+        Qs = 0.1 * np.eye(D)
+        Cs = npr.randn(N, D)
+        Ds = np.zeros((N, U))
+        Rs = 0.1 * np.eye(N)
+        us = np.zeros((T, U))
+        ys = np.sin(2 * np.pi * np.arange(T) / 50)[:, None] * npr.randn(1, N) + 0.1 * npr.randn(T, N)
+
+        return m0, S0, As, Bs, Qs, Cs, Ds, Rs, us, ys
+
+    def cumsum(v,strict=False):
+        if not strict:
+            return np.cumsum(v,axis=0)
+        else:
+            out = np.zeros_like(v)
+            out[1:] = np.cumsum(v[:-1],axis=0)
+            return out
+
+    def bmat(blocks):
+        rowsizes = [row[0].shape[0] for row in blocks]
+        colsizes = [col[0].shape[1] for col in zip(*blocks)]
+        rowstarts = cumsum(rowsizes,strict=True)
+        colstarts = cumsum(colsizes,strict=True)
+
+        nrows, ncols = sum(rowsizes), sum(colsizes)
+        out = np.zeros((nrows,ncols))
+
+        for i, (rstart, rsz) in enumerate(zip(rowstarts, rowsizes)):
+            for j, (cstart, csz) in enumerate(zip(colstarts, colsizes)):
+                out[rstart:rstart+rsz,cstart:cstart+csz] = blocks[i][j]
+        return out
+
+    def lds_to_dense_infoparams(params):
+        m0, S0, As, Bs, Qs, Cs, Ds, Rs, us, ys = params
+        mu_init = m0
+        sigma_init = S0
+        A, B, sigma_states = As, Bs, Qs
+        C, D, sigma_obs = Cs, Ds, Rs
+        data = ys
+        inputs = us
+
+        # Copied from PYLDS tests/test_dense.py
+        T, n = data.shape[0], D.shape[0]
+
+        # mu_init, sigma_init = model.mu_init, model.sigma_init
+        # A, B, sigma_states = model.A, model.B,  model.sigma_states
+        # C, D, sigma_obs = model.C, model.D, model.sigma_obs
+        ss_inv = np.linalg.inv(sigma_states)
+
+        h = np.zeros((T,n))
+        h[0] += np.linalg.solve(sigma_init, mu_init)
+
+        # Dynamics
+        h[1:] += inputs[:-1].dot(B.T).dot(ss_inv)
+        h[:-1] += -inputs[:-1].dot(B.T).dot(np.linalg.solve(sigma_states, A))
+
+        # Emissions
+        h += C.T.dot(np.linalg.solve(sigma_obs, data.T)).T
+        h += -inputs.dot(D.T).dot(np.linalg.solve(sigma_obs, C))
+
+        J = np.kron(np.eye(T),C.T.dot(np.linalg.solve(sigma_obs,C)))
+        J[:n,:n] += np.linalg.inv(sigma_init)
+        pairblock = bmat([[A.T.dot(ss_inv).dot(A), -A.T.dot(ss_inv)],
+                        [-ss_inv.dot(A), ss_inv]])
+        for t in range(0,n*(T-1),n):
+            J[t:t+2*n,t:t+2*n] += pairblock
+
+        return J.reshape(T*n,T*n), h.reshape(T*n)
+
+    T, D, N, U = 100, 10, 10, 0
+    params = make_lds_parameters(T, D, N, U)
+    J_full, h_full = lds_to_dense_infoparams(params)
+
+    ref_entropy = entropy_mv_gaussian(J_full, h_full)
+
+    # Calculate entropy using kalman filter and posterior's entropy fn
+    info_args = ssm.messages.convert_mean_to_info_args(*params)
+    J_ini, h_ini, _, J_dyn_11,\
+        J_dyn_21, J_dyn_22, h_dyn_1,\
+        h_dyn_2, _, J_obs, h_obs, _ = info_args
+
+    # J_obs[1:] += J_dyn_22
+    # J_dyn_22[:] = 0
+    log_Z, smoothed_mus, smoothed_Sigmas, ExxnT = ssm.messages.\
+        kalman_info_smoother(*info_args)
+
+
+    # Model is just a dummy model to simplify 
+    # instantiating the posterior object.
+    model = ssm.SLDS(N, 1, D, emissions="gaussian", dynamics="gaussian")
+    datas = params[-1]
+    post = ssm.variational.SLDSStructuredMeanFieldVariationalPosterior(model, datas)
+
+    # Assign posterior to have info params that are the same as the ones used
+    # in the reference entropy calculation.
+    continuous_state_params = [dict(J_ini=J_ini,
+                                    J_dyn_11=J_dyn_11,
+                                    J_dyn_21=J_dyn_21,
+                                    J_dyn_22=J_dyn_22,
+                                    J_obs=J_obs,
+                                    h_ini=h_ini,
+                                    h_dyn_1=h_dyn_1,
+                                    h_dyn_2=h_dyn_2,
+                                    h_obs=h_obs)]
+    post.continuous_state_params = continuous_state_params
+
+    ssm_entropy = post._continuous_entropy()
+    print("reference entropy: {}".format(ref_entropy))
+    print("ssm_entropy: {}".format(ssm_entropy))
+    assert np.allclose(ref_entropy, ssm_entropy)
+
 if __name__ == "__main__":
     # test_hmm_likelihood_perf()
     # test_hmm_mp_perf()
-    test_constrained_hmm()
+    # test_constrained_hmm()
+    test_SLDSStructuredMeanField_entropy()

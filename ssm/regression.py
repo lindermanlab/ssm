@@ -9,6 +9,7 @@ from autograd.scipy.special import logsumexp, gammaln
 from scipy.special import polygamma, digamma
 from scipy.optimize import minimize
 from warnings import warn
+from ssm.util import check_shape
 
 mean_functions = dict(
     identity=lambda x: x,
@@ -42,17 +43,39 @@ model_kwarg_descriptions = dict(
 def fit_linear_regression(Xs, ys,
                           weights=None,
                           fit_intercept=True,
-                          prior_mean=0,
-                          prior_variance=1,
+                          expectations=None,
+                          prior_ExxT=None,
+                          prior_ExyT=None,
                           nu0=1,
                           Psi0=1
                           ):
     """
     Fit a linear regression y_i ~ N(Wx_i + b, diag(S)) for W, b, S.
 
-    :param Xs: array or list of arrays
-    :param ys: array or list of arrays
-    :param fit_intercept:  if False drop b
+    Params
+    ------
+    Xs: array or list of arrays, each element is N x D,
+        where N is the number of data points, and D is the
+        dimension of x_i.
+    ys: array or list of arrays, each element is N x P,
+        where p is the dimension of y_i.
+    weights: optional, list of scalars weighting each observation.
+                Must be same length as Xs and ys.
+    fit_intercept:  if False drop b.
+    expectations: optional, tuple of sufficient statistics for the
+                    regression. If provided, Xs and ys will be ignored,
+                    and the regression is calculated only from the
+                    sufficient statistics. Tuple should be of the form
+                    (Exx, Exy, Eyy, weight_sum).
+    prior_ExxT: D x D array. optional. Only used when expectations=None.
+    prior_ExyT: D x P array. optional. Only used when expectations=None.
+    nu0: prior on covariance from MNIW distribution.
+    psi0: prior on covariance from MNIW distribution.
+
+    Returns
+    -------
+    W, b, Sigmas: when fit_intercept=True.
+    W, b: when fit_intercept=False.
     """
     Xs = Xs if isinstance(Xs, (list, tuple)) else [Xs]
     ys = ys if isinstance(ys, (list, tuple)) else [ys]
@@ -63,50 +86,57 @@ def fit_linear_regression(Xs, ys,
     assert all([y.shape[1] == d for y in ys])
     assert all([X.shape[0] == y.shape[0] for X, y in zip(Xs, ys)])
 
-    prior_mean = prior_mean * np.zeros((d, p))
-    prior_variance = prior_variance * np.eye(p)
-
     # Check the weights.  Default to all ones.
     if weights is not None:
         weights = weights if isinstance(weights, (list, tuple)) else [weights]
     else:
         weights = [np.ones(X.shape[0]) for X in Xs]
 
-    # Add weak prior on intercept
-    if fit_intercept:
-        prior_mean = np.column_stack((prior_mean, np.zeros(d)))
-        prior_variance = block_diag(prior_variance, np.eye(1))
+    x_dim = d + int(fit_intercept)
+    ExxT = np.zeros((x_dim, x_dim))
+    ExyT = np.zeros((x_dim, p))
+    EyyT = np.zeros((p, p))
+    weight_sum = 0
+    if expectations is None:
 
-    # Compute the posterior
-    J = np.linalg.inv(prior_variance)
-    h = np.dot(J, prior_mean.T)
+        # Compute the posterior. The priors must include a prior for the
+        # intercept term, if given.
+        if prior_ExxT is not None and prior_ExyT is not None:
+            check_shape(prior_ExxT, "prior_ExxT", (x_dim, x_dim))
+            check_shape(prior_ExyT, "prior_ExyT", (x_dim, p))
+            ExxT[:, :] = prior_ExxT
+            ExyT[:, :] = prior_ExyT
 
-    for X, y, weight in zip(Xs, ys, weights):
-        X = np.column_stack((X, np.ones(X.shape[0]))) if fit_intercept else X
-        J += np.dot(X.T * weight, X)
-        h += np.dot(X.T * weight, y)
+        for X, y, weight in zip(Xs, ys, weights):
+            X = np.column_stack((X, np.ones(X.shape[0]))) if fit_intercept else X
+            weight_sum += np.sum(weight)
+            weight = weight[:, None] if weight.ndim == 1 else weight
+            weighted_x = X * weight
+            weighted_y = y * weight
+            ExxT += weighted_x.T @ X
+            ExyT += weighted_x.T @ y
+            EyyT += weighted_y.T @ y
+    else:
+        ExxT, ExyT, EyyT, weight_sum = expectations
+        check_shape(ExxT, "ExxT", (x_dim, x_dim))
+        check_shape(ExyT, "ExyT", (x_dim, p))
+        check_shape(EyyT, "EyyT", (p, p))
 
     # Solve for the MAP estimate
-    W = np.linalg.solve(J, h).T
+    W_full = np.linalg.solve(ExxT, ExyT).T
     if fit_intercept:
-        W, b = W[:, :-1], W[:, -1]
+        W, b = W_full[:, :-1], W_full[:, -1]
     else:
+        W = W_full
         b = 0
 
-    # Compute the residual and the posterior variance
-    nu = nu0
-    Psi = Psi0 * np.eye(d)
-    for X, y, weight in zip(Xs, ys, weights):
-        yhat = np.dot(X, W.T) + b
-        resid = y - yhat
-        nu += np.sum(weight)
-        tmp1 = np.einsum('t,ti,tj->ij', weight, resid, resid)
-        tmp2 = np.sum(weight[:, None, None] * resid[:, :, None] * resid[:, None, :], axis=0)
-        assert np.allclose(tmp1, tmp2)
-        Psi += tmp1
+    # Compute expected error for covariance matrix estimate
+    # E[(y - Ax)(y - Ax)^T]
+    expected_err = EyyT - 2 * W_full @ ExyT + W_full @ ExxT @ W_full.T
+    nu = nu0 + weight_sum
 
     # Get MAP estimate of posterior covariance
-    Sigma = Psi / (nu + d + 1)
+    Sigma = (expected_err + Psi0 * np.eye(d)) / (nu + d + 1)
     if fit_intercept:
         return W, b, Sigma
     else:

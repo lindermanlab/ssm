@@ -1,11 +1,14 @@
 import time
 import ssm
 from ssm.util import SEED
+import copy
+import scipy
 
 from autograd import elementwise_grad
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.test_util import check_grads
+from autograd import hessian
 
 from ssm.primitives import \
     blocks_to_bands, bands_to_blocks, transpose_banded, \
@@ -14,6 +17,43 @@ from ssm.primitives import \
     cholesky_lds, solve_lds, lds_sample, lds_mean, \
     convert_lds_to_block_tridiag
 
+TRANSITIONS_NAMES = [
+    "stationary",
+    "sticky",
+    "inputdriven",
+    "recurrent",
+    "recurrent_only",
+    "rbf_recurrent",
+    "nn_recurrent",
+    ]
+
+DYNAMICS_NAMES = [
+    "none",
+    "gaussian",
+    "diagonal_gaussian",
+    "studentst",
+    "diagonal_t",
+    ]
+
+# Exclude the identity emissions (for now)
+# because they require N == D
+EMISSIONS_NAMES = [
+    "gaussian",
+    "gaussian_orthog",
+    "gaussian_nn",
+    "studentst",
+    "studentst_orthog",
+    "studentst_nn",
+    "poisson",
+    "poisson_orthog",
+    "poisson_nn",
+    "bernoulli",
+    "bernoulli_orthog",
+    "bernoulli_nn",
+    "autoregressive",
+    "autoregressive_orthog",
+    "autoregressive_nn",
+    ]
 
 def make_lds_parameters(T=20, D=2):
     As = npr.randn(T-1, D, D)
@@ -404,55 +444,17 @@ def test_lds_log_probability_perf(T=1000, D=10, N_iter=10):
     print("Time per iter: {:.4f}".format((stop - start) / N_iter))
 
 def test_lds_sample_and_fit(T=100, N=15, K=3, D=10):
-    transition_names = [
-    "stationary",
-    "sticky",
-    "inputdriven",
-    "recurrent",
-    "recurrent_only",
-    "rbf_recurrent",
-    "nn_recurrent",
-    ]
-
-    dynamics_names = [
-    "none",
-    "gaussian",
-    "diagonal_gaussian",
-    "studentst",
-    "diagonal_t",
-    ]
-
-    # Exclude the identity emissions (for now)
-    # because they require N == D
-    emission_names = [
-    "gaussian",
-    "gaussian_orthog",
-    "gaussian_nn",
-    "studentst",
-    "studentst_orthog",
-    "studentst_nn",
-    "poisson",
-    "poisson_orthog",
-    "poisson_nn",
-    "bernoulli",
-    "bernoulli_orthog",
-    "bernoulli_nn",
-    "autoregressive",
-    "autoregressive_orthog",
-    "autoregressive_nn",
-    ]
-
     # method_name --> allowable posteriors
     methods = {
-        "svi": ["mf", "lds"],
-    #    "laplace_em": ["structured_meanfield"]
+        "bbvi": ["mf", "lds"],
+        "laplace_em": ["structured_meanfield"]
     }
 
     # Test SLDS and RSLDS
     print("Testing SLDS and RSLDS...")
-    for dynamics in dynamics_names:
-        for emissions in emission_names:
-            for transitions in transition_names:
+    for dynamics in DYNAMICS_NAMES:
+        for emissions in EMISSIONS_NAMES:
+            for transitions in TRANSITIONS_NAMES:
                 for method in methods:
                     for posterior in methods[method]:
                         npr.seed(seed=SEED)
@@ -486,21 +488,170 @@ def test_lds_sample_and_fit(T=100, N=15, K=3, D=10):
                                      num_iters=2)
 
 
-if __name__ == "__main__":
-    test_blocks_to_banded()
-    test_transpose_banded()
-    test_lds_log_probability()
-    test_lds_mean()
-    test_lds_sample()
-    test_blocks_to_banded_grad()
-    test_transpose_banded_grad()
-    test_cholesky_banded_grad()
-    test_solve_banded_grad()
-    test_solveh_banded_grad()
-    test_cholesky_lds_grad()
-    test_solve_lds_grad()
-    test_lds_log_probability_grad()
-    test_lds_sample_grad()
-    for D in range(2, 21, 2):
-        test_lds_log_probability_perf(T=1000, D=D)
+def lbfgs_newton_perf_comparison(T=100, N=15, K=3, D=10, ntrials=5, n_iters=20):
+    np.random.seed(seed=123)
+    true_slds = ssm.SLDS(N, K, D,
+                            transitions="recurrent",
+                            dynamics="gaussian",
+                            emissions="gaussian")
+    z, x, y = true_slds.sample(T)
 
+    fit_slds = ssm.SLDS(N, K, D,
+                        transitions="recurrent",
+                        dynamics="gaussian",
+                        emissions="gaussian")
+    # Make sure all params are starting at the same value
+    newtons_lds = copy.deepcopy(fit_slds)
+    lbfgs_lds = copy.deepcopy(fit_slds)
+
+    newton_time = 0
+    for i in range(ntrials):
+        start = time.time()
+        newtons_lds.fit(y,
+                    initialize=False,
+                    num_iters=n_iters,
+                    continuous_optimizer="newton")
+        end = time.time()
+        newton_time += (end - start) / n_iters
+    newton_time /= ntrials
+    print("Avg time/iter with newton's method: {:.4f}".format(newton_time))
+
+    lbfgs_time = 0
+    for i in range(ntrials):
+        start = time.time()
+        lbfgs_lds.fit(y,
+                    initialize=False,
+                    num_iters=n_iters,
+                    continuous_optimizer="lbfgs")
+        end = time.time()
+        lbfgs_time += (end - start) / n_iters
+    lbfgs_time /= ntrials
+    print("Avg time/iter with lbfgs: {:.4f}".format(lbfgs_time))
+
+def test_laplace_em(T=100, N=15, K=3, D=10):
+    # Check that laplace-em works for each transition and emission model
+    # so long as the dynamics are linear-gaussian.
+    for transitions in TRANSITIONS_NAMES:
+        for emissions in EMISSIONS_NAMES:
+            true_slds = ssm.SLDS(N, K, D,
+                                 transitions=transitions,
+                                 dynamics="gaussian",
+                                 emissions=emissions)
+            z, x, y = true_slds.sample(T)
+            fit_slds = ssm.SLDS(N, K, D,
+                                transitions=transitions,
+                                dynamics="gaussian",
+                                emissions=emissions)
+            try:
+                fit_slds.fit(y,
+                            initialize=True,
+                            num_init_iters=2,
+                            num_iters=5)
+            # So that we can still interrupt the test.
+            except KeyboardInterrupt:
+                raise
+            # So that we know which test case fails...
+            except:
+                print("Error during fit with Laplace-EM. Failed with:")
+                print("Emissions = {}".format(emissions))
+                print("Transitions = {}".format(transitions))
+                # raise
+
+def test_laplace_em_hessian(N=20, K=3, D=10, T=200):
+    for transitions in ["standard", "recurrent", "recurrent_only"]:
+        for emissions in ["gaussian_orthog", "gaussian"]:
+            print("Checking analytical hessian for transitions={},  "
+                  "and emissions={}".format(transitions, emissions)
+            )
+            slds = ssm.SLDS(N, K, D, transitions=transitions,
+                            dynamics="gaussian",
+                            emissions=emissions)
+            z, x, y = slds.sample(T)
+            new_slds = ssm.SLDS(N, K, D, transitions="standard",
+                            dynamics="gaussian",
+                            emissions=emissions) 
+
+            inputs = [np.zeros((T, 0))]
+            masks = [np.ones_like(y)]
+            tags = [None]
+            method = "laplace_em"
+            datas = [y]
+            num_samples = 1
+
+            def neg_expected_log_joint_wrapper(x_vec, T, D):
+                x = x_vec.reshape(T, D)
+                return new_slds._laplace_neg_expected_log_joint(datas[0],
+                                                                inputs[0],
+                                                                masks[0],
+                                                                tags[0],
+                                                                x,
+                                                                Ez,
+                                                                Ezzp1)
+            variational_posterior = new_slds._make_variational_posterior("structured_meanfield",
+                                                                        datas, inputs, masks, tags, method)
+            new_slds._fit_laplace_em_discrete_state_update(
+                            variational_posterior, datas, inputs, masks, tags, num_samples)
+            Ez, Ezzp1, _ = variational_posterior.discrete_expectations[0]
+
+            x = variational_posterior.mean_continuous_states[0]
+            scale = x.size
+            J_diag, J_lower_diag = new_slds._laplace_hessian_neg_expected_log_joint(datas[0],
+                                                                inputs[0],
+                                                                masks[0],
+                                                                tags[0],
+                                                                x,
+                                                                Ez,
+                                                                Ezzp1)
+            dense_hessian = scipy.linalg.block_diag(*[x for x in J_diag])
+            dense_hessian[D:, :-D] += scipy.linalg.block_diag(*[x for x in J_lower_diag])
+            dense_hessian[:-D, D:] += scipy.linalg.block_diag(*[x.T for x in J_lower_diag])
+
+            true_hess = hessian(neg_expected_log_joint_wrapper)(x.reshape(-1), T, D)
+            assert np.allclose(true_hess, dense_hessian)
+            print("Hessian passed.")
+
+            # Also check that computation of H works.
+            h_dense = dense_hessian @ x.reshape(-1)
+            h_dense = h_dense.reshape(T, D)
+
+            J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs = new_slds._laplace_neg_hessian_params(datas[0],
+                                                                inputs[0],
+                                                                masks[0],
+                                                                tags[0],
+                                                                x,
+                                                                Ez,
+                                                                Ezzp1)
+            h_ini, h_dyn_1, h_dyn_2, h_obs = new_slds._laplace_neg_hessian_params_to_hs(x,
+                J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs
+            )
+
+            h = h_obs.copy()
+            h[0] += h_ini
+            h[:-1] += h_dyn_1
+            h[1:] += h_dyn_2
+
+            assert np.allclose(h, h_dense)
+
+
+if __name__ == "__main__":
+    # test_blocks_to_banded()
+    # test_transpose_banded()
+    # test_lds_log_probability()
+    # test_lds_mean()
+    # test_lds_sample()
+    # test_blocks_to_banded_grad()
+    # test_transpose_banded_grad()
+    # test_cholesky_banded_grad()
+    # test_solve_banded_grad()
+    # test_solveh_banded_grad()
+    # test_cholesky_lds_grad()
+    # test_solve_lds_grad()
+    # test_lds_log_probability_grad()
+    # test_lds_sample_grad()
+    # for D in range(2, 21, 2):
+    #     test_lds_log_probability_perf(T=1000, D=D)
+    # for T in [100, 1000]:
+    #     print("Performance comparison for LBFGS vs. Newton's method "
+    #           "with T={}".format(T))
+    #     lbfgs_newton_perf_comparison(T=T, N=5, K=1, D=30)
+    test_laplace_em_hessian()

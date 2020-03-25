@@ -238,3 +238,24 @@ def collapse(x, state_map, axis=-1):
                                   axis=axis, keepdims=True)
                            for k in range(K)], axis=axis)
 
+
+def check_shape(var, var_name, desired_shape):
+    assert var.shape == desired_shape, "Variable {} is of wrong shape. "\
+        "Expected {}, found {}.".format(var_name, desired_shape, var.shape)
+
+
+def trace_product(A, B):
+    """ Compute trace of the matrix product A*B efficiently.
+
+    A, B can be 2D or 3D arrays, in which case the trace is computed along
+    the last two axes. In this case, the function will return an array.
+    Computed using the fact that tr(AB) = sum_{ij}A_{ij}B_{ji}.
+    """
+    ndimsA = A.ndim
+    ndimsB = B.ndim
+    assert ndimsA == ndimsB, "Both A and B must have same number of dimensions."
+    assert ndimsA <= 3, "A and B must have 3 or fewer dimensions"
+
+    # We'll take the trace along the last two dimensions.
+    BT = np.swapaxes(B, -1, -2)
+    return np.sum(A*BT, axis=(-1, -2))
