@@ -514,7 +514,7 @@ class SLDS(object):
             kwargs = dict(data=data, input=input, mask=mask, tag=tag, Ez=Ez, Ezzp1=Ezzp1, scale=scale)
 
             def _objective(x, iter): return self._laplace_neg_expected_log_joint(x=x, **kwargs)
-            def _grad_obj(x): return grad(self._laplace_neg_expected_log_joint, argnum=4)(x=x, **kwargs)
+            def _grad_obj(x): return grad(self._laplace_neg_expected_log_joint, argnum=4)(data, input, mask, tag, x, Ez, Ezzp1, scale)
             def _hess_obj(x): return self._laplace_hessian_neg_expected_log_joint(x=x, **kwargs)
 
             if continuous_optimizer == "newton":
@@ -641,7 +641,7 @@ class SLDS(object):
                         inputs=None, masks=None, tags=None,
                         num_iters=100,
                         num_samples=1,
-                        continuous_optimizer="lbfgs",
+                        continuous_optimizer="newton",
                         continuous_tolerance=1e-4,
                         continuous_maxiter=100,
                         emission_optimizer="lbfgs",

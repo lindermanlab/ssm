@@ -844,10 +844,9 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None, localize=True):
-        from sklearn.linear_model import LinearRegression
-
         # Sample time bins for each discrete state
         # Use the data to cluster the time bins if specified.
+        K, D, M, lags = self.K, self.D, self.M, self.lags
         Ts = [data.shape[0] for data in datas]
         if localize:
             from sklearn.cluster import KMeans
@@ -867,7 +866,15 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             ys = [data[t+self.lags] for t, data in zip(ts, datas)]
 
             # Solve the linear regression
-            coef_, intercept_, Sigma = fit_linear_regression(Xs, ys)
+            J0 = np.diag(np.concatenate((self.l2_penalty_A * np.ones(D * lags),
+                                         self.l2_penalty_V * np.ones(M),
+                                         self.l2_penalty_b * np.ones(1))))
+            h0 = np.concatenate((np.zeros((D * (lags - 1), D)),
+                                 self.l2_penalty_A * np.eye(D),
+                                 np.zeros((M + 1, D))))
+
+            coef_, intercept_, Sigma = fit_linear_regression(
+                Xs, ys, prior_ExxT=J0, prior_ExyT=h0)
             self.As[k] = coef_[:, :self.D * self.lags]
             self.Vs[k] = coef_[:, self.D * self.lags:]
             self.bs[k] = intercept_
@@ -913,6 +920,21 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         As = np.zeros((K, D, D * lags + M))
         bs = np.zeros((K, D))
         Sigmas = np.zeros((K, D, D))
+
+        # Set up the prior
+        if J0 is None:
+            J0_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
+                                     self.l2_penalty_V * np.ones(M),
+                                     self.l2_penalty_b * np.ones(1)))
+            J0 = np.tile(np.diag(J0_diag)[None, :, :], (K, 1, 1))
+
+        if h0 is None:
+            h0 = np.concatenate((np.zeros((D * (lags - 1), D)),
+                                 self.l2_penalty_A * np.eye(D),
+                                 np.zeros((M + 1, D))))
+            h0 = np.tile(h0[None, :, :], (K, 1, 1))
+
+        # Collect the data and weights
         xs, ys, Ezs = [], [], []
         for (Ez, _, _), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
             if not np.all(mask):
@@ -925,28 +947,16 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             )
             ys.append(data[self.lags:])
             Ezs.append(Ez[self.lags:])
-        if continuous_expectations is None:
-            # We are performing an approximate m-step here.
-            # Collect all the data and pass it to fit_linear_regression.
-            if J0 is not None:
-                J = J0
-            else:
-                J_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
-                                        self.l2_penalty_V * np.ones(M),
-                                        self.l2_penalty_b * np.ones(1)))
-                J = np.tile(np.diag(J_diag)[None, :, :], (K, 1, 1))
-            if h0 is not None:
-                h = h0
-            else:
-                h = np.zeros((K, D + M + 1, D))
 
+        if continuous_expectations is None:
+            # Fit each linear regression to the data
             for k in range(K):
                 weights_curr = [Ez[:, k] for Ez in Ezs]
                 A_curr, b_curr, sigma_curr = fit_linear_regression(xs, ys,
                                         weights=weights_curr,
                                         fit_intercept=True,
-                                        prior_ExxT=J[k],
-                                        prior_ExyT=h[k],
+                                        prior_ExxT=J0[k],
+                                        prior_ExyT=h0[k],
                                         Psi0=1,
                                         nu0=1
                                     )
@@ -974,11 +984,11 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             ExxT = np.zeros((K, D, D))
             ExyT = np.zeros((K, D, D))
             EyyT = np.zeros((K, D, D))
-            for (ez, (_, ex, smoothed_sigmas, exxn)) in zip(Ezs, continuous_expectations):
+            for ez, (_, ex, smoothed_sigmas, exxn), u in zip(Ezs, continuous_expectations, inputs):
                 for k in range(K):
                     exx = smoothed_sigmas + np.swapaxes(ex[:, None], 2,1) @ ex[:, None]
 
-                    Eu[k] += np.sum(inputs[:-1] * ez[:, k, None], axis=0)
+                    Eu[k] += np.sum(u[:-1] * ez[:, k, None], axis=0)
                     Ex[k] += np.sum(ex[:-1] * ez[:, k, None], axis=0)
                     Ey[k] += np.sum(ex[1:] * ez[:, k, None], axis=0)
                     ExxT[k] += np.sum(exx[:-1, :, :] * ez[:, k, None, None], axis=0)
@@ -990,8 +1000,8 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             # E[ xxT xuT x]
             #  [ uxT uuT u]
             #  [ xT   uT 1]
+
             # Dimension of ExxT aug should be (K, D+M+1, D+M+1)
-            u = inputs[:-1]
             for k in range(K):
                 weights_curr = [Ez[:, k] for Ez in Ezs]
                 pz_equal_k = np.sum(weights_curr)
@@ -1015,6 +1025,12 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                                         [ExyT[k]],
                                         [Ey[k].T]
                                         ])
+
+                # Add in the prior
+                ExxT_aug += J0[k]
+                ExyT_aug += h0[k]
+
+                # Solve the linear regression
                 A_curr, b_curr, sigma_curr = fit_linear_regression(
                                     xs,
                                     ys,

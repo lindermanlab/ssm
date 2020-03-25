@@ -118,12 +118,19 @@ def _generic_minimize(method, loss, x0, verbose=False, num_iters=1000, state=Non
         itr[0] += 1
         print("Iteration {} loss: {:.3f}".format(itr[0], loss(unflatten(x_flat), -1)))
 
-    # Call the optimizer.
-    # HACK: Pass in -1 as the iteration.
-    result = minimize(_objective, _x0, args=(-1,), jac=grad(_objective),
+    # Wrap the gradient to avoid NaNs
+    def safe_grad(x, itr):
+        g = grad(_objective)(x, itr)
+        g[~np.isfinite(g)] = 1e8
+        return g
+
+    # Call the optimizer.  Pass in -1 as the iteration since it is unused.
+    result = minimize(_objective, _x0, args=(-1,),
+                      jac=safe_grad,
                       method=method,
                       callback=callback if verbose else None,
                       options=dict(maxiter=num_iters, disp=verbose),
+                      tol=1e-4,
                       **kwargs)
     if verbose:
         print("{} completed with message: \n{}".format(method, result.message))

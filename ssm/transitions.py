@@ -42,7 +42,7 @@ class Transitions(object):
         return np.exp(self.log_transition_matrices(data, input, mask, tag))
 
     def m_step(self, expectations, datas, inputs, masks, tags,
-               optimizer="lbfgs", num_iters=100, **kwargs):
+               optimizer="lbfgs", num_iters=1000, **kwargs):
         """
         If M-step cannot be done in closed form for the transitions, default to BFGS.
         """
@@ -109,9 +109,7 @@ class StationaryTransitions(Transitions):
         return np.exp(self.log_Ps - logsumexp(self.log_Ps, axis=1, keepdims=True))
 
     def log_transition_matrices(self, data, input, mask, tag):
-        T = data.shape[0]
         log_Ps = self.log_Ps - logsumexp(self.log_Ps, axis=1, keepdims=True)
-        # return np.tile(log_Ps[None, :, :], (T-1, 1, 1))
         return log_Ps[None, :, :]
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
@@ -140,13 +138,15 @@ class ConstrainedStationaryTransitions(StationaryTransitions):
         super(ConstrainedStationaryTransitions, self).__init__(K, D, M=M)
         Ps = self.transition_matrix
         if transition_mask is None:
-            transition_mask = np.ones_like(Ps)
+            transition_mask = np.ones_like(Ps, dtype=bool)
+        else:
+            transition_mask = transition_mask.astype(bool)
 
         # Validate the transition mask. A valid mask must have be the same shape
         # as the transition matrix, contain only ones and zeros, and contain at
         # least one non-zero entry per row.
         assert transition_mask.shape == Ps.shape, "Mask must be the same size " \
-            "as the transition matrix. Found mask of shape {}".format(mask.shape)
+            "as the transition matrix. Found mask of shape {}".format(transition_mask.shape)
         assert np.isin(transition_mask,[1,0]).all(), "Mask must contain only 1s and zeros."
         for i in range(transition_mask.shape[0]):
             assert transition_mask[i].any(), "Mask must contain at least one " \
@@ -155,7 +155,8 @@ class ConstrainedStationaryTransitions(StationaryTransitions):
         self.transition_mask = transition_mask
         Ps = Ps * transition_mask
         Ps /= Ps.sum(axis=-1, keepdims=True)
-        self.log_Ps = np.log(Ps)
+        self.log_Ps = np.log(Ps + LOG_EPS)
+        self.log_Ps[~transition_mask] = -np.inf
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         super(ConstrainedStationaryTransitions, self).m_step(

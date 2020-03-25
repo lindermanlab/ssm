@@ -2,7 +2,6 @@ import numba
 import numpy as np
 import numpy.random as npr
 import scipy.special as scsp
-import scipy.linalg as spla
 from functools import partial
 
 from autograd.tracer import getval
@@ -178,6 +177,12 @@ def hmm_expected_states(pi0, Ps, ll):
     expected_states -= scsp.logsumexp(expected_states, axis=1, keepdims=True)
     expected_states = np.exp(expected_states)
 
+    # Compute the log transition matrices.
+    # Suppress log(0) warnings as they are expected.
+    with np.errstate(divide="ignore"):
+        log_Ps = np.log(Ps)
+
+
     # Compute E[z_t, z_{t+1}] for t = 1, ..., T-1
     # Note that this is an array of size T*K*K, which can be quite large.
     # To be a bit more frugal with memory, first check if the given log_Ps
@@ -187,7 +192,7 @@ def hmm_expected_states(pi0, Ps, ll):
     # M-step is the sum of the expected joints.
     stationary = (Ps.shape[0] == 1)
     if not stationary:
-        expected_joints = alphas[:-1,:,None] + betas[1:,None,:] + ll[1:,None,:] + np.log(Ps)
+        expected_joints = alphas[:-1,:,None] + betas[1:,None,:] + ll[1:,None,:] + log_Ps
         expected_joints -= expected_joints.max((1,2))[:,None, None]
         expected_joints = np.exp(expected_joints)
         expected_joints /= expected_joints.sum((1,2))[:,None,None]
@@ -195,7 +200,7 @@ def hmm_expected_states(pi0, Ps, ll):
     else:
         # Compute the sum over time axis of the expected joints
         expected_joints = np.zeros((K, K))
-        _compute_stationary_expected_joints(alphas, betas, ll, np.log(Ps[0]), expected_joints)
+        _compute_stationary_expected_joints(alphas, betas, ll, log_Ps[0], expected_joints)
         expected_joints = expected_joints[None, :, :]
 
     return expected_states, expected_joints, normalizer

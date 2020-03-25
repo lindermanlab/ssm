@@ -447,7 +447,7 @@ def test_lds_sample_and_fit(T=100, N=15, K=3, D=10):
     # method_name --> allowable posteriors
     methods = {
         "bbvi": ["mf", "lds"],
-        "laplace_em": ["structured_meanfield"]
+        # "laplace_em": ["structured_meanfield"]
     }
 
     # Test SLDS and RSLDS
@@ -531,8 +531,21 @@ def lbfgs_newton_perf_comparison(T=100, N=15, K=3, D=10, ntrials=5, n_iters=20):
 def test_laplace_em(T=100, N=15, K=3, D=10):
     # Check that laplace-em works for each transition and emission model
     # so long as the dynamics are linear-gaussian.
-    for transitions in TRANSITIONS_NAMES:
-        for emissions in EMISSIONS_NAMES:
+    for transitions in ["stationary",
+                        "sticky",
+                        "inputdriven",
+                        "recurrent",
+                        "recurrent_only",
+                        ]:
+
+        for emissions in ["gaussian",
+                          "gaussian_orthog",
+                          "poisson",
+                          "poisson_orthog",
+                          "bernoulli",
+                          "bernoulli_orthog",
+                          ]:
+
             true_slds = ssm.SLDS(N, K, D,
                                  transitions=transitions,
                                  dynamics="gaussian",
@@ -550,14 +563,15 @@ def test_laplace_em(T=100, N=15, K=3, D=10):
             # So that we can still interrupt the test.
             except KeyboardInterrupt:
                 raise
+
             # So that we know which test case fails...
             except:
                 print("Error during fit with Laplace-EM. Failed with:")
                 print("Emissions = {}".format(emissions))
                 print("Transitions = {}".format(transitions))
-                # raise
+                raise
 
-def test_laplace_em_hessian(N=20, K=3, D=10, T=200):
+def test_laplace_em_hessian(N=5, K=3, D=2, T=20):
     for transitions in ["standard", "recurrent", "recurrent_only"]:
         for emissions in ["gaussian_orthog", "gaussian"]:
             print("Checking analytical hessian for transitions={},  "
