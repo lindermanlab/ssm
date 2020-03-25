@@ -83,7 +83,6 @@ def test_constrained_hmm(T=100, K=3, D=3):
     ]).astype(bool)
     init_Ps = np.random.rand(3, 3)
     init_Ps /= init_Ps.sum(axis=-1, keepdims=True)
-    init_log_Ps = np.log(init_Ps)
     transition_kwargs = dict(
         transition_mask=transition_mask
     )
@@ -452,7 +451,8 @@ def test_SLDSStructuredMeanField_entropy():
     assert np.allclose(ref_entropy, ssm_entropy)
 
 if __name__ == "__main__":
+    test_expectations()
     # test_hmm_likelihood_perf()
     # test_hmm_mp_perf()
     # test_constrained_hmm()
-    test_SLDSStructuredMeanField_entropy()
+    # test_SLDSStructuredMeanField_entropy()

@@ -9,7 +9,7 @@ from ssm.util import ensure_args_are_lists, \
     logistic, logit, softplus, inv_softplus
 from ssm.preprocessing import interpolate_data, pca_with_imputation
 from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
-from ssm.stats import independent_studentst_logpdf
+from ssm.stats import independent_studentst_logpdf, bernoulli_logpdf
 
 
 # Observation models for SLDS
@@ -545,10 +545,10 @@ class _BernoulliEmissionsMixin(object):
 
     def log_likelihoods(self, data, input, mask, tag, x):
         assert data.dtype == bool or (data.dtype == int and data.min() >= 0 and data.max() <= 1)
-        ps = self.mean(self.forward(x, input, tag))
+        assert self.link_name == "logit", "Log likelihood is only implemented for logit link."
+        logit_ps = self.forward(x, input, tag)
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
-        lls = data[:, None, :] * np.log(ps) + (1 - data[:, None, :]) * np.log(1 - ps)
-        return np.sum(lls * mask[:, None, :], axis=2)
+        return bernoulli_logpdf(data[:, None, :], logit_ps, mask=mask[:, None, :])
 
     def invert(self, data, input=None, mask=None, tag=None):
         yhat = self.link(np.clip(data, .1, .9))
