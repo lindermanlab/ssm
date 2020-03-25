@@ -185,12 +185,12 @@ class StickyTransitions(StationaryTransitions):
 
     def log_prior(self):
         K = self.K
-        Ps = np.exp(self.log_Ps - logsumexp(self.log_Ps, axis=1, keepdims=True))
+        log_P = self.log_Ps - logsumexp(self.log_Ps, axis=1, keepdims=True)
 
         lp = 0
         for k in range(K):
             alpha = self.alpha * np.ones(K) + self.kappa * (np.arange(K) == k)
-            lp += dirichlet.logpdf(Ps[k], alpha)
+            lp += np.dot((alpha - 1), log_P[k])
         return lp
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
