@@ -528,7 +528,7 @@ def lbfgs_newton_perf_comparison(T=100, N=15, K=3, D=10, ntrials=5, n_iters=20):
     lbfgs_time /= ntrials
     print("Avg time/iter with lbfgs: {:.4f}".format(lbfgs_time))
 
-def test_laplace_em(T=100, N=15, K=3, D=10):
+def test_laplace_em(T=100, N=15, K=3, D=10, M=1):
     # Check that laplace-em works for each transition and emission model
     # so long as the dynamics are linear-gaussian.
     for transitions in ["stationary",
@@ -545,21 +545,22 @@ def test_laplace_em(T=100, N=15, K=3, D=10):
                           "bernoulli",
                           "bernoulli_orthog",
                           ]:
-
-            true_slds = ssm.SLDS(N, K, D,
+            inputs = np.ones((T, M))
+            true_slds = ssm.SLDS(N, K, D, M=M,
                                  transitions=transitions,
                                  dynamics="gaussian",
                                  emissions=emissions)
-            z, x, y = true_slds.sample(T)
-            fit_slds = ssm.SLDS(N, K, D,
+            z, x, y = true_slds.sample(T, input=inputs)
+            fit_slds = ssm.SLDS(N, K, D, M=M,
                                 transitions=transitions,
                                 dynamics="gaussian",
                                 emissions=emissions)
             try:
                 fit_slds.fit(y,
-                            initialize=True,
-                            num_init_iters=2,
-                            num_iters=5)
+                             inputs=inputs,
+                             initialize=True,
+                             num_init_iters=2,
+                             num_iters=5)
             # So that we can still interrupt the test.
             except KeyboardInterrupt:
                 raise

@@ -917,7 +917,8 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         """
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
-        As = np.zeros((K, D, D * lags + M))
+        As = np.zeros((K, D, D * lags))
+        Vs = np.zeros((K, D, M))
         bs = np.zeros((K, D))
         Sigmas = np.zeros((K, D, D))
 
@@ -960,7 +961,8 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                                         Psi0=1,
                                         nu0=1
                                     )
-                As[k] = A_curr
+                As[k] = A_curr[:, :D * lags]
+                Vs[k] = A_curr[:, D * lags:]
                 bs[k] = b_curr
                 Sigmas[k] = sigma_curr
         else:
@@ -978,9 +980,9 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             # Each element of ExxnTs is a 3D array (T-1 x D x D)
             # We need to weight the expectations using Ezs,
             # each element of Ezs is (T-1 x K), then sum along the T axis.
-            Eu = np.zeros((K, M))
-            Ex = np.zeros((K, D))
-            Ey = np.zeros((K, D))
+            Eu = np.zeros((K, M, 1))
+            Ex = np.zeros((K, D, 1))
+            Ey = np.zeros((K, D, 1))
             ExxT = np.zeros((K, D, D))
             ExyT = np.zeros((K, D, D))
             EyyT = np.zeros((K, D, D))
@@ -988,9 +990,9 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 for k in range(K):
                     exx = smoothed_sigmas + np.swapaxes(ex[:, None], 2,1) @ ex[:, None]
 
-                    Eu[k] += np.sum(u[:-1] * ez[:, k, None], axis=0)
-                    Ex[k] += np.sum(ex[:-1] * ez[:, k, None], axis=0)
-                    Ey[k] += np.sum(ex[1:] * ez[:, k, None], axis=0)
+                    Eu[k] += np.sum(u[:-1] * ez[:, k, None], axis=0)[:, None]
+                    Ex[k] += np.sum(ex[:-1] * ez[:, k, None], axis=0)[:, None]
+                    Ey[k] += np.sum(ex[1:] * ez[:, k, None], axis=0)[:, None]
                     ExxT[k] += np.sum(exx[:-1, :, :] * ez[:, k, None, None], axis=0)
                     ExyT[k] += np.sum(exxn * ez[:, k, None, None], axis=0)
                     EyyT[k] += np.sum(exx[1:, :, :] * ez[:, k, None, None], axis=0)
@@ -1006,25 +1008,21 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 weights_curr = [Ez[:, k] for Ez in Ezs]
                 pz_equal_k = np.sum(weights_curr)
                 if M > 0:
-                    ExxT_aug = np.block([
-                                        [ExxT[k], Ex[k].T @ Eu[k], Ex[k].T],
-                                        [Eu[k].T @ Ex[k], Eu[k].T @ Eu[k], Eu[k]],
-                                        [Ex[k], Eu[k], pz_equal_k]
-                                        ])
-                    ExyT_aug = np.block([
-                                        [ExyT[k]],
-                                        [Eu[k] @ Ey[k].T],
-                                        [Ey[k].T]
-                                        ])
+                    ExxT_aug = np.block(
+                        [[ExxT[k],         Ex[k] @ Eu[k].T, Ex[k]],
+                         [Eu[k] @ Ex[k].T, Eu[k] @ Eu[k].T, Eu[k]],
+                         [Ex[k].T,         Eu[k].T,         pz_equal_k]])
+                    ExyT_aug = np.block(
+                        [[ExyT[k]],
+                         [Eu[k] @ Ey[k].T],
+                         [Ey[k].T]])
                 else:
-                    ExxT_aug = np.block([
-                                        [ExxT[k], Ex[k, None].T],
-                                        [Ex[k, None], pz_equal_k]
-                                        ])
-                    ExyT_aug = np.block([
-                                        [ExyT[k]],
-                                        [Ey[k].T]
-                                        ])
+                    ExxT_aug = np.block(
+                        [[ExxT[k], Ex[k].T],
+                         [Ex[k].T, pz_equal_k]])
+                    ExyT_aug = np.block(
+                        [[ExyT[k]],
+                         [Ey[k].T]])
 
                 # Add in the prior
                 ExxT_aug += J0[k]
@@ -1043,13 +1041,10 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                                     Psi0=1,
                                     nu0=1
                                     )
-                As[k] = A_curr
+                As[k] = A_curr[:, :D * lags]
+                Vs[k] = A_curr[:, D * lags:]
                 bs[k] = b_curr
                 Sigmas[k] = sigma_curr
-
-        self.As = As
-        self.bs = bs
-        self.Sigmas = Sigmas
 
         # If any states are unused, set their parameters to a perturbation of a used state
         usage = sum([Ez.sum(0) for Ez in Ezs])
@@ -1058,11 +1053,16 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         if len(unused) > 0:
             for k in unused:
                 i = npr.choice(used)
-                self.As[k] = self.As[i] + 0.01 * npr.randn(*self.As[i].shape)
-                self.Vs[k] = self.Vs[i] + 0.01 * npr.randn(*self.Vs[i].shape)
-                self.bs[k] = self.bs[i] + 0.01 * npr.randn(*self.bs[i].shape)
-                self.Sigmas[k] = Sigmas[i]
-
+                As[k] = As[i] + 0.01 * npr.randn(*As[i].shape)
+                Vs[k] = Vs[i] + 0.01 * npr.randn(*Vs[i].shape)
+                bs[k] = bs[i] + 0.01 * npr.randn(*bs[i].shape)
+                Sigmas[k] = Sigmas[i]
+                
+        # Update parameters via their setter
+        self.As = As
+        self.Vs = Vs
+        self.bs = bs
+        self.Sigmas = Sigmas
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, As, bs, Vs = self.D, self.As, self.bs, self.Vs
