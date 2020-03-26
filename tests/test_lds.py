@@ -528,7 +528,7 @@ def lbfgs_newton_perf_comparison(T=100, N=15, K=3, D=10, ntrials=5, n_iters=20):
     lbfgs_time /= ntrials
     print("Avg time/iter with lbfgs: {:.4f}".format(lbfgs_time))
 
-def test_laplace_em(T=100, N=15, K=3, D=10, M=1):
+def test_laplace_em(T=100, N=15, K=3, D=10):
     # Check that laplace-em works for each transition and emission model
     # so long as the dynamics are linear-gaussian.
     for transitions in ["stationary",
@@ -545,32 +545,33 @@ def test_laplace_em(T=100, N=15, K=3, D=10, M=1):
                           "bernoulli",
                           "bernoulli_orthog",
                           ]:
-            inputs = np.ones((T, M))
-            true_slds = ssm.SLDS(N, K, D, M=M,
-                                 transitions=transitions,
-                                 dynamics="gaussian",
-                                 emissions=emissions)
-            z, x, y = true_slds.sample(T, input=inputs)
-            fit_slds = ssm.SLDS(N, K, D, M=M,
-                                transitions=transitions,
-                                dynamics="gaussian",
-                                emissions=emissions)
-            try:
-                fit_slds.fit(y,
-                             inputs=inputs,
-                             initialize=True,
-                             num_init_iters=2,
-                             num_iters=5)
-            # So that we can still interrupt the test.
-            except KeyboardInterrupt:
-                raise
+            for input_dim in [0, 1]:
+                inputs = np.ones((T, input_dim))
+                true_slds = ssm.SLDS(N, K, D, M=input_dim,
+                                     transitions=transitions,
+                                     dynamics="gaussian",
+                                     emissions=emissions)
+                z, x, y = true_slds.sample(T, input=inputs)
+                fit_slds = ssm.SLDS(N, K, D, M=input_dim,
+                                    transitions=transitions,
+                                    dynamics="gaussian",
+                                    emissions=emissions)
+                try:
+                    fit_slds.fit(y,
+                                 inputs=inputs,
+                                 initialize=True,
+                                 num_init_iters=2,
+                                 num_iters=5)
+                # So that we can still interrupt the test.
+                except KeyboardInterrupt:
+                    raise
 
-            # So that we know which test case fails...
-            except:
-                print("Error during fit with Laplace-EM. Failed with:")
-                print("Emissions = {}".format(emissions))
-                print("Transitions = {}".format(transitions))
-                raise
+                # So that we know which test case fails...
+                except:
+                    print("Error during fit with Laplace-EM. Failed with:")
+                    print("Emissions = {}".format(emissions))
+                    print("Transitions = {}".format(transitions))
+                    raise
 
 def test_laplace_em_hessian(N=5, K=3, D=2, T=20):
     for transitions in ["standard", "recurrent", "recurrent_only"]:

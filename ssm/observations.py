@@ -1007,22 +1007,14 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             for k in range(K):
                 weights_curr = [Ez[:, k] for Ez in Ezs]
                 pz_equal_k = np.sum(weights_curr)
-                if M > 0:
-                    ExxT_aug = np.block(
-                        [[ExxT[k],         Ex[k] @ Eu[k].T, Ex[k]],
-                         [Eu[k] @ Ex[k].T, Eu[k] @ Eu[k].T, Eu[k]],
-                         [Ex[k].T,         Eu[k].T,         pz_equal_k]])
-                    ExyT_aug = np.block(
-                        [[ExyT[k]],
-                         [Eu[k] @ Ey[k].T],
-                         [Ey[k].T]])
-                else:
-                    ExxT_aug = np.block(
-                        [[ExxT[k], Ex[k].T],
-                         [Ex[k].T, pz_equal_k]])
-                    ExyT_aug = np.block(
-                        [[ExyT[k]],
-                         [Ey[k].T]])
+                ExxT_aug = np.block(
+                    [[ExxT[k],         Ex[k] @ Eu[k].T, Ex[k]],
+                     [Eu[k] @ Ex[k].T, Eu[k] @ Eu[k].T, Eu[k]],
+                     [Ex[k].T,         Eu[k].T,         pz_equal_k]])
+                ExyT_aug = np.block(
+                    [[ExyT[k]],
+                     [Eu[k] @ Ey[k].T],
+                     [Ey[k].T]])
 
                 # Add in the prior
                 ExxT_aug += J0[k]
