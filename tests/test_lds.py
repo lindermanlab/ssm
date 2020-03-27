@@ -546,22 +546,30 @@ def test_laplace_em(T=100, N=15, K=3, D=10):
                           "bernoulli_orthog",
                           ]:
             for input_dim in [0, 1]:
-                inputs = npr.randn(T, input_dim)
                 true_slds = ssm.SLDS(N, K, D, M=input_dim,
                                      transitions=transitions,
                                      dynamics="gaussian",
                                      emissions=emissions)
-                z, x, y = true_slds.sample(T, input=inputs)
+
+                # Test with a random number of data arrays
+                num_datas = npr.randint(1, 5)
+                Ts = T + npr.randint(20, size=num_datas)
+                us = [npr.randn(Ti, input_dim) for Ti in Ts]
+                datas = [true_slds.sample(Ti, input=u) for Ti, u in zip(Ts, us)]
+                zs, xs, ys = list(zip(*datas))
+
+                # Fit an SLDS to the data
                 fit_slds = ssm.SLDS(N, K, D, M=input_dim,
                                     transitions=transitions,
                                     dynamics="gaussian",
                                     emissions=emissions)
                 try:
-                    fit_slds.fit(y,
-                                 inputs=inputs,
+                    fit_slds.fit(ys,
+                                 inputs=us,
                                  initialize=True,
                                  num_init_iters=2,
                                  num_iters=5)
+
                 # So that we can still interrupt the test.
                 except KeyboardInterrupt:
                     raise

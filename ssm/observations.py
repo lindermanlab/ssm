@@ -917,11 +917,11 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 for l1 in range(lags):
                     x1 = data[lags - l1 - 1:-l1 - 1]
                     ExuyTs[k, l1*D:(l1+1)*D, :] += np.einsum('t,ti,tj->ij', w, x1, y)
-                ExuyTs[k, D*lags:D*lags+M, :] = np.einsum('t,ti,tj->ij', w, u, y)
-                ExuyTs[k, -1, :] = np.einsum('t,ti->i', w, y)
+                ExuyTs[k, D*lags:D*lags+M, :] += np.einsum('t,ti,tj->ij', w, u, y)
+                ExuyTs[k, -1, :] += np.einsum('t,ti->i', w, y)
 
                 # EyyTs[k] and Ens[k]
-                EyyTs[k] = np.einsum('t,ti,tj->ij',w,y,y)
+                EyyTs[k] += np.einsum('t,ti,tj->ij',w,y,y)
                 Ens[k] += np.sum(w)
 
         # Symmetrize the expectations
@@ -930,7 +930,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 for l2 in range(l1, lags):
                     ExuxuTs[k, l2*D:(l2+1)*D, l1*D:(l1+1)* D] = ExuxuTs[k, l1*D:(l1+1)*D, l2*D:(l2+1)*D].T
                 ExuxuTs[k, D*lags:D*lags+M, l1*D:(l1+1)*D] = ExuxuTs[k, l1*D:(l1+1)*D, D*lags:D*lags+M].T
-                ExuxuTs[k, -1, l1*D:(l1+1)*D] = ExuxuTs[k, l1*D:(l1+1)*D, -1]
+                ExuxuTs[k, -1, l1*D:(l1+1)*D] = ExuxuTs[k, l1*D:(l1+1)*D, -1].T
             ExuxuTs[k, -1, D*lags:D*lags+M] = ExuxuTs[k, D*lags:D*lags+M, -1].T
 
         return ExuxuTs, ExuyTs, EyyTs, Ens

@@ -504,9 +504,8 @@ class SLDS(object):
         # for q(x).
         continuous_state_params = []
         x0s = variational_posterior.mean_continuous_states
-        for prms, (Ez, Ezzp1, _), x0, data, input, mask, tag in \
-            zip(variational_posterior.params,
-                variational_posterior.discrete_expectations,
+        for (Ez, Ezzp1, _), x0, data, input, mask, tag in \
+            zip(variational_posterior.discrete_expectations,
                 x0s, datas, inputs, masks, tags):
 
             # Use Newton's method or LBFGS to find the argmax of the expected log joint
