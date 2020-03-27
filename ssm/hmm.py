@@ -101,6 +101,8 @@ class HMM(object):
             robust_autoregressive=obs.RobustAutoRegressiveObservations,
             diagonal_robust_ar=obs.RobustAutoRegressiveDiagonalNoiseObservations,
             diagonal_robust_autoregressive=obs.RobustAutoRegressiveDiagonalNoiseObservations,
+            sparse_ar=obs.SparseAutoRegressiveObservations,
+            sparse_autoregressive=obs.SparseAutoRegressiveObservations,
             )
 
         if isinstance(observations, str):
@@ -544,6 +546,8 @@ class HSMM(HMM):
             robust_autoregressive=obs.RobustAutoRegressiveObservations,
             diagonal_robust_ar=obs.RobustAutoRegressiveDiagonalNoiseObservations,
             diagonal_robust_autoregressive=obs.RobustAutoRegressiveDiagonalNoiseObservations,
+            sparse_ar=obs.SparseAutoRegressiveObservations,
+            sparse_autoregressive=obs.SparseAutoRegressiveObservations,
             )
 
         if isinstance(observations, str):

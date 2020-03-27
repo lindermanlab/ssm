@@ -1063,7 +1063,8 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         self.Sigmas = Sigmas
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
-        D, As, bs, Vs = self.D, self.As, self.bs, self.Vs
+        D, As, bs, Vs, Sigmas = self.D, self.As, self.bs, self.Vs, self.Sigmas
+        Sigma_sqrts = np.linalg.cholesky(Sigmas)
 
         if xhist.shape[0] < self.lags:
             # Sample from the initial distribution
@@ -1076,7 +1077,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 Al = As[z][:,l*D:(l+1)*D]
                 mu += Al.dot(xhist[-l-1])
 
-            S = np.linalg.cholesky(self.Sigmas[z]) if with_noise else 0
+            S = Sigma_sqrts[z] if with_noise else 0
             return mu + np.dot(S, npr.randn(D))
 
     def neg_hessian_expected_log_dynamics_prob(self, Ez, data, input, mask, tag=None):
@@ -1257,7 +1258,7 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
             for _ in range(K)])
 
         # Initialize the dynamics mask
-        assert isinstance(block_size, (tuple, list)) and len(block_size == 2)
+        assert isinstance(block_size, (tuple, list)) and len(block_size) == 2
         assert D % block_size[0] == 0, "block size must perfectly divide D"
         assert D % block_size[1] == 0, "block size must perfectly divide D"
         self.block_size = block_size
@@ -1278,9 +1279,19 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
     def As(self, value):
         self._As = value
 
+    @property
+    def Sigmas_init(self):
+        return np.array([sigmasq * np.eye(self.D) for sigmasq in self.sigmasq_inits])
+
+    @property
+    def Sigmas(self):
+        return np.array([sigmasq * np.eye(self.D) for sigmasq in self.sigmasqs])
+
     def permute(self, perm):
-        super(SparseAutoRegressiveObservations, self).permute(perm)
+        super(AutoRegressiveObservations, self).permute(perm)
         self.As_mask = self.As_mask[perm]
+        self.sigmasq_inits = self.sigmasq_inits[perm]
+        self.sigmasqs = self.sigmasqs[perm]
 
     def log_likelihoods(self, data, input, mask, tag):
         assert np.all(mask), "Cannot compute likelihood of autoregressive obsevations with missing data."
@@ -1324,7 +1335,7 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
                 z = np.concatenate([np.kron(zk, np.ones(S_in)), np.ones(M + 1)])
                 J = J0 + 1 / sigmasq * ExxT * np.outer(z, z)
                 L = np.linalg.cholesky(J)
-                h = h0 + 1 / sigmasq * ExyT[:, slc] * z
+                h = h0[:, slc] + 1 / sigmasq * ExyT[:, slc] * z[:, None]
                 tmp = solve_triangular(L, h, lower=True)
 
                 log_probs[ind] = np.sum(zk * np.log(rho) + (1 - zk) * np.log(1 - rho))
@@ -1337,7 +1348,7 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
             Z[bo] = assignments[np.argmax(log_probs)]
             z = np.concatenate([np.kron(Z[bo], np.ones(S_in)), np.ones(1)])
             J = J0 + 1 / sigmasq * ExxT * np.outer(z, z)
-            h = 1 / sigmasq * ExyT[:, slc] * z
+            h = 1 / sigmasq * ExyT[:, slc] * z[:, None]
             W[slc] = np.linalg.solve(J, h).T
 
         # Solve for the optimal variance
