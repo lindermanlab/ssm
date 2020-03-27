@@ -939,7 +939,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         return ExuxuTs, ExuyTs, EyyTs, Ens
 
     def _extend_given_sufficient_statistics(self, expectations, continuous_expectations, inputs):
-        # Continuous expectations are given for Ex, ExxT, and ExxnT
+        # Extend continuous_expectations with given inputs and discrete weights
         assert self.lags == 1, "_extend_given_sufficient_statistics assumes lags == 1."
         K, D, M, lags = self.K, self.D, self.M, self.lags
         D_in = D * lags + M + 1
@@ -1025,7 +1025,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         elif np.isscalar(Psi0):
             Psi0 = Psi0 * np.eye(D)
 
-        # Collect the data and weights
+        # Collect sufficient statistics
         if continuous_expectations is None:
             ExuxuTs, ExuyTs, EyyTs, Ens = \
                 self._get_sufficient_statistics(expectations, datas, inputs)
@@ -1224,32 +1224,37 @@ class AutoRegressiveDiagonalNoiseObservations(AutoRegressiveObservations):
         return np.row_stack((ll_init, ll_ar))
 
 
-class SparseAutoRegressiveObservations(AutoRegressiveDiagonalNoiseObservations):
+class SparseAutoRegressiveObservations(AutoRegressiveObservations):
     """
     AutoRegressive observation model with sparse weights.
 
-        (x_t | z_t = k, u_t) ~ N((A_k * Amask_k) x_{t-1} + b_k + V_k u_t, S_k)
+        (x_t | z_t = k, u_t) ~ N((A_k * Amask_k) x_{t-1} + b_k + V_k u_t, sigma_k^2 I)
 
     where
 
         A_k is a set of regression weights
         Amask_k is a binary mask that zeros out some weights
-        S_k = diag([sigma_{k,1}, ..., sigma_{k, D}])
+        sigma_k^2 is an isotropic noise variance
 
     The parameters are fit via maximum likelihood estimation.
-    Note: our derivations rely on S_k being diagonal.
     """
     def __init__(self, K, D, M=0, lags=1,
-                 l2_penalty_A=1e-8,
-                 l2_penalty_b=1e-8,
-                 l2_penalty_V=1e-8,
+                 prior_precicion_A=1,
+                 prior_precicion_b=1e-8,
+                 prior_precicion_V=1e-8,
                  block_size=(1,1)):
+        assert lags == 1, "Sparse AR model is only implemented for lags==1"
 
         super(SparseAutoRegressiveObservations, self).\
             __init__(K, D, M, lags=lags,
-                     l2_penalty_A=l2_penalty_A,
-                     l2_penalty_b=l2_penalty_b,
-                     l2_penalty_V=l2_penalty_V)
+                     l2_penalty_A=prior_precicion_A,
+                     l2_penalty_b=prior_precicion_b,
+                     l2_penalty_V=prior_precicion_V)
+
+        # Initialize the dynamics and the noise covariances
+        self._As = .80 * np.array([
+                np.column_stack([random_rotation(D), np.zeros((D, (lags-1) * D))])
+            for _ in range(K)])
 
         # Initialize the dynamics mask
         assert isinstance(block_size, (tuple, list)) and len(block_size == 2)
@@ -1257,6 +1262,13 @@ class SparseAutoRegressiveObservations(AutoRegressiveDiagonalNoiseObservations):
         assert D % block_size[1] == 0, "block size must perfectly divide D"
         self.block_size = block_size
         self.As_mask = np.ones((K, D // block_size[0], D // block_size[1]), dtype=bool)
+
+        # Our current code assumes isotropic variance for efficiency.
+        # Get rid of the square root parameterization and replace with sigmasq
+        del self._sqrt_Sigmas_init
+        del self._sqrt_Sigmas
+        self.sigmasq_inits = np.ones((K,))
+        self.sigmasqs = np.ones((K,))
 
     @property
     def As(self):
@@ -1270,10 +1282,74 @@ class SparseAutoRegressiveObservations(AutoRegressiveDiagonalNoiseObservations):
         super(SparseAutoRegressiveObservations, self).permute(perm)
         self.As_mask = self.As_mask[perm]
 
+    def log_likelihoods(self, data, input, mask, tag):
+        assert np.all(mask), "Cannot compute likelihood of autoregressive obsevations with missing data."
+        D, L = self.D, self.lags
+        mus = self._compute_mus(data, input, mask, tag)
+
+        ll_init = np.column_stack([stats.diagonal_gaussian_logpdf(data[:L], mu[:L], sigmasq * np.ones(D))
+                               for mu, sigmasq in zip(mus, self.sigmasq_inits)])
+
+        ll_ar = np.column_stack([stats.diagonal_gaussian_logpdf(data[L:], mu[L:], sigmasq * np.ones(D))
+                               for mu, sigmasq in zip(mus, self.sigmasqs)])
+
+        return np.row_stack((ll_init, ll_ar))
+
+    def fit_sparse_linear_regression(self, ExxT, ExyT, EyyT, En, sigmasq, J0, h0, rho):
+        from itertools import product
+        from scipy.linalg import solve_triangular
+        D, M = self.D, self.M
+        D_in = D + M + 1
+        S_out, S_in = self.block_size
+        B_out = D // S_out
+        B_in = D // S_in
+
+        # Initialize the outputs
+        W = np.zeros((D, D_in))
+        Z = np.zeros((B_out, B_in))
+        Z_posteriors = []
+
+        # Compute the posterior distribution for each row of Z
+        for bo in range(B_out):
+            # Find the output slice
+            slc = slice(bo * S_out, (bo + 1) * S_out)
+
+            # Enumerate all 2^{B_in} assignments of the binary mask
+            assert B_in <= 16, "You probably don't want to explicitly enumerate 2^B_{in}" \
+                               "assignments when B_{in} > 16."
+            assignments = np.array(list(product([0, 1], repeat=B_in)))
+            log_probs = np.zeros(2 ** B_in)
+            for ind, zk in enumerate(assignments):
+                # Expand the binary mask and pad with extra ones for the input and intercept
+                z = np.concatenate([np.kron(zk, np.ones(S_in)), np.ones(M + 1)])
+                J = J0 + 1 / sigmasq * ExxT * np.outer(z, z)
+                L = np.linalg.cholesky(J)
+                h = h0 + 1 / sigmasq * ExyT[:, slc] * z
+                tmp = solve_triangular(L, h, lower=True)
+
+                log_probs[ind] = np.sum(zk * np.log(rho) + (1 - zk) * np.log(1 - rho))
+                log_probs[ind] += 0.5 * np.sum(tmp ** 2) - S_out * np.sum(np.log(np.diag(L)))
+
+            # Save the posterior
+            Z_posteriors.append((assignments, np.exp(log_probs - logsumexp(log_probs))))
+
+            # Find the most likely assignment for these outputs
+            Z[bo] = assignments[np.argmax(log_probs)]
+            z = np.concatenate([np.kron(Z[bo], np.ones(S_in)), np.ones(1)])
+            J = J0 + 1 / sigmasq * ExxT * np.outer(z, z)
+            h = 1 / sigmasq * ExyT[:, slc] * z
+            W[slc] = np.linalg.solve(J, h).T
+
+        # Solve for the optimal variance
+        sqerr = EyyT - 2 * W @ ExyT + W @ ExxT @ W.T
+        sigmasq = np.sum(np.diag(sqerr)) / (En * D)
+
+        # Unpack the weights and intercept
+        A, V, b = W[:, :D], W[:, D:D+M], W[:, -1]
+        return A, V, b, Z, sigmasq, Z_posteriors
 
     def m_step(self, expectations, datas, inputs, masks, tags,
-               J0=None, h0=None, nu0=None, Psi0=None,
-               continuous_expectations=None, **kwargs):
+               J0=None, h0=None, continuous_expectations=None, **kwargs):
         """Compute M-step for Gaussian Auto Regressive Observations.
 
         If `continuous_expectations` is not None, this function will
@@ -1289,11 +1365,6 @@ class SparseAutoRegressiveObservations(AutoRegressiveDiagonalNoiseObservations):
         """
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
-        As = np.zeros((K, D, D * lags))
-        Vs = np.zeros((K, D, M))
-        bs = np.zeros((K, D))
-        Sigmas = np.zeros((K, D, D))
-
         # Set up the prior
         if J0 is None:
             J0_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
@@ -1307,67 +1378,19 @@ class SparseAutoRegressiveObservations(AutoRegressiveDiagonalNoiseObservations):
                                  np.zeros((M + 1, D))))
             h0 = np.tile(h0[None, :, :], (K, 1, 1))
 
-        if nu0 is None:
-            nu0 = 1
-
-        if Psi0 is None:
-            Psi0 = np.eye(D)
-        elif np.isscalar(Psi0):
-            Psi0 = Psi0 * np.eye(D)
-
         # Collect the data and weights
         if continuous_expectations is None:
-            ExuxuTs, ExuyTs, EyyTs, Ens = self._get_sufficient_statistics(expectations, datas, inputs)
+            ExuxuTs, ExuyTs, EyyTs, Ens = \
+                self._get_sufficient_statistics(expectations, datas, inputs)
         else:
-            # Continuous expectations are given for Ex, ExxT, and ExxnT
-            assert self.lags == 1, "Continuous expectations can only be given for lags=1 model"
-
-            # Augment the expectations with inputs (u) and affine terms (1's)
-            ExuxuTs = np.zeros((K, D + M + 1, D + M + 1))
-            ExuyTs = np.zeros((K, D + M + 1, D))
-            EyyTs = np.zeros((K, D, D))
-            Ens = np.zeros(K)
-
-            for (Ez, _, _), (_, Ex, Covx, Exxn), u in \
-                    zip(expectations, continuous_expectations, inputs):
-                ExxT = Covx + np.einsum('ti,tj->tij', Ex, Ex)
-                u = u[lags:]
-
-                for k in range(K):
-                    w = Ez[lags:, k]
-
-                    ExuxuTs[k, :D,       :D] += np.einsum('t,tij->ij', w, ExxT[:-1])
-                    ExuxuTs[k, :D,    D:D+M] += np.einsum('t,ti,tj->ij', w, Ex[:-1], u)
-                    ExuxuTs[k, :D,       -1] += np.einsum('t,ti->i', w, Ex[:-1])
-                    ExuxuTs[k, D:D+M, D:D+M] += np.einsum('t,ti,tj->ij', w, u, u)
-                    ExuxuTs[k, D:D+M,    -1] += np.einsum('t,ti->i', w, u)
-                    ExuxuTs[k, -1,       -1] += np.sum(w)
-
-                    ExuyTs[k, :D,    :] += np.einsum('t,tij->ij', w, Exxn)
-                    ExuyTs[k, D:D+M, :] += np.einsum('t,ti,tj->ij', w, u, Ex[1:])
-                    ExuyTs[k, -1,    :] += np.einsum('t,ti->i', w, Ex[1:])
-
-                    EyyTs[k] += np.einsum('t,tij->ij', w, ExxT[1:])
-                    Ens[k]   += np.sum(w)
-
-            # Symmetrize the expectations
-            for k in range(K):
-                ExuxuTs[k, D:D+M,    :D] = ExuxuTs[k, :D, D:D+M].T
-                ExuxuTs[k, -1,       :D] = ExuxuTs[k, :D, -1].T
-                ExuxuTs[k, -1,    D:D+M] = ExuxuTs[k, D:D+M, -1].T
-                assert np.allclose(ExuxuTs[k] - ExuxuTs[k].T, 0.0)
+            ExuxuTs, ExuyTs, EyyTs, Ens = \
+                self._extend_given_sufficient_statistics(expectations, continuous_expectations, inputs)
 
         # Solve the linear regressions
         for k in range(K):
-            Wk = np.linalg.solve(ExuxuTs[k] + J0[k], ExuyTs[k] + h0[k]).T
-            As[k] = Wk[:, :D * lags]
-            Vs[k] = Wk[:, D * lags:-1]
-            bs[k] = Wk[:, -1]
-
-            # Solve for the MAP estimate of the covariance
-            sqerr = EyyTs[k] - 2 * Wk @ ExuyTs[k] + Wk @ ExuxuTs[k] @ Wk.T
-            nu = nu0 + Ens[k]
-            Sigmas[k] = (sqerr + Psi0) / (nu + D + 1)
+            self._As[k], self.Vs[k], self.bs[k], self.As_mask[k], self.sigmasqs[k], _ = \
+                self.fit_sparse_linear_regression(ExuxuTs[k], ExuyTs[k], EyyTs[k], Ens[k],
+                                                  self.sigmasqs[k], J0[k], h0[k], rho=0.1)
 
         # If any states are unused, set their parameters to a perturbation of a used state
         unused = np.where(Ens < 1)[0]
@@ -1375,16 +1398,12 @@ class SparseAutoRegressiveObservations(AutoRegressiveDiagonalNoiseObservations):
         if len(unused) > 0:
             for k in unused:
                 i = npr.choice(used)
-                As[k] = As[i] + 0.01 * npr.randn(*As[i].shape)
-                Vs[k] = Vs[i] + 0.01 * npr.randn(*Vs[i].shape)
-                bs[k] = bs[i] + 0.01 * npr.randn(*bs[i].shape)
-                Sigmas[k] = Sigmas[i]
+                self._As[k] = self._As[i] + 0.01 * npr.randn(*self._As[i].shape)
+                self.Vs[k] = self.Vs[i] + 0.01 * npr.randn(*self.Vs[i].shape)
+                self.bs[k] = self.bs[i] + 0.01 * npr.randn(*self.bs[i].shape)
+                self.As_mask[k] = self.As_mask[i]
+                self.sigmasqs[k] = self.sigmasqs[i]
 
-        # Update parameters via their setter
-        self.As = As
-        self.Vs = Vs
-        self.bs = bs
-        self.Sigmas = Sigmas
 
 class IndependentAutoRegressiveObservations(_AutoRegressiveObservationsBase):
     def __init__(self, K, D, M=0, lags=1):
