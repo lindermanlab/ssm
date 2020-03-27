@@ -1274,6 +1274,18 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
         self.sigmasq_inits = np.ones((K,))
         self.sigmasqs = np.ones((K,))
 
+        # # Set up the prior
+        # J0_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
+        #                          self.l2_penalty_V * np.ones(M),
+        #                          self.l2_penalty_b * np.ones(1)))
+        # self.J0 = np.tile(np.diag(J0_diag)[None, :, :], (K, 1, 1))
+        #
+        # # h0 = np.concatenate((self.l2_penalty_A * np.eye(D),
+        # #                      np.zeros((D * (lags - 1), D)),
+        # #                      np.zeros((M + 1, D))))
+        # h0 = np.zeros((D * lags + M + 1, D))
+        # self.h0 = np.tile(h0[None, :, :], (K, 1, 1))
+
     @property
     def As(self):
         return self._As * np.kron(self.As_mask, np.ones(self.block_size))
@@ -1295,6 +1307,16 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
         self.As_mask = self.As_mask[perm]
         self.sigmasq_inits = self.sigmasq_inits[perm]
         self.sigmasqs = self.sigmasqs[perm]
+
+    # def log_prior(self):
+    #     lp = stats.bernoulli_logpdf(self.As_mask.ravel(), logit(self.sparsity))
+    #
+    #     # Evaluate the prior on A
+    #     mask = np.kron(self.As_mask, np.ones(self.block_size))
+    #     mus = np.linalg.solve(self.J0, self.h0)
+    #
+    #     lp += stats.diagonal_gaussian_logpdf(Avals.ravel(), 0, 1 / self.l2_penalty_A)
+    #     return lp
 
     def log_likelihoods(self, data, input, mask, tag):
         assert np.all(mask), "Cannot compute likelihood of autoregressive obsevations with missing data."
@@ -1380,17 +1402,11 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
         # Set up the prior
-        if J0 is None:
-            J0_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
-                                     self.l2_penalty_V * np.ones(M),
-                                     self.l2_penalty_b * np.ones(1)))
-            J0 = np.tile(np.diag(J0_diag)[None, :, :], (K, 1, 1))
-
-        if h0 is None:
-            h0 = np.concatenate((self.l2_penalty_A * np.eye(D),
-                                 np.zeros((D * (lags - 1), D)),
-                                 np.zeros((M + 1, D))))
-            h0 = np.tile(h0[None, :, :], (K, 1, 1))
+        J0_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
+                                  self.l2_penalty_V * np.ones(M),
+                                  self.l2_penalty_b * np.ones(1)))
+        J0 = np.tile(np.diag(J0_diag)[None, :, :], (K, 1, 1))
+        h0 = np.zeros((K, D * lags + M + 1, D))
 
         # Collect the data and weights
         if continuous_expectations is None:
