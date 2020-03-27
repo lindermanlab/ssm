@@ -935,6 +935,49 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
         return ExuxuTs, ExuyTs, EyyTs, Ens
 
+    def _extend_given_sufficient_statistics(self, expectations, continuous_expectations, inputs):
+        # Extend continuous_expectations with given inputs and discrete weights
+        assert self.lags == 1, "_extend_given_sufficient_statistics assumes lags == 1."
+        K, D, M, lags = self.K, self.D, self.M, self.lags
+        D_in = D * lags + M + 1
+
+        # Initialize the outputs
+        ExuxuTs = np.zeros((K, D_in, D_in))
+        ExuyTs = np.zeros((K, D_in, D))
+        EyyTs = np.zeros((K, D, D))
+        Ens = np.zeros(K)
+
+        for (Ez, _, _), (_, Ex, smoothed_sigmas, Exxn), u in \
+                zip(expectations, continuous_expectations, inputs):
+            ExxT = smoothed_sigmas + np.einsum('ti,tj->tij', Ex, Ex)
+            u = u[lags:]
+
+            for k in range(K):
+                w = Ez[lags:, k]
+
+                ExuxuTs[k, :D, :D] += np.einsum('t,tij->ij', w, ExxT[:-1])
+                ExuxuTs[k, :D, D:D + M] += np.einsum('t,ti,tj->ij', w, Ex[:-1], u)
+                ExuxuTs[k, :D, -1] += np.einsum('t,ti->i', w, Ex[:-1])
+                ExuxuTs[k, D:D + M, D:D + M] += np.einsum('t,ti,tj->ij', w, u, u)
+                ExuxuTs[k, D:D + M, -1] += np.einsum('t,ti->i', w, u)
+                ExuxuTs[k, -1, -1] += np.sum(w)
+
+                ExuyTs[k, :D, :] += np.einsum('t,tij->ij', w, Exxn)
+                ExuyTs[k, D:D + M, :] += np.einsum('t,ti,tj->ij', w, u, Ex[1:])
+                ExuyTs[k, -1, :] += np.einsum('t,ti->i', w, Ex[1:])
+
+                EyyTs[k] += np.einsum('t,tij->ij', w, ExxT[1:])
+                Ens[k] += np.sum(w)
+
+        # Symmetrize the expectations
+        for k in range(K):
+            ExuxuTs[k, D:D + M, :D] = ExuxuTs[k, :D, D:D + M].T
+            ExuxuTs[k, -1, :D] = ExuxuTs[k, :D, -1].T
+            ExuxuTs[k, -1, D:D + M] = ExuxuTs[k, D:D + M, -1].T
+            assert np.allclose(ExuxuTs[k] - ExuxuTs[k].T, 0.0)
+
+        return ExuxuTs, ExuyTs, EyyTs, Ens
+
     def m_step(self, expectations, datas, inputs, masks, tags,
                J0=None, h0=None, nu0=None, Psi0=None,
                continuous_expectations=None, **kwargs):
@@ -979,47 +1022,12 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         elif np.isscalar(Psi0):
             Psi0 = Psi0 * np.eye(D)
 
-        # Collect the data and weights
+        # Collect sufficient statistics
         if continuous_expectations is None:
             ExuxuTs, ExuyTs, EyyTs, Ens = self._get_sufficient_statistics(expectations, datas, inputs)
         else:
-            # Continuous expectations are given for Ex, ExxT, and ExxnT
-            assert self.lags == 1, "Continuous expectations can only be given for lags=1 model"
-
-            # Augment the expectations with inputs (u) and affine terms (1's)
-            ExuxuTs = np.zeros((K, D + M + 1, D + M + 1))
-            ExuyTs = np.zeros((K, D + M + 1, D))
-            EyyTs = np.zeros((K, D, D))
-            Ens = np.zeros(K)
-
-            for (Ez, _, _), (_, Ex, smoothed_sigmas, Exxn), u in \
-                    zip(expectations, continuous_expectations, inputs):
-                ExxT = smoothed_sigmas + np.einsum('ti,tj->tij', Ex, Ex)
-                u = u[lags:]
-
-                for k in range(K):
-                    w = Ez[lags:, k]
-
-                    ExuxuTs[k, :D,       :D] += np.einsum('t,tij->ij', w, ExxT[:-1])
-                    ExuxuTs[k, :D,    D:D+M] += np.einsum('t,ti,tj->ij', w, Ex[:-1], u)
-                    ExuxuTs[k, :D,       -1] += np.einsum('t,ti->i', w, Ex[:-1])
-                    ExuxuTs[k, D:D+M, D:D+M] += np.einsum('t,ti,tj->ij', w, u, u)
-                    ExuxuTs[k, D:D+M,    -1] += np.einsum('t,ti->i', w, u)
-                    ExuxuTs[k, -1,       -1] += np.sum(w)
-
-                    ExuyTs[k, :D,    :] += np.einsum('t,tij->ij', w, Exxn)
-                    ExuyTs[k, D:D+M, :] += np.einsum('t,ti,tj->ij', w, u, Ex[1:])
-                    ExuyTs[k, -1,    :] += np.einsum('t,ti->i', w, Ex[1:])
-
-                    EyyTs[k] += np.einsum('t,tij->ij', w, ExxT[1:])
-                    Ens[k]   += np.sum(w)
-
-            # Symmetrize the expectations
-            for k in range(K):
-                ExuxuTs[k, D:D+M,    :D] = ExuxuTs[k, :D, D:D+M].T
-                ExuxuTs[k, -1,       :D] = ExuxuTs[k, :D, -1].T
-                ExuxuTs[k, -1,    D:D+M] = ExuxuTs[k, D:D+M, -1].T
-                assert np.allclose(ExuxuTs[k] - ExuxuTs[k].T, 0.0)
+            ExuxuTs, ExuyTs, EyyTs, Ens = \
+                self._extend_given_sufficient_statistics(expectations, continuous_expectations, inputs)
 
         # Solve the linear regressions
         for k in range(K):
