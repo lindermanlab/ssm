@@ -974,7 +974,6 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             ExuxuTs[k, D:D + M, :D] = ExuxuTs[k, :D, D:D + M].T
             ExuxuTs[k, -1, :D] = ExuxuTs[k, :D, -1].T
             ExuxuTs[k, -1, D:D + M] = ExuxuTs[k, D:D + M, -1].T
-            assert np.allclose(ExuxuTs[k] - ExuxuTs[k].T, 0.0)
 
         return ExuxuTs, ExuyTs, EyyTs, Ens
 
@@ -995,11 +994,6 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         states from the posterior distribution.
         """
         K, D, M, lags = self.K, self.D, self.M, self.lags
-
-        As = np.zeros((K, D, D * lags))
-        Vs = np.zeros((K, D, M))
-        bs = np.zeros((K, D))
-        Sigmas = np.zeros((K, D, D))
 
         # Set up the prior
         if J0 is None:
@@ -1030,6 +1024,10 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 self._extend_given_sufficient_statistics(expectations, continuous_expectations, inputs)
 
         # Solve the linear regressions
+        As = np.zeros((K, D, D * lags))
+        Vs = np.zeros((K, D, M))
+        bs = np.zeros((K, D))
+        Sigmas = np.zeros((K, D, D))
         for k in range(K):
             Wk = np.linalg.solve(ExuxuTs[k] + J0[k], ExuyTs[k] + h0[k]).T
             As[k] = Wk[:, :D * lags]
