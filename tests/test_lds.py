@@ -546,7 +546,7 @@ def test_laplace_em(T=100, N=15, K=3, D=10):
                           "bernoulli_orthog",
                           ]:
             for input_dim in [0, 1]:
-                inputs = np.ones((T, input_dim))
+                inputs = npr.randn(T, input_dim)
                 true_slds = ssm.SLDS(N, K, D, M=input_dim,
                                      transitions=transitions,
                                      dynamics="gaussian",
