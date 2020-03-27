@@ -92,10 +92,10 @@ def fit_linear_regression(Xs, ys,
     else:
         weights = [np.ones(X.shape[0]) for X in Xs]
 
-    x_dim = d + int(fit_intercept)
+    x_dim = p + int(fit_intercept)
     ExxT = np.zeros((x_dim, x_dim))
-    ExyT = np.zeros((x_dim, p))
-    EyyT = np.zeros((p, p))
+    ExyT = np.zeros((x_dim, d))
+    EyyT = np.zeros((d, d))
     weight_sum = 0
     if expectations is None:
 
@@ -103,7 +103,7 @@ def fit_linear_regression(Xs, ys,
         # intercept term, if given.
         if prior_ExxT is not None and prior_ExyT is not None:
             check_shape(prior_ExxT, "prior_ExxT", (x_dim, x_dim))
-            check_shape(prior_ExyT, "prior_ExyT", (x_dim, p))
+            check_shape(prior_ExyT, "prior_ExyT", (x_dim, d))
             ExxT[:, :] = prior_ExxT
             ExyT[:, :] = prior_ExyT
 
@@ -119,8 +119,8 @@ def fit_linear_regression(Xs, ys,
     else:
         ExxT, ExyT, EyyT, weight_sum = expectations
         check_shape(ExxT, "ExxT", (x_dim, x_dim))
-        check_shape(ExyT, "ExyT", (x_dim, p))
-        check_shape(EyyT, "EyyT", (p, p))
+        check_shape(ExyT, "ExyT", (x_dim, d))
+        check_shape(EyyT, "EyyT", (d, d))
 
     # Solve for the MAP estimate
     W_full = np.linalg.solve(ExxT, ExyT).T

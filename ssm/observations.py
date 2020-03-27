@@ -847,7 +847,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None, localize=True):
-        # Sample time bins for each discrete state
+        # Sample time bins for each discrete state.
         # Use the data to cluster the time bins if specified.
         K, D, M, lags = self.K, self.D, self.M, self.lags
         Ts = [data.shape[0] for data in datas]
@@ -856,35 +856,15 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             km = KMeans(self.K)
             km.fit(np.vstack(datas))
             zs = np.split(km.labels_, np.cumsum(Ts)[:-1])
-            zs = [z[self.lags:] for z in zs]               # remove the ends
         else:
-            zs = [npr.choice(self.K, size=T-self.lags) for T in Ts]
+            zs = [npr.choice(self.K, size=T) for T in Ts]
 
-        # Initialize the weights with linear regression
-        Sigmas = []
-        for k in range(self.K):
-            ts = [np.where(z == k)[0] for z in zs]
-            Xs = [np.column_stack([data[t + l] for l in range(self.lags)] + [input[t, :self.M]])
-                  for t, data, input in zip(ts, datas, inputs)]
-            ys = [data[t+self.lags] for t, data in zip(ts, datas)]
+        # Make a one-hot encoding of z and treat it as HMM expectations
+        Ezs = [one_hot(z, K) for z in zs]
+        expectations = [(Ez, None, None) for Ez in Ezs]
 
-            # Solve the linear regression
-            J0 = np.diag(np.concatenate((self.l2_penalty_A * np.ones(D * lags),
-                                         self.l2_penalty_V * np.ones(M),
-                                         self.l2_penalty_b * np.ones(1))))
-            h0 = np.concatenate((np.zeros((D * (lags - 1), D)),
-                                 self.l2_penalty_A * np.eye(D),
-                                 np.zeros((M + 1, D))))
-
-            coef_, intercept_, Sigma = fit_linear_regression(
-                Xs, ys, prior_ExxT=J0, prior_ExyT=h0)
-            self.As[k] = coef_[:, :self.D * self.lags]
-            self.Vs[k] = coef_[:, self.D * self.lags:]
-            self.bs[k] = intercept_
-            Sigmas.append(Sigma)
-
-        # Set the variances all at once to use the setter
-        self.Sigmas = np.array(Sigmas)
+        # # Set the variances all at once to use the setter
+        self.m_step(expectations, datas, inputs, masks, tags)
 
     def log_likelihoods(self, data, input, mask, tag=None):
         assert np.all(mask), "Cannot compute likelihood of autoregressive obsevations with missing data."
@@ -903,8 +883,107 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
         return np.row_stack((ll_init, ll_ar))
 
+    def _get_sufficient_statistics(self, expectations, datas, inputs):
+        K, D, M, lags = self.K, self.D, self.M, self.lags
+        D_in = D * lags + M + 1
+
+        # Initialize the outputs
+        ExuxuTs = np.zeros((K, D_in, D_in))
+        ExuyTs = np.zeros((K, D_in, D))
+        EyyTs = np.zeros((K, D, D))
+        Ens = np.zeros(K)
+
+        # Iterate over data arrays and discrete states
+        for (Ez, _, _), data, input in zip(expectations, datas, inputs):
+            u = input[lags:]
+            y = data[lags:]
+            for k in range(K):
+                w = Ez[lags:, k]
+
+                # ExuxuTs[k]
+                for l1 in range(lags):
+                    x1 = data[lags-l1-1:-l1-1]
+                    # Cross terms between lagged data and other lags
+                    for l2 in range(l1, lags):
+                        x2 = data[lags - l2 - 1:-l2 - 1]
+                        ExuxuTs[k, l1*D:(l1+1)*D, l2*D:(l2+1)*D] += np.einsum('t,ti,tj->ij', w, x1, x2)
+
+                    # Cross terms between lagged data and inputs and bias
+                    ExuxuTs[k, l1*D:(l1+1)*D, D*lags:D*lags+M] += np.einsum('t,ti,tj->ij', w, x1, u)
+                    ExuxuTs[k, l1*D:(l1+1)*D, -1] += np.einsum('t,ti->i', w, x1)
+
+                ExuxuTs[k, D*lags:D*lags+M, D*lags:D*lags+M] += np.einsum('t,ti,tj->ij', w, u, u)
+                ExuxuTs[k, D*lags:D*lags+M, -1] += np.einsum('t,ti->i', w, u)
+                ExuxuTs[k, -1, -1] += np.sum(w)
+
+                # ExuyTs[k]
+                for l1 in range(lags):
+                    x1 = data[lags - l1 - 1:-l1 - 1]
+                    ExuyTs[k, l1*D:(l1+1)*D, :] += np.einsum('t,ti,tj->ij', w, x1, y)
+                ExuyTs[k, D*lags:D*lags+M, :] = np.einsum('t,ti,tj->ij', w, u, y)
+                ExuyTs[k, -1, :] = np.einsum('t,ti->i', w, y)
+
+                # EyyTs[k] and Ens[k]
+                EyyTs[k] = np.einsum('t,ti,tj->ij',w,y,y)
+                Ens[k] += np.sum(w)
+
+        # Symmetrize the expectations
+        for k in range(K):
+            for l1 in range(lags):
+                for l2 in range(l1, lags):
+                    ExuxuTs[k, l2*D:(l2+1)*D, l1*D:(l1+1)* D] = ExuxuTs[k, l1*D:(l1+1)*D, l2*D:(l2+1)*D].T
+                ExuxuTs[k, D*lags:D*lags+M, l1*D:(l1+1)*D] = ExuxuTs[k, l1*D:(l1+1)*D, D*lags:D*lags+M].T
+                ExuxuTs[k, -1, l1*D:(l1+1)*D] = ExuxuTs[k, l1*D:(l1+1)*D, -1]
+            ExuxuTs[k, -1, D*lags:D*lags+M] = ExuxuTs[k, D*lags:D*lags+M, -1].T
+
+        return ExuxuTs, ExuyTs, EyyTs, Ens
+
+    def _extend_given_sufficient_statistics(self, expectations, continuous_expectations, inputs):
+        # Continuous expectations are given for Ex, ExxT, and ExxnT
+        assert self.lags == 1, "_extend_given_sufficient_statistics assumes lags == 1."
+        K, D, M, lags = self.K, self.D, self.M, self.lags
+        D_in = D * lags + M + 1
+
+        # Initialize the outputs
+        ExuxuTs = np.zeros((K, D_in, D_in))
+        ExuyTs = np.zeros((K, D_in, D))
+        EyyTs = np.zeros((K, D, D))
+        Ens = np.zeros(K)
+
+        for (Ez, _, _), (_, Ex, smoothed_sigmas, Exxn), u in \
+                zip(expectations, continuous_expectations, inputs):
+            ExxT = smoothed_sigmas + np.einsum('ti,tj->tij', Ex, Ex)
+            u = u[lags:]
+
+            for k in range(K):
+                w = Ez[lags:, k]
+
+                ExuxuTs[k, :D, :D] += np.einsum('t,tij->ij', w, ExxT[:-1])
+                ExuxuTs[k, :D, D:D + M] += np.einsum('t,ti,tj->ij', w, Ex[:-1], u)
+                ExuxuTs[k, :D, -1] += np.einsum('t,ti->i', w, Ex[:-1])
+                ExuxuTs[k, D:D + M, D:D + M] += np.einsum('t,ti,tj->ij', w, u, u)
+                ExuxuTs[k, D:D + M, -1] += np.einsum('t,ti->i', w, u)
+                ExuxuTs[k, -1, -1] += np.sum(w)
+
+                ExuyTs[k, :D, :] += np.einsum('t,tij->ij', w, Exxn)
+                ExuyTs[k, D:D + M, :] += np.einsum('t,ti,tj->ij', w, u, Ex[1:])
+                ExuyTs[k, -1, :] += np.einsum('t,ti->i', w, Ex[1:])
+
+                EyyTs[k] += np.einsum('t,tij->ij', w, ExxT[1:])
+                Ens[k] += np.sum(w)
+
+        # Symmetrize the expectations
+        for k in range(K):
+            ExuxuTs[k, D:D + M, :D] = ExuxuTs[k, :D, D:D + M].T
+            ExuxuTs[k, -1, :D] = ExuxuTs[k, :D, -1].T
+            ExuxuTs[k, -1, D:D + M] = ExuxuTs[k, D:D + M, -1].T
+            assert np.allclose(ExuxuTs[k] - ExuxuTs[k].T, 0.0)
+
+        return ExuxuTs, ExuyTs, EyyTs, Ens
+
     def m_step(self, expectations, datas, inputs, masks, tags,
-               J0=None, h0=None, continuous_expectations=None, **kwargs):
+               J0=None, h0=None, nu0=None, Psi0=None,
+               continuous_expectations=None, **kwargs):
         """Compute M-step for Gaussian Auto Regressive Observations.
 
         If `continuous_expectations` is not None, this function will
@@ -920,7 +999,8 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         """
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
-        As = np.zeros((K, D, D * lags + M))
+        As = np.zeros((K, D, D * lags))
+        Vs = np.zeros((K, D, M))
         bs = np.zeros((K, D))
         Sigmas = np.zeros((K, D, D))
 
@@ -937,123 +1017,37 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                                  np.zeros((M + 1, D))))
             h0 = np.tile(h0[None, :, :], (K, 1, 1))
 
+        if nu0 is None:
+            nu0 = 1
+
+        if Psi0 is None:
+            Psi0 = np.eye(D)
+        elif np.isscalar(Psi0):
+            Psi0 = Psi0 * np.eye(D)
+
         # Collect the data and weights
-        xs, ys, Ezs = [], [], []
-        for (Ez, _, _), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
-            if not np.all(mask):
-                raise Exception("Encountered missing data in AutoRegressiveObservations!")
-            # Since the fit_linear_regression function includes an intercept, we
-            # don't need to append the intercept to the xs
-            xs.append(
-                np.hstack([data[self.lags-l-1:-l-1] for l in range(self.lags)]
-                          + [input[self.lags:, :self.M]])
-            )
-            ys.append(data[self.lags:])
-            Ezs.append(Ez[self.lags:])
-
         if continuous_expectations is None:
-            # Fit each linear regression to the data
-            for k in range(K):
-                weights_curr = [Ez[:, k] for Ez in Ezs]
-                A_curr, b_curr, sigma_curr = fit_linear_regression(xs, ys,
-                                        weights=weights_curr,
-                                        fit_intercept=True,
-                                        prior_ExxT=J0[k],
-                                        prior_ExyT=h0[k],
-                                        Psi0=1,
-                                        nu0=1
-                                    )
-                As[k] = A_curr
-                bs[k] = b_curr
-                Sigmas[k] = sigma_curr
+            ExuxuTs, ExuyTs, EyyTs, Ens = \
+                self._get_sufficient_statistics(expectations, datas, inputs)
         else:
-            # Continuous expectations are given. We are performing an exact
-            # m-step. Pass the sufficient statistics to fit_linear_regression
-            # along with the data.
-            # check instead that the expectations given are sufficient for the
-            # calculation (in practice this will only be used with lags=1)
-            assert self.lags == 1, "Exact parameter update is not yet "\
-                "supported for lags > 1"
+            ExuxuTs, ExuyTs, EyyTs, Ens = \
+                self._extend_given_sufficient_statistics(expectations, continuous_expectations, inputs)
 
-            # We have one expectation for each trial from the kalman filter.
-            # Unpack and reformat them for regression.
-            # Each element of ExxTs is a 3D array (T x D x D),
-            # Each element of ExxnTs is a 3D array (T-1 x D x D)
-            # We need to weight the expectations using Ezs,
-            # each element of Ezs is (T-1 x K), then sum along the T axis.
-            Eu = np.zeros((K, M))
-            Ex = np.zeros((K, D))
-            Ey = np.zeros((K, D))
-            ExxT = np.zeros((K, D, D))
-            ExyT = np.zeros((K, D, D))
-            EyyT = np.zeros((K, D, D))
-            for ez, (_, ex, smoothed_sigmas, exxn), u in zip(Ezs, continuous_expectations, inputs):
-                for k in range(K):
-                    exx = smoothed_sigmas + np.swapaxes(ex[:, None], 2,1) @ ex[:, None]
+        # Solve the linear regressions
+        for k in range(K):
+            Wk = np.linalg.solve(ExuxuTs[k] + J0[k], ExuyTs[k] + h0[k]).T
+            As[k] = Wk[:, :D * lags]
+            Vs[k] = Wk[:, D * lags:-1]
+            bs[k] = Wk[:, -1]
 
-                    Eu[k] += np.sum(u[:-1] * ez[:, k, None], axis=0)
-                    Ex[k] += np.sum(ex[:-1] * ez[:, k, None], axis=0)
-                    Ey[k] += np.sum(ex[1:] * ez[:, k, None], axis=0)
-                    ExxT[k] += np.sum(exx[:-1, :, :] * ez[:, k, None, None], axis=0)
-                    ExyT[k] += np.sum(exxn * ez[:, k, None, None], axis=0)
-                    EyyT[k] += np.sum(exx[1:, :, :] * ez[:, k, None, None], axis=0)
-
-            # Now we need to handle the "augmented" state vector x which includes
-            # the input and bias x_aug = [x u 1]^T, so E[x_aug x_aug^T] =
-            # E[ xxT xuT x]
-            #  [ uxT uuT u]
-            #  [ xT   uT 1]
-
-            # Dimension of ExxT aug should be (K, D+M+1, D+M+1)
-            for k in range(K):
-                weights_curr = [Ez[:, k] for Ez in Ezs]
-                pz_equal_k = np.sum(weights_curr)
-                if M > 0:
-                    ExxT_aug = np.block([
-                                        [ExxT[k], Ex[k].T @ Eu[k], Ex[k].T],
-                                        [Eu[k].T @ Ex[k], Eu[k].T @ Eu[k], Eu[k]],
-                                        [Ex[k], Eu[k], pz_equal_k]
-                                        ])
-                    ExyT_aug = np.block([
-                                        [ExyT[k]],
-                                        [Eu[k] @ Ey[k].T],
-                                        [Ey[k].T]
-                                        ])
-                else:
-                    ExxT_aug = np.block([
-                                        [ExxT[k], Ex[k, None].T],
-                                        [Ex[k, None], pz_equal_k]
-                                        ])
-                    ExyT_aug = np.block([
-                                        [ExyT[k]],
-                                        [Ey[k].T]
-                                        ])
-
-                # Add in the prior
-                ExxT_aug += J0[k]
-                ExyT_aug += h0[k]
-
-                # Solve the linear regression
-                A_curr, b_curr, sigma_curr = fit_linear_regression(
-                                    xs,
-                                    ys,
-                                    weights=None,
-                                    fit_intercept=True,
-                                    expectations=(ExxT_aug,
-                                                  ExyT_aug,
-                                                  EyyT[k],
-                                                  pz_equal_k),
-                                    Psi0=1,
-                                    nu0=1
-                                    )
-                As[k] = A_curr
-                bs[k] = b_curr
-                Sigmas[k] = sigma_curr
+            # Solve for the MAP estimate of the covariance
+            sqerr = EyyTs[k] - 2 * Wk @ ExuyTs[k] + Wk @ ExuxuTs[k] @ Wk.T
+            nu = nu0 + Ens[k]
+            Sigmas[k] = (sqerr + Psi0) / (nu + D + 1)
 
         # If any states are unused, set their parameters to a perturbation of a used state
-        usage = sum([Ez.sum(0) for Ez in Ezs])
-        unused = np.where(usage < 1)[0]
-        used = np.where(usage > 1)[0]
+        unused = np.where(Ens < 1)[0]
+        used = np.where(Ens > 1)[0]
         if len(unused) > 0:
             for k in unused:
                 i = npr.choice(used)
@@ -1062,8 +1056,9 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 bs[k] = bs[i] + 0.01 * npr.randn(*bs[i].shape)
                 Sigmas[k] = Sigmas[i]
 
-        # Access the properties via their setters
+        # Update parameters via their setter
         self.As = As
+        self.Vs = Vs
         self.bs = bs
         self.Sigmas = Sigmas
 
@@ -1275,8 +1270,10 @@ class SparseAutoRegressiveObservations(AutoRegressiveDiagonalNoiseObservations):
         super(SparseAutoRegressiveObservations, self).permute(perm)
         self.As_mask = self.As_mask[perm]
 
+
     def m_step(self, expectations, datas, inputs, masks, tags,
-               J0=None, h0=None, continuous_expectations=None, **kwargs):
+               J0=None, h0=None, nu0=None, Psi0=None,
+               continuous_expectations=None, **kwargs):
         """Compute M-step for Gaussian Auto Regressive Observations.
 
         If `continuous_expectations` is not None, this function will
@@ -1292,7 +1289,8 @@ class SparseAutoRegressiveObservations(AutoRegressiveDiagonalNoiseObservations):
         """
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
-        As = np.zeros((K, D, D * lags + M))
+        As = np.zeros((K, D, D * lags))
+        Vs = np.zeros((K, D, M))
         bs = np.zeros((K, D))
         Sigmas = np.zeros((K, D, D))
 
@@ -1309,137 +1307,84 @@ class SparseAutoRegressiveObservations(AutoRegressiveDiagonalNoiseObservations):
                                  np.zeros((M + 1, D))))
             h0 = np.tile(h0[None, :, :], (K, 1, 1))
 
+        if nu0 is None:
+            nu0 = 1
+
+        if Psi0 is None:
+            Psi0 = np.eye(D)
+        elif np.isscalar(Psi0):
+            Psi0 = Psi0 * np.eye(D)
+
         # Collect the data and weights
-        xs, ys, Ezs = [], [], []
-        for (Ez, _, _), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
-            if not np.all(mask):
-                raise Exception("Encountered missing data in AutoRegressiveObservations!")
-
-            # Since the fit_linear_regression function includes an intercept, we
-            # don't need to append the intercept to the xs
-            xs.append(
-                np.hstack([data[self.lags-l-1:-l-1] for l in range(self.lags)]
-                          + [input[self.lags:, :self.M]])
-            )
-            ys.append(data[self.lags:])
-            Ezs.append(Ez[self.lags:])
-
         if continuous_expectations is None:
-            # Fit each linear regression to the data
-            for k in range(K):
-                weights_curr = [Ez[:, k] for Ez in Ezs]
-                A_curr, b_curr, sigma_curr = fit_linear_regression(xs, ys,
-                                        weights=weights_curr,
-                                        fit_intercept=True,
-                                        prior_ExxT=J0[k],
-                                        prior_ExyT=h0[k],
-                                        Psi0=1,
-                                        nu0=1
-                                    )
-                As[k] = A_curr
-                bs[k] = b_curr
-                Sigmas[k] = sigma_curr
+            ExuxuTs, ExuyTs, EyyTs, Ens = self._get_sufficient_statistics(expectations, datas, inputs)
         else:
-            # Continuous expectations are given. We are performing an exact
-            # m-step. Pass the sufficient statistics to fit_linear_regression
-            # along with the data.
-            # check instead that the expectations given are sufficient for the
-            # calculation (in practice this will only be used with lags=1)
-            assert self.lags == 1, "Exact parameter update is not yet "\
-                "supported for lags > 1"
+            # Continuous expectations are given for Ex, ExxT, and ExxnT
+            assert self.lags == 1, "Continuous expectations can only be given for lags=1 model"
 
-            # We have one expectation for each trial from the kalman filter.
-            # Unpack and reformat them for regression.
-            # Each element of ExxTs is a 3D array (T x D x D),
-            # Each element of ExxnTs is a 3D array (T-1 x D x D)
-            # We need to weight the expectations using Ezs,
-            # each element of Ezs is (T-1 x K), then sum along the T axis.
-            Eu = np.zeros((K, M))
-            Ex = np.zeros((K, D))
-            Ey = np.zeros((K, D))
-            ExxT = np.zeros((K, D, D))
-            ExyT = np.zeros((K, D, D))
-            EyyT = np.zeros((K, D, D))
-            for ez, (_, ex, smoothed_sigmas, exxn), u in zip(Ezs, continuous_expectations, inputs):
+            # Augment the expectations with inputs (u) and affine terms (1's)
+            ExuxuTs = np.zeros((K, D + M + 1, D + M + 1))
+            ExuyTs = np.zeros((K, D + M + 1, D))
+            EyyTs = np.zeros((K, D, D))
+            Ens = np.zeros(K)
+
+            for (Ez, _, _), (_, Ex, Covx, Exxn), u in \
+                    zip(expectations, continuous_expectations, inputs):
+                ExxT = Covx + np.einsum('ti,tj->tij', Ex, Ex)
+                u = u[lags:]
+
                 for k in range(K):
-                    exx = smoothed_sigmas + np.swapaxes(ex[:, None], 2,1) @ ex[:, None]
+                    w = Ez[lags:, k]
 
-                    Eu[k] += np.sum(u[:-1] * ez[:, k, None], axis=0)
-                    Ex[k] += np.sum(ex[:-1] * ez[:, k, None], axis=0)
-                    Ey[k] += np.sum(ex[1:] * ez[:, k, None], axis=0)
-                    ExxT[k] += np.sum(exx[:-1, :, :] * ez[:, k, None, None], axis=0)
-                    ExyT[k] += np.sum(exxn * ez[:, k, None, None], axis=0)
-                    EyyT[k] += np.sum(exx[1:, :, :] * ez[:, k, None, None], axis=0)
+                    ExuxuTs[k, :D,       :D] += np.einsum('t,tij->ij', w, ExxT[:-1])
+                    ExuxuTs[k, :D,    D:D+M] += np.einsum('t,ti,tj->ij', w, Ex[:-1], u)
+                    ExuxuTs[k, :D,       -1] += np.einsum('t,ti->i', w, Ex[:-1])
+                    ExuxuTs[k, D:D+M, D:D+M] += np.einsum('t,ti,tj->ij', w, u, u)
+                    ExuxuTs[k, D:D+M,    -1] += np.einsum('t,ti->i', w, u)
+                    ExuxuTs[k, -1,       -1] += np.sum(w)
 
-            # Now we need to handle the "augmented" state vector x which includes
-            # the input and bias x_aug = [x u 1]^T, so E[x_aug x_aug^T] =
-            # E[ xxT xuT x]
-            #  [ uxT uuT u]
-            #  [ xT   uT 1]
+                    ExuyTs[k, :D,    :] += np.einsum('t,tij->ij', w, Exxn)
+                    ExuyTs[k, D:D+M, :] += np.einsum('t,ti,tj->ij', w, u, Ex[1:])
+                    ExuyTs[k, -1,    :] += np.einsum('t,ti->i', w, Ex[1:])
 
-            # Dimension of ExxT aug should be (K, D+M+1, D+M+1)
+                    EyyTs[k] += np.einsum('t,tij->ij', w, ExxT[1:])
+                    Ens[k]   += np.sum(w)
+
+            # Symmetrize the expectations
             for k in range(K):
-                weights_curr = [Ez[:, k] for Ez in Ezs]
-                pz_equal_k = np.sum(weights_curr)
-                if M > 0:
-                    ExxT_aug = np.block([
-                                        [ExxT[k], Ex[k].T @ Eu[k], Ex[k].T],
-                                        [Eu[k].T @ Ex[k], Eu[k].T @ Eu[k], Eu[k]],
-                                        [Ex[k], Eu[k], pz_equal_k]
-                                        ])
-                    ExyT_aug = np.block([
-                                        [ExyT[k]],
-                                        [Eu[k] @ Ey[k].T],
-                                        [Ey[k].T]
-                                        ])
-                else:
-                    ExxT_aug = np.block([
-                                        [ExxT[k], Ex[k, None].T],
-                                        [Ex[k, None], pz_equal_k]
-                                        ])
-                    ExyT_aug = np.block([
-                                        [ExyT[k]],
-                                        [Ey[k].T]
-                                        ])
+                ExuxuTs[k, D:D+M,    :D] = ExuxuTs[k, :D, D:D+M].T
+                ExuxuTs[k, -1,       :D] = ExuxuTs[k, :D, -1].T
+                ExuxuTs[k, -1,    D:D+M] = ExuxuTs[k, D:D+M, -1].T
+                assert np.allclose(ExuxuTs[k] - ExuxuTs[k].T, 0.0)
 
-                # Add in the prior
-                ExxT_aug += J0[k]
-                ExyT_aug += h0[k]
+        # Solve the linear regressions
+        for k in range(K):
+            Wk = np.linalg.solve(ExuxuTs[k] + J0[k], ExuyTs[k] + h0[k]).T
+            As[k] = Wk[:, :D * lags]
+            Vs[k] = Wk[:, D * lags:-1]
+            bs[k] = Wk[:, -1]
 
-                # Solve the linear regression
-                A_curr, b_curr, sigma_curr = fit_linear_regression(
-                                    xs,
-                                    ys,
-                                    weights=None,
-                                    fit_intercept=True,
-                                    expectations=(ExxT_aug,
-                                                  ExyT_aug,
-                                                  EyyT[k],
-                                                  pz_equal_k),
-                                    Psi0=1,
-                                    nu0=1
-                                    )
-                As[k] = A_curr
-                bs[k] = b_curr
-                Sigmas[k] = sigma_curr
+            # Solve for the MAP estimate of the covariance
+            sqerr = EyyTs[k] - 2 * Wk @ ExuyTs[k] + Wk @ ExuxuTs[k] @ Wk.T
+            nu = nu0 + Ens[k]
+            Sigmas[k] = (sqerr + Psi0) / (nu + D + 1)
 
         # If any states are unused, set their parameters to a perturbation of a used state
-        usage = sum([Ez.sum(0) for Ez in Ezs])
-        unused = np.where(usage < 1)[0]
-        used = np.where(usage > 1)[0]
+        unused = np.where(Ens < 1)[0]
+        used = np.where(Ens > 1)[0]
         if len(unused) > 0:
             for k in unused:
                 i = npr.choice(used)
-                self.As[k] = self.As[i] + 0.01 * npr.randn(*self.As[i].shape)
-                self.Vs[k] = self.Vs[i] + 0.01 * npr.randn(*self.Vs[i].shape)
-                self.bs[k] = self.bs[i] + 0.01 * npr.randn(*self.bs[i].shape)
-                self.Sigmas[k] = Sigmas[i]
+                As[k] = As[i] + 0.01 * npr.randn(*As[i].shape)
+                Vs[k] = Vs[i] + 0.01 * npr.randn(*Vs[i].shape)
+                bs[k] = bs[i] + 0.01 * npr.randn(*bs[i].shape)
+                Sigmas[k] = Sigmas[i]
 
-        # Access the setters
+        # Update parameters via their setter
         self.As = As
+        self.Vs = Vs
         self.bs = bs
         self.Sigmas = Sigmas
-
 
 class IndependentAutoRegressiveObservations(_AutoRegressiveObservationsBase):
     def __init__(self, K, D, M=0, lags=1):
