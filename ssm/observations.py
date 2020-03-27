@@ -1012,8 +1012,8 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             J0 = np.tile(np.diag(J0_diag)[None, :, :], (K, 1, 1))
 
         if h0 is None:
-            h0 = np.concatenate((np.zeros((D * (lags - 1), D)),
-                                 self.l2_penalty_A * np.eye(D),
+            h0 = np.concatenate((self.l2_penalty_A * np.eye(D),
+                                 np.zeros((D * (lags - 1), D)),
                                  np.zeros((M + 1, D))))
             h0 = np.tile(h0[None, :, :], (K, 1, 1))
 
@@ -1243,7 +1243,8 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
                  prior_precicion_A=1,
                  prior_precicion_b=1e-8,
                  prior_precicion_V=1e-8,
-                 block_size=(1,1)):
+                 block_size=(1,1),
+                 sparsity=0.1):
         assert lags == 1, "Sparse AR model is only implemented for lags==1"
 
         super(SparseAutoRegressiveObservations, self).\
@@ -1263,6 +1264,8 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
         assert D % block_size[1] == 0, "block size must perfectly divide D"
         self.block_size = block_size
         self.As_mask = np.ones((K, D // block_size[0], D // block_size[1]), dtype=bool)
+        assert 0 < sparsity < 1
+        self.sparsity = sparsity
 
         # Our current code assumes isotropic variance for efficiency.
         # Get rid of the square root parameterization and replace with sigmasq
@@ -1348,7 +1351,7 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
             Z[bo] = assignments[np.argmax(log_probs)]
             z = np.concatenate([np.kron(Z[bo], np.ones(S_in)), np.ones(1)])
             J = J0 + 1 / sigmasq * ExxT * np.outer(z, z)
-            h = 1 / sigmasq * ExyT[:, slc] * z[:, None]
+            h = h0[:, slc] + 1 / sigmasq * ExyT[:, slc] * z[:, None]
             W[slc] = np.linalg.solve(J, h).T
 
         # Solve for the optimal variance
@@ -1384,8 +1387,8 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
             J0 = np.tile(np.diag(J0_diag)[None, :, :], (K, 1, 1))
 
         if h0 is None:
-            h0 = np.concatenate((np.zeros((D * (lags - 1), D)),
-                                 self.l2_penalty_A * np.eye(D),
+            h0 = np.concatenate((self.l2_penalty_A * np.eye(D),
+                                 np.zeros((D * (lags - 1), D)),
                                  np.zeros((M + 1, D))))
             h0 = np.tile(h0[None, :, :], (K, 1, 1))
 
@@ -1401,7 +1404,7 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
         for k in range(K):
             self._As[k], self.Vs[k], self.bs[k], self.As_mask[k], self.sigmasqs[k], _ = \
                 self.fit_sparse_linear_regression(ExuxuTs[k], ExuyTs[k], EyyTs[k], Ens[k],
-                                                  self.sigmasqs[k], J0[k], h0[k], rho=0.1)
+                                                  self.sigmasqs[k], J0[k], h0[k], self.sparsity)
 
         # If any states are unused, set their parameters to a perturbation of a used state
         unused = np.where(Ens < 1)[0]
