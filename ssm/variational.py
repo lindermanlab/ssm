@@ -341,12 +341,13 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         h_dyn_2 = np.zeros((T - 1, D))
 
         # Set the posterior mean based on the emission model, if possible.
-        if self.model.emissions.single_subspace:
+        if self.model.emissions.single_subspace and self.model.emissions.N >= D:
             h_obs = (1.0 / self.initial_variance) * self.model.emissions. \
                 invert(data, input=input, mask=mask, tag=tag)
         else:
-            warn("Posterior initialization is not implemented for multiple subspaces. \
-                  A random initialization is used.")
+            warn("We can only initialize the continuous states if the emissions lie in a "
+                 "single subspace and are of higher dimension than the latent states."
+                 "Defaulting to a random initialization instead.")
             h_obs = (1.0 / self.initial_variance) * np.random.randn(data.shape[0], self.D)
 
         # Initialize the posterior variance to self.initial_variance * I

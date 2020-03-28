@@ -820,6 +820,11 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
     def Sigmas_init(self):
         return np.matmul(self._sqrt_Sigmas_init, np.swapaxes(self._sqrt_Sigmas_init, -1, -2))
 
+    @Sigmas_init.setter
+    def Sigmas_init(self, value):
+        assert value.shape == (self.K, self.D, self.D)
+        self._sqrt_Sigmas_init = np.linalg.cholesky(value)
+
     @property
     def Sigmas(self):
         return np.matmul(self._sqrt_Sigmas, np.swapaxes(self._sqrt_Sigmas, -1, -2))
