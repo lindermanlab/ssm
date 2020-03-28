@@ -1093,6 +1093,72 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         return J_ini, J_dyn_11, J_dyn_21, J_dyn_22
 
 
+class AutoRegressiveRotationalObservations(AutoRegressiveObservations):
+    """
+    AutoRegressive observation model where the matrix A is constrained to be orthogonal.
+    As a result of this constraint, we do an approximate M-Step which assumes noise
+    covariance to be identity.
+
+    This is intended for use as the dynamics of a rotational LDS, in order to create
+    a probabilistic version of jPCA.
+
+    The original formulation of jPCA is from Churchland et al 2012:
+    https://www.nature.com/articles/nature11129.
+
+    NOTE: For now, this uses a simple rotational dynamical system with no inputs and no offset vector.
+          x_{t+1} = Ax_t + noise.
+    """
+    def __init__(self, K, D, M=0, lags=1):
+        assert lags == 1, "Lags must be 1. This observation model is undefined otherwise."
+        assert M == 0, "This model does not support inputs yet."
+        super(AutoRegressiveRotationalObservations, self).\
+            __init__(K, D, M=0, lags=lags)
+        self.As = [random_rotation(D) for _ in range(K)]
+
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None, localize=True):
+        super(AutoRegressiveRotationalObservations, self).\
+            initialize(datas, inputs=inputs, masks=masks, tags=tags, localize=localize)
+        D, K = self.D, self.K
+        self.Sigmas = np.tile(np.eye(D), (K, 1, 1))
+
+    def m_step(self, expectations, datas, inputs, masks, tags, continuous_expectations=None, J0=None, h0=None):
+        """Simplified m_step for orthogonal dynamics matrix
+
+        We only consider the case where K=1, lags=1, which simplifies some of the m-step
+        calculations. We don't allow an l2 penalty on the A-update, since we already have
+        the orthogonality constraint.
+        """
+        K, D, M, lags = self.K, self.D, self.M, self.lags
+
+        # Collect sufficient statistics
+        if continuous_expectations is None:
+            ExuxuTs, ExuyTs, EyyTs, Ens = self._get_sufficient_statistics(expectations, datas, inputs)
+        else:
+            ExuxuTs, ExuyTs, EyyTs, Ens = \
+                self._extend_given_sufficient_statistics(expectations, continuous_expectations, inputs)
+
+        # For now, we are not handling a bias term, so we ignore the last row
+        ExuyTs = ExuyTs[:, :-1, :]
+
+        # The M-Step for the A matrix is modified so that it remains a rotation
+        # matrix during the update. For the purposes of this step, we are
+        # assuming identity covariance, which amounts to solving an instance of
+        # the Orthogonal Procrustes Problem. The solution is given by the SVD of
+        # the expected sufficient statistics -- see 2006 PhD thesis by Thomas
+        # Viklands for more info: https://people.cs.umu.se/viklands/PhD.pdf
+
+        # SVD broadcasts along the K dimension, so we can solve for
+        # all A matrices simultaneously.
+        U, _, Vt = np.linalg.svd(ExuyTs)
+        V = np.swapaxes(Vt, -1, -2)
+        Ut = np.swapaxes(U, -1, -2)
+        c = np.tile(np.eye(D), (K, 1, 1))
+        c[:, -1, -1] = np.sign(np.linalg.det(V @ Ut))
+        self.As = V @ c @ Ut
+
+
+
 class AutoRegressiveObservationsNoInput(AutoRegressiveObservations):
     """
     AutoRegressive observation model without the inputs.
