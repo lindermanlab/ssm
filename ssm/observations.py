@@ -794,10 +794,6 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         self._sqrt_Sigmas_init = np.tile(np.eye(D)[None, ...], (K, 1, 1))
         self._sqrt_Sigmas = npr.randn(K, D, D)
 
-        # Regularization penalties on A, b, V, and Sigma
-        self.nu0 = nu0
-        self.Psi0 = Psi0 * np.eye(D) if np.isscalar(Psi0) else Psi0
-
         # Set natural parameters of Gaussian prior on (A, V, b) weight matrix
         J0_diag = np.concatenate((l2_penalty_A * np.ones(D * lags),
                                   l2_penalty_V * np.ones(M),
@@ -811,9 +807,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
         # Set natural parameters of inverse Wishart prior on Sigma
         self.nu0 = nu0
-        if np.isscalar(Psi0):
-            Psi0 = Psi0 * np.eye(D)
-        self.Psi0 = Psi0
+        self.Psi0 = Psi0 * np.eye(D) if np.isscalar(Psi0) else Psi0
 
     @property
     def A(self):
