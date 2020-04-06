@@ -781,7 +781,8 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
     def __init__(self, K, D, M=0, lags=1,
                  l2_penalty_A=1e-8,
                  l2_penalty_b=1e-8,
-                 l2_penalty_V=1e-8):
+                 l2_penalty_V=1e-8,
+                 nu0=1e-4, Psi0=1e-4):
         super(AutoRegressiveObservations, self).\
             __init__(K, D, M, lags=lags)
 
@@ -793,10 +794,26 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         self._sqrt_Sigmas_init = np.tile(np.eye(D)[None, ...], (K, 1, 1))
         self._sqrt_Sigmas = npr.randn(K, D, D)
 
-        # Regularization penalties on A, b, and V
-        self.l2_penalty_A = l2_penalty_A
-        self.l2_penalty_b = l2_penalty_b
-        self.l2_penalty_V = l2_penalty_V
+        # Regularization penalties on A, b, V, and Sigma
+        self.nu0 = nu0
+        self.Psi0 = Psi0 * np.eye(D) if np.isscalar(Psi0) else Psi0
+
+        # Set natural parameters of Gaussian prior on (A, V, b) weight matrix
+        J0_diag = np.concatenate((l2_penalty_A * np.ones(D * lags),
+                                  l2_penalty_V * np.ones(M),
+                                  l2_penalty_b * np.ones(1)))
+        self.J0 = np.tile(np.diag(J0_diag)[None, :, :], (K, 1, 1))
+
+        h0 = np.concatenate((np.zeros((D * (lags - 1), D)),
+                             l2_penalty_A * np.eye(D),
+                             np.zeros((M + 1, D))))
+        self.h0 = np.tile(h0[None, :, :], (K, 1, 1))
+
+        # Set natural parameters of inverse Wishart prior on Sigma
+        self.nu0 = nu0
+        if np.isscalar(Psi0):
+            Psi0 = Psi0 * np.eye(D)
+        self.Psi0 = Psi0
 
     @property
     def A(self):
@@ -823,7 +840,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
     @Sigmas_init.setter
     def Sigmas_init(self, value):
         assert value.shape == (self.K, self.D, self.D)
-        self._sqrt_Sigmas_init = np.linalg.cholesky(value)
+        self._sqrt_Sigmas_init = np.linalg.cholesky(value + 1e-8 * np.eye(self.D))
 
     @property
     def Sigmas(self):
@@ -832,7 +849,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
     @Sigmas.setter
     def Sigmas(self, value):
         assert value.shape == (self.K, self.D, self.D)
-        self._sqrt_Sigmas = np.linalg.cholesky(value)
+        self._sqrt_Sigmas = np.linalg.cholesky(value + 1e-8 * np.eye(self.D))
 
     @property
     def params(self):
@@ -983,7 +1000,6 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         return ExuxuTs, ExuyTs, EyyTs, Ens
 
     def m_step(self, expectations, datas, inputs, masks, tags,
-               J0=None, h0=None, nu0=None, Psi0=None,
                continuous_expectations=None, **kwargs):
         """Compute M-step for Gaussian Auto Regressive Observations.
 
@@ -1000,27 +1016,6 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         """
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
-        # Set up the prior
-        if J0 is None:
-            J0_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
-                                     self.l2_penalty_V * np.ones(M),
-                                     self.l2_penalty_b * np.ones(1)))
-            J0 = np.tile(np.diag(J0_diag)[None, :, :], (K, 1, 1))
-
-        if h0 is None:
-            h0 = np.concatenate((np.zeros((D * (lags - 1), D)),
-                                 self.l2_penalty_A * np.eye(D),
-                                 np.zeros((M + 1, D))))
-            h0 = np.tile(h0[None, :, :], (K, 1, 1))
-
-        if nu0 is None:
-            nu0 = 1
-
-        if Psi0 is None:
-            Psi0 = np.eye(D)
-        elif np.isscalar(Psi0):
-            Psi0 = Psi0 * np.eye(D)
-
         # Collect sufficient statistics
         if continuous_expectations is None:
             ExuxuTs, ExuyTs, EyyTs, Ens = self._get_sufficient_statistics(expectations, datas, inputs)
@@ -1034,15 +1029,15 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         bs = np.zeros((K, D))
         Sigmas = np.zeros((K, D, D))
         for k in range(K):
-            Wk = np.linalg.solve(ExuxuTs[k] + J0[k], ExuyTs[k] + h0[k]).T
+            Wk = np.linalg.solve(ExuxuTs[k] + self.J0[k], ExuyTs[k] + self.h0[k]).T
             As[k] = Wk[:, :D * lags]
             Vs[k] = Wk[:, D * lags:-1]
             bs[k] = Wk[:, -1]
 
             # Solve for the MAP estimate of the covariance
             sqerr = EyyTs[k] - 2 * Wk @ ExuyTs[k] + Wk @ ExuxuTs[k] @ Wk.T
-            nu = nu0 + Ens[k]
-            Sigmas[k] = (sqerr + Psi0) / (nu + D + 1)
+            nu = self.nu0 + Ens[k]
+            Sigmas[k] = (sqerr + self.Psi0) / (nu + D + 1)
 
         # If any states are unused, set their parameters to a perturbation of a used state
         unused = np.where(Ens < 1)[0]
