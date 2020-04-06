@@ -163,7 +163,7 @@ def standardize(data, mask):
     return y
 
 
-def jPCA_project(mean_states, rotation_matrix, num_components=2):
+def jPCA_project(data, rotation_matrix, num_components=2):
     """
     Project data into dimensions which capture rotations.
     We assume that rotation_matrix is an orthogonal matrix which was found
@@ -172,7 +172,7 @@ def jPCA_project(mean_states, rotation_matrix, num_components=2):
 
     Args
     ----
-    data: T x D array of data points (often pre-processed by PCA)
+    data: list of T x D arrays of data points (often pre-processed by PCA)
     rotation_matrix: D x D rotation matrix
     num_components: number of components to use for projection (default is 2)
 
@@ -205,19 +205,23 @@ def jPCA_project(mean_states, rotation_matrix, num_components=2):
         V = np.real(np.column_stack((v1, v2))) / np.sqrt(2)
 
         # Adapted from jPCA Matlab code:
-        # Rotate bases so that the rotations are vertical
-        test_proj = mean_states[0] @ V
-        pca = PCA(2)
+        # Rotate bases so that the "plan" state is spread mostly
+        # along the horizontal axis. We first get the data from each trial
+        # at time zero.
+        plan_states = [x[0] for x in data]
+        plan_states = np.row_stack(plan_states)
+        test_proj = plan_states @ V
+        pca = PCA(n_components=2)
         pca = pca.fit(test_proj)
         rotv = pca.components_
 
-        pc1 = np.append(rotv[:,0],0)
-        pc2 = np.append(rotv[:, 1], 0)
+        pc1 = np.append(rotv[:,1],0)
+        pc2 = np.append(rotv[:, 0], 0)
         cross = np.cross(pc1, pc2)
         if cross[2] > 0:
             rotv[:, 1] = -rotv[:, 1]
         V = V @ rotv
-        test_proj = mean_states[0] @ V
+        test_proj = np.concatenate(data) @ V
 
         # Adapted from jPCA matlab code
         # so that plots are consistent. 
@@ -227,6 +231,6 @@ def jPCA_project(mean_states, rotation_matrix, num_components=2):
         jpca_basis[:, k:k+2] = V
 
     out = []
-    for state in mean_states:
-        out.append(state @ jpca_basis)
+    for trial in data:
+        out.append(trial @ jpca_basis)
     return out
