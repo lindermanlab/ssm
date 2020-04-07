@@ -1409,6 +1409,12 @@ class _RobustAutoRegressiveObservationsMixin(object):
                      l2_penalty_V=l2_penalty_V)
         self._log_nus = np.log(4) * np.ones(K)
 
+        J_diag = np.concatenate((l2_penalty_A * np.ones(D * lags),
+                                 l2_penalty_V * np.ones(M),
+                                 l2_penalty_b * np.ones(1)))
+        self.J0 = np.tile(np.diag(J_diag)[None, :, :], (K, 1, 1))
+        self.h0 = np.zeros((K, D * lags + M + 1, D))
+
     @property
     def nus(self):
         return np.exp(self._log_nus)
@@ -1444,16 +1450,16 @@ class _RobustAutoRegressiveObservationsMixin(object):
 
         return np.row_stack((ll_init, ll_ar))
 
-    def m_step(self, expectations, datas, inputs, masks, tags, num_em_iters=1, J0=None, h0=None):
+    def m_step(self, expectations, datas, inputs, masks, tags, num_em_iters=1):
         """
         Student's t is a scale mixture of Gaussians.  We can estimate its
         parameters using the EM algorithm. See the notebook in doc/students_t
         for complete details.
         """
-        self._m_step_ar(expectations, datas, inputs, masks, tags, num_em_iters, J0=J0, h0=h0)
+        self._m_step_ar(expectations, datas, inputs, masks, tags, num_em_iters)
         self._m_step_nu(expectations, datas, inputs, masks, tags)
 
-    def _m_step_ar(self, expectations, datas, inputs, masks, tags, num_em_iters, J0=None, h0=None):
+    def _m_step_ar(self, expectations, datas, inputs, masks, tags, num_em_iters):
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
         # Collect data for this dimension
@@ -1485,18 +1491,8 @@ class _RobustAutoRegressiveObservationsMixin(object):
             # M step: Fit the weighted linear regressions for each K and D
             # This is exactly the same as the M-step for the AutoRegressiveObservations,
             # but it has an extra scaling factor of tau applied to the weight.
-            if J0 is None and h0 is None:
-                J_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
-                                 self.l2_penalty_V * np.ones(M),
-                                 self.l2_penalty_b * np.ones(1)))
-                J = np.tile(np.diag(J_diag)[None, :, :], (K, 1, 1))
-                h = np.zeros((K, D * lags + M + 1, D))
-            else:
-                assert J0.shape == (K, D*lags + M + 1, D*lags + M + 1)
-                assert h0.shape == (K, D*lags + M + 1, D)
-                J = J0
-                h = h0
-
+            J = self.J0
+            h = self.h0
             for x, y, Ez, tau in zip(xs, ys, Ezs, taus):
                 weight = Ez * tau
                 # Einsum is concise but slow!

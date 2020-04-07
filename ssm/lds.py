@@ -580,7 +580,12 @@ class SLDS(object):
                       masks=xmasks,
                       tags=tags
         )
-        if isinstance(self.dynamics, obs.AutoRegressiveObservations) and self.dynamics.lags == 1:
+        exact_m_step_dynamics = [
+           obs.AutoRegressiveObservations,
+           obs.AutoRegressiveObservationsNoInput,
+           obs.AutoRegressiveDiagonalNoiseObservations, 
+        ]
+        if type(self.dynamics) in exact_m_step_dynamics and self.dynamics.lags == 1:
             # In this case, we can do an exact M-step on the dynamics by passing
             # in the true sufficient statistics for the continuous state.
             kwargs["continuous_expectations"] = variational_posterior.continuous_expectations
