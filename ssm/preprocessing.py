@@ -180,6 +180,7 @@ def jPCA_project(data, rotation_matrix, num_components=2):
     -------
     out: T x num_components project of the data, which should capture rotations
     """
+    data = data if isinstance(data, list) else [data]
     D, _ = rotation_matrix.shape
     assert num_components % 2 == 0, "num_components needs to be even."
     assert num_components <= D, "num_components must be less than " \
@@ -207,20 +208,21 @@ def jPCA_project(data, rotation_matrix, num_components=2):
         # Adapted from jPCA Matlab code:
         # Rotate bases so that the "plan" state is spread mostly
         # along the horizontal axis. We first get the data from each trial
-        # at time zero.
-        plan_states = [x[0] for x in data]
-        plan_states = np.row_stack(plan_states)
-        test_proj = plan_states @ V
-        pca = PCA(n_components=2)
-        pca = pca.fit(test_proj)
-        rotv = pca.components_
+        # at time zero. We can only do this procedure with multiple trials.
+        if len(data) >= 2:
+            plan_states = [x[0] for x in data]
+            plan_states = np.row_stack(plan_states)
+            test_proj = plan_states @ V
+            pca = PCA(n_components=2)
+            pca = pca.fit(test_proj)
+            rotv = pca.components_
 
-        pc1 = np.append(rotv[:,1],0)
-        pc2 = np.append(rotv[:, 0], 0)
-        cross = np.cross(pc1, pc2)
-        if cross[2] > 0:
-            rotv[:, 1] = -rotv[:, 1]
-        V = V @ rotv
+            pc1 = np.append(rotv[:,1],0)
+            pc2 = np.append(rotv[:, 0], 0)
+            cross = np.cross(pc1, pc2)
+            if cross[2] > 0:
+                rotv[:, 1] = -rotv[:, 1]
+            V = V @ rotv
         test_proj = np.concatenate(data) @ V
 
         # Adapted from jPCA matlab code
@@ -233,4 +235,7 @@ def jPCA_project(data, rotation_matrix, num_components=2):
     out = []
     for trial in data:
         out.append(trial @ jpca_basis)
-    return out
+
+    # check that the jpca basis is orthogonal
+    assert(np.allclose(jpca_basis.T @ jpca_basis, np.eye(num_components)))
+    return out, jpca_basis
