@@ -1491,8 +1491,8 @@ class _RobustAutoRegressiveObservationsMixin(object):
             # M step: Fit the weighted linear regressions for each K and D
             # This is exactly the same as the M-step for the AutoRegressiveObservations,
             # but it has an extra scaling factor of tau applied to the weight.
-            J = self.J0
-            h = self.h0
+            J = self.J0.copy()
+            h = self.h0.copy()
             for x, y, Ez, tau in zip(xs, ys, Ezs, taus):
                 weight = Ez * tau
                 # Einsum is concise but slow!
