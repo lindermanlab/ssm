@@ -1112,17 +1112,13 @@ class AutoRegressiveRotationalObservations(AutoRegressiveObservations):
         assert lags == 1, "Lags must be 1. This observation model is undefined otherwise."
         super(AutoRegressiveRotationalObservations, self).\
             __init__(K, D, M=0, lags=lags)
-        self.As = [random_rotation(D) for _ in range(K)]
+        self._As = np.array([
+                np.column_stack([random_rotation(D), np.zeros((D, (lags-1) * D))])
+            for _ in range(K)])
 
-    @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, localize=True):
-        super(AutoRegressiveRotationalObservations, self).\
-            initialize(datas, inputs=inputs, masks=masks, tags=tags, localize=localize)
-        D, K = self.D, self.K
-        self.Sigmas = np.tile(np.eye(D), (K, 1, 1))
-
-    def m_step(self, expectations, datas, inputs, masks, tags, continuous_expectations=None,
-                nu0=None, Psi0=None, J0=None, h0=None):
+    def m_step(self, expectations, datas, inputs, masks, tags,
+                continuous_expectations=None,
+                nu0=None, Psi0=None):
         """Simplified m_step for orthogonal dynamics matrix
 
         We only consider the case where K=1, lags=1, which simplifies some of the m-step
@@ -1130,27 +1126,6 @@ class AutoRegressiveRotationalObservations(AutoRegressiveObservations):
         the orthogonality constraint.
         """
         K, D, M, lags = self.K, self.D, self.M, self.lags
-
-        # Set up the prior
-        if J0 is None:
-            J0_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
-                                     self.l2_penalty_V * np.ones(M),
-                                     self.l2_penalty_b * np.ones(1)))
-            J0 = np.tile(np.diag(J0_diag)[None, :, :], (K, 1, 1))
-
-        if h0 is None:
-            h0 = np.concatenate((np.zeros((D * (lags - 1), D)),
-                                 self.l2_penalty_A * np.eye(D),
-                                 np.zeros((M + 1, D))))
-            h0 = np.tile(h0[None, :, :], (K, 1, 1))
-
-        if nu0 is None:
-            nu0 = 1
-
-        if Psi0 is None:
-            Psi0 = np.eye(D)
-        elif np.isscalar(Psi0):
-            Psi0 = Psi0 * np.eye(D)
 
         # Collect sufficient statistics
         if continuous_expectations is None:
@@ -1165,20 +1140,20 @@ class AutoRegressiveRotationalObservations(AutoRegressiveObservations):
         bs = np.zeros((K, D))
         Sigmas = np.zeros((K, D, D))
         for k in range(K):
-            Wk = np.linalg.solve(ExuxuTs[k] + J0[k], ExuyTs[k] + h0[k]).T
+            Wk = np.linalg.solve(ExuxuTs[k] + self.J0[k], ExuyTs[k] + self.h0[k]).T
             As[k] = Wk[:, :D * lags]
-
-            # Project the As to the set of Orthogonal Matrices
-            U, _, Vt = np.linalg.svd(As[k])
-            As[k] = U @ Vt 
-
             Vs[k] = Wk[:, D * lags:-1]
             bs[k] = Wk[:, -1]
 
+            # Project to the set of orthogonal matrices.
+            # SVD will broadcast along the first dimension.
+            U, _, VT = np.linalg.svd(As[k])
+            As[k] = U @ VT
+            
             # Solve for the MAP estimate of the covariance
             sqerr = EyyTs[k] - 2 * Wk @ ExuyTs[k] + Wk @ ExuxuTs[k] @ Wk.T
-            nu = nu0 + Ens[k]
-            Sigmas[k] = (sqerr + Psi0) / (nu + D + 1)
+            nu = self.nu0 + Ens[k]
+            Sigmas[k] = (sqerr + self.Psi0) / (nu + D + 1)
 
         # If any states are unused, set their parameters to a perturbation of a used state
         unused = np.where(Ens < 1)[0]
@@ -1191,12 +1166,11 @@ class AutoRegressiveRotationalObservations(AutoRegressiveObservations):
                 bs[k] = bs[i] + 0.01 * npr.randn(*bs[i].shape)
                 Sigmas[k] = Sigmas[i]
                 
-                # Update parameters via their setter
+        # Update parameters via their setter
         self.As = As
         self.Vs = Vs
         self.bs = bs
         self.Sigmas = Sigmas
-
 class AutoRegressiveObservationsNoInput(AutoRegressiveObservations):
     """
     AutoRegressive observation model without the inputs.
