@@ -1110,7 +1110,6 @@ class AutoRegressiveRotationalObservations(AutoRegressiveObservations):
     """
     def __init__(self, K, D, M=0, lags=1):
         assert lags == 1, "Lags must be 1. This observation model is undefined otherwise."
-        assert M == 0, "This model does not support inputs yet."
         super(AutoRegressiveRotationalObservations, self).\
             __init__(K, D, M=0, lags=lags)
         self.As = [random_rotation(D) for _ in range(K)]
@@ -1122,7 +1121,8 @@ class AutoRegressiveRotationalObservations(AutoRegressiveObservations):
         D, K = self.D, self.K
         self.Sigmas = np.tile(np.eye(D), (K, 1, 1))
 
-    def m_step(self, expectations, datas, inputs, masks, tags, continuous_expectations=None, J0=None, h0=None):
+    def m_step(self, expectations, datas, inputs, masks, tags, continuous_expectations=None,
+                nu0=None, Psi0=None, J0=None, h0=None):
         """Simplified m_step for orthogonal dynamics matrix
 
         We only consider the case where K=1, lags=1, which simplifies some of the m-step
@@ -1131,6 +1131,27 @@ class AutoRegressiveRotationalObservations(AutoRegressiveObservations):
         """
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
+        # Set up the prior
+        if J0 is None:
+            J0_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
+                                     self.l2_penalty_V * np.ones(M),
+                                     self.l2_penalty_b * np.ones(1)))
+            J0 = np.tile(np.diag(J0_diag)[None, :, :], (K, 1, 1))
+
+        if h0 is None:
+            h0 = np.concatenate((np.zeros((D * (lags - 1), D)),
+                                 self.l2_penalty_A * np.eye(D),
+                                 np.zeros((M + 1, D))))
+            h0 = np.tile(h0[None, :, :], (K, 1, 1))
+
+        if nu0 is None:
+            nu0 = 1
+
+        if Psi0 is None:
+            Psi0 = np.eye(D)
+        elif np.isscalar(Psi0):
+            Psi0 = Psi0 * np.eye(D)
+
         # Collect sufficient statistics
         if continuous_expectations is None:
             ExuxuTs, ExuyTs, EyyTs, Ens = self._get_sufficient_statistics(expectations, datas, inputs)
@@ -1138,26 +1159,43 @@ class AutoRegressiveRotationalObservations(AutoRegressiveObservations):
             ExuxuTs, ExuyTs, EyyTs, Ens = \
                 self._extend_given_sufficient_statistics(expectations, continuous_expectations, inputs)
 
-        # For now, we are not handling a bias term, so we ignore the last row
-        ExuyTs = ExuyTs[:, :-1, :]
+        # Solve the linear regressions
+        As = np.zeros((K, D, D * lags))
+        Vs = np.zeros((K, D, M))
+        bs = np.zeros((K, D))
+        Sigmas = np.zeros((K, D, D))
+        for k in range(K):
+            Wk = np.linalg.solve(ExuxuTs[k] + J0[k], ExuyTs[k] + h0[k]).T
+            As[k] = Wk[:, :D * lags]
 
-        # The M-Step for the A matrix is modified so that it remains a rotation
-        # matrix during the update. For the purposes of this step, we are
-        # assuming identity covariance, which amounts to solving an instance of
-        # the Orthogonal Procrustes Problem. The solution is given by the SVD of
-        # the expected sufficient statistics -- see 2006 PhD thesis by Thomas
-        # Viklands for more info: https://people.cs.umu.se/viklands/PhD.pdf
+            # Project the As to the set of Orthogonal Matrices
+            U, _, Vt = np.linalg.svd(As[k])
+            As[k] = U @ Vt 
 
-        # SVD broadcasts along the K dimension, so we can solve for
-        # all A matrices simultaneously.
-        U, _, Vt = np.linalg.svd(ExuyTs)
-        V = np.swapaxes(Vt, -1, -2)
-        Ut = np.swapaxes(U, -1, -2)
-        c = np.tile(np.eye(D), (K, 1, 1))
-        c[:, -1, -1] = np.sign(np.linalg.det(V @ Ut))
-        self.As = V @ c @ Ut
+            Vs[k] = Wk[:, D * lags:-1]
+            bs[k] = Wk[:, -1]
 
+            # Solve for the MAP estimate of the covariance
+            sqerr = EyyTs[k] - 2 * Wk @ ExuyTs[k] + Wk @ ExuxuTs[k] @ Wk.T
+            nu = nu0 + Ens[k]
+            Sigmas[k] = (sqerr + Psi0) / (nu + D + 1)
 
+        # If any states are unused, set their parameters to a perturbation of a used state
+        unused = np.where(Ens < 1)[0]
+        used = np.where(Ens > 1)[0]
+        if len(unused) > 0:
+            for k in unused:
+                i = npr.choice(used)
+                As[k] = As[i] + 0.01 * npr.randn(*As[i].shape)
+                Vs[k] = Vs[i] + 0.01 * npr.randn(*Vs[i].shape)
+                bs[k] = bs[i] + 0.01 * npr.randn(*bs[i].shape)
+                Sigmas[k] = Sigmas[i]
+                
+                # Update parameters via their setter
+        self.As = As
+        self.Vs = Vs
+        self.bs = bs
+        self.Sigmas = Sigmas
 
 class AutoRegressiveObservationsNoInput(AutoRegressiveObservations):
     """
