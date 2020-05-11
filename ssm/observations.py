@@ -1018,10 +1018,10 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             h0 = np.tile(h0[None, :, :], (K, 1, 1))
 
         if nu0 is None:
-            nu0 = 1
+            nu0 = 1e-4
 
         if Psi0 is None:
-            Psi0 = np.eye(D)
+            Psi0 = 1e-4 * np.eye(D)
         elif np.isscalar(Psi0):
             Psi0 = Psi0 * np.eye(D)
 
@@ -1264,6 +1264,7 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
         assert D % block_size[1] == 0, "block size must perfectly divide D"
         self.block_size = block_size
         self.As_mask = np.ones((K, D // block_size[0], D // block_size[1]), dtype=bool)
+        self.As_mask_posteriors = [None] * K
         assert 0 < sparsity < 1
         self.sparsity = sparsity
 
@@ -1271,8 +1272,8 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
         # Get rid of the square root parameterization and replace with sigmasq
         del self._sqrt_Sigmas_init
         del self._sqrt_Sigmas
-        self.sigmasq_inits = np.ones((K,))
-        self.sigmasqs = np.ones((K,))
+        self.sigmasq_inits = np.ones((K, ))
+        self.sigmasqs = np.ones((K, D))
 
         # # Set up the prior
         # J0_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
@@ -1342,44 +1343,50 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
 
         # Initialize the outputs
         W = np.zeros((D, D_in))
-        Z = np.zeros((B_out, B_in))
+        Z = np.ones((B_out, B_in))
         Z_posteriors = []
-
+        
         # Compute the posterior distribution for each row of Z
         for bo in range(B_out):
             # Find the output slice
             slc = slice(bo * S_out, (bo + 1) * S_out)
-
             # Enumerate all 2^{B_in} assignments of the binary mask
             assert B_in <= 16, "You probably don't want to explicitly enumerate 2^B_{in}" \
                                "assignments when B_{in} > 16."
-            assignments = np.array(list(product([0, 1], repeat=B_in)))
-            log_probs = np.zeros(2 ** B_in)
-            for ind, zk in enumerate(assignments):
+            assignments = np.array(list(product([0, 1], repeat=B_in-1)))
+            log_probs = np.zeros(2 ** (B_in-1))
+            for ind, zk_temp in enumerate(assignments):
+                # Always include the diagonal block in zk
+                zk = np.ones(B_in)
+                inc_idx = np.delete(np.arange(0, B_in), bo)
+                zk[inc_idx] = zk_temp
+
+                # Add the prior of the sparsity for this row of blocks
+                log_probs[ind] = np.sum(zk * np.log(rho) + (1 - zk) * np.log(1 - rho))
+                
                 # Expand the binary mask and pad with extra ones for the input and intercept
                 z = np.concatenate([np.kron(zk, np.ones(S_in)), np.ones(M + 1)])
-                J = J0 + 1 / sigmasq * ExxT * np.outer(z, z)
-                L = np.linalg.cholesky(J)
-                h = h0[:, slc] + 1 / sigmasq * ExyT[:, slc] * z[:, None]
-                tmp = solve_triangular(L, h, lower=True)
-
-                log_probs[ind] = np.sum(zk * np.log(rho) + (1 - zk) * np.log(1 - rho))
-                log_probs[ind] += 0.5 * np.sum(tmp ** 2) - S_out * np.sum(np.log(np.diag(L)))
+                for i in range(bo * S_out, (bo + 1) * S_out):
+                    J = J0 + 1 / sigmasq[i] * ExxT * np.outer(z, z)
+                    L = np.linalg.cholesky(J)
+                    h = h0[:, i] + 1 / sigmasq[i] * ExyT[:, i] * z
+                    tmp = solve_triangular(L, h, lower=True)
+                    log_probs[ind] += 0.5 * np.sum(tmp ** 2) - np.sum(np.log(np.diag(L)))
 
             # Save the posterior
             Z_posteriors.append((assignments, np.exp(log_probs - logsumexp(log_probs))))
-
             # Find the most likely assignment for these outputs
-            Z[bo] = assignments[np.argmax(log_probs)]
-            z = np.concatenate([np.kron(Z[bo], np.ones(S_in)), np.ones(1)])
-            J = J0 + 1 / sigmasq * ExxT * np.outer(z, z)
-            h = h0[:, slc] + 1 / sigmasq * ExyT[:, slc] * z[:, None]
-            W[slc] = np.linalg.solve(J, h).T
+            Z[bo, inc_idx] = assignments[np.argmax(log_probs)]
+            z = np.concatenate([np.kron(Z[bo], np.ones(S_in)), np.ones(M+1)])
+            for i in range(bo * S_out, (bo + 1) * S_out):
+                J = J0 + 1 / sigmasq[i] * ExxT * np.outer(z, z)
+                h = h0[:, i] + 1 / sigmasq[i] * ExyT[:, i] * z
+                W[i] = np.linalg.solve(J, h).T
 
         # Solve for the optimal variance
         sqerr = EyyT - 2 * W @ ExyT + W @ ExxT @ W.T
-        sigmasq = np.sum(np.diag(sqerr)) / (En * D)
-
+        sigmasq = np.diag(sqerr) / En
+        
         # Unpack the weights and intercept
         A, V, b = W[:, :D], W[:, D:D+M], W[:, -1]
         return A, V, b, Z, sigmasq, Z_posteriors
@@ -1387,27 +1394,29 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
     def m_step(self, expectations, datas, inputs, masks, tags,
                J0=None, h0=None, continuous_expectations=None, **kwargs):
         """Compute M-step for Gaussian Auto Regressive Observations.
-
         If `continuous_expectations` is not None, this function will
         compute an exact M-step using the expected sufficient statistics for the
         continuous states. In this case, we ignore the prior provided by (J0, h0),
         because the calculation is exact. `continuous_expectations` should be a tuple of
         (Ex, Ey, ExxT, ExyT, EyyT).
-
         If `continuous_expectations` is None, we use `datas` and `expectations,
         and (optionally) the prior given by (J0, h0). In this case, we estimate the sufficient
         statistics using `datas,` which is typically a single sample of the continuous
         states from the posterior distribution.
         """
         K, D, M, lags = self.K, self.D, self.M, self.lags
-
         # Set up the prior
-        J0_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
-                                  self.l2_penalty_V * np.ones(M),
-                                  self.l2_penalty_b * np.ones(1)))
-        J0 = np.tile(np.diag(J0_diag)[None, :, :], (K, 1, 1))
-        h0 = np.zeros((K, D * lags + M + 1, D))
-
+        if J0 is None:
+            J0_diag = np.concatenate((self.l2_penalty_A * np.ones(D * lags),
+                                     self.l2_penalty_V * np.ones(M),
+                                     self.l2_penalty_b * np.ones(1)))
+            J0 = np.tile(np.diag(J0_diag)[None, :, :], (K, 1, 1))
+        if h0 is None:
+            h0 = np.concatenate((1*self.l2_penalty_A * np.eye(D),
+                                 np.zeros((D * (lags - 1), D)),
+                                 np.zeros((M + 1, D))))
+            h0 = np.tile(h0[None, :, :], (K, 1, 1))
+            
         # Collect the data and weights
         if continuous_expectations is None:
             ExuxuTs, ExuyTs, EyyTs, Ens = \
@@ -1418,7 +1427,7 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
 
         # Solve the linear regressions
         for k in range(K):
-            self._As[k], self.Vs[k], self.bs[k], self.As_mask[k], self.sigmasqs[k], _ = \
+            self._As[k], self.Vs[k], self.bs[k], self.As_mask[k], self.sigmasqs[k], self.As_mask_posteriors[k] = \
                 self.fit_sparse_linear_regression(ExuxuTs[k], ExuyTs[k], EyyTs[k], Ens[k],
                                                   self.sigmasqs[k], J0[k], h0[k], self.sparsity)
 
@@ -1432,8 +1441,9 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
                 self.Vs[k] = self.Vs[i] + 0.01 * npr.randn(*self.Vs[i].shape)
                 self.bs[k] = self.bs[i] + 0.01 * npr.randn(*self.bs[i].shape)
                 self.As_mask[k] = self.As_mask[i]
+                self.As_mask_posteriors[k] = self.As_mask_posteriors[i]
                 self.sigmasqs[k] = self.sigmasqs[i]
-
+    
 
 class IndependentAutoRegressiveObservations(_AutoRegressiveObservationsBase):
     def __init__(self, K, D, M=0, lags=1):
