@@ -259,3 +259,32 @@ def trace_product(A, B):
     # We'll take the trace along the last two dimensions.
     BT = np.swapaxes(B, -1, -2)
     return np.sum(A*BT, axis=(-1, -2))
+
+
+def real_modal_form(A):
+    vals, vecs = np.linalg.eig(A)
+
+    # sort eigenvalues and vectors by the strength of their imaginary part
+    real_idx = np.abs(np.imag(vals)) < 1e-16
+    imag_idx = ~real_idx
+
+    real_eigvecs = vecs[:, real_idx]
+    imag_eigvals = vals[imag_idx]
+    imag_eigvecs = vecs[:, imag_idx]
+
+    idx = np.argsort(np.abs(np.imag(imag_eigvals)))[::-1]
+    imag_eigvals = imag_eigvals[idx]
+    imag_eigvecs = imag_eigvecs[:, idx]
+
+    # we need to be consistent about taking the eigenvector with the positive imaginary part.
+    S = np.zeros_like(A)
+    nreals = sum(real_idx)
+    S[:, 0:nreals] = real_eigvecs
+
+    for i in range(0, A.shape[0] - nreals, 2):
+        S[:, i + nreals] = np.real(imag_eigvecs[:, i])
+        if np.imag(imag_eigvals[i]) > 0:
+            S[:, i+nreals+1] = np.imag(imag_eigvecs[:, i])
+        else:
+            S[:, i+nreals+1] = -np.imag(imag_eigvecs[:, i])
+    return S

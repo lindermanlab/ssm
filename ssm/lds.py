@@ -835,6 +835,7 @@ class LDS(SLDS):
         emission_classes = dict(
             gaussian=emssn.GaussianEmissions,
             gaussian_orthog=emssn.GaussianOrthogonalEmissions,
+            gaussian_orthog_proj=emssn.GaussianOrthogonalProjectedEmissions,
             gaussian_id=emssn.GaussianIdentityEmissions,
             gaussian_nn=emssn.GaussianNeuralNetworkEmissions,
             studentst=emssn.StudentsTEmissions,

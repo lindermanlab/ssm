@@ -441,6 +441,41 @@ class GaussianOrthogonalEmissions(_GaussianEmissionsMixin, _OrthogonalLinearEmis
         return -1 * hess
 
 
+class GaussianOrthogonalProjectedEmissions(GaussianOrthogonalEmissions):
+    def m_step(self, discrete_expectations, continuous_expectations,
+               datas, inputs, masks, tags,
+               optimizer="bfgs", maxiter=100, **kwargs):
+
+        if self.single_subspace:
+            # Return exact m-step updates for C, F, d, and inv_etas
+            # stack across all datas
+            x = np.vstack(continuous_expectations)
+            u = np.vstack(inputs)
+            y = np.vstack(datas)
+            T, D = np.shape(x)
+            xb = np.hstack((np.ones((T,1)),x,u)) # design matrix
+            params = np.linalg.lstsq(xb.T@xb, xb.T@y, rcond=None)[0].T
+            self.ds = params[:,0].reshape((1,self.N))
+
+            C = params[:,1:D+1]
+
+            # project to be orthogonal
+            U, _, Vt = np.linalg.svd(C, full_matrices=False)
+            C_orth = (U @ Vt)[None, :, :]
+            self.Cs = C_orth
+
+            if self.M > 0:
+                self.Fs = params[:,D+1:].reshape((1,self.N,self.M))
+            mu = np.dot(xb, params.T)
+            Sigma = (y-mu).T@(y-mu) / T
+            self.inv_etas = np.log(np.diag(Sigma)).reshape((1,self.N))
+        else:
+            Emissions.m_step(self, discrete_expectations, continuous_expectations,
+                             datas, inputs, masks, tags,
+                             optimizer=optimizer, maxiter=maxiter, **kwargs)
+
+
+
 class GaussianIdentityEmissions(_GaussianEmissionsMixin, _IdentityEmissions):
 
     def neg_hessian_log_emissions_prob(self, data, input, mask, tag, x, Ez):
