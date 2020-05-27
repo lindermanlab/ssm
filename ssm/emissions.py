@@ -621,25 +621,37 @@ class BernoulliNeuralNetworkEmissions(_BernoulliEmissionsMixin, _NeuralNetworkEm
 
 class _PoissonEmissionsMixin(object):
     def __init__(self, N, K, D, M=0, single_subspace=True, link="softplus", bin_size=1.0, **kwargs):
+
         super(_PoissonEmissionsMixin, self).__init__(N, K, D, M, single_subspace=single_subspace, **kwargs)
 
         self.link_name = link
         self.bin_size = bin_size
         mean_functions = dict(
-            log=lambda x: np.exp(x) * self.bin_size,
-            softplus= lambda x: softplus(x) * self.bin_size
+            log=self._log_mean,
+            softplus=self._softplus_mean
             )
         self.mean = mean_functions[link]
-
         link_functions = dict(
-            log=lambda rate: np.log(rate) - np.log(self.bin_size),
-            softplus=lambda rate: inv_softplus(rate / self.bin_size)
+            log=self._log_link,
+            softplus=self._softplus_link
             )
         self.link = link_functions[link]
 
         # Set the bias to be small if using log link
         if link == "log":
             self.ds = -3 + .5 * npr.randn(1, N) if single_subspace else npr.randn(K, N)
+
+    def _log_mean(self, x):
+        return np.exp(x) * self.bin_size
+
+    def _softplus_mean(self, x):
+        return softplus(x) * self.bin_size
+
+    def _log_link(self, rate):
+        return np.log(rate) - np.log(self.bin_size)
+
+    def _softplus_link(self, rate):
+        return inv_softplus(rate / self.bin_size)
 
     def log_likelihoods(self, data, input, mask, tag, x):
         assert data.dtype == int
