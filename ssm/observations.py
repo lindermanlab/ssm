@@ -1151,7 +1151,8 @@ class AutoRegressiveRotationalObservations(AutoRegressiveObservations):
             As[k] = U @ VT
             
             # Solve for the MAP estimate of the covariance
-            sqerr = EyyTs[k] - 2 * Wk @ ExuyTs[k] + Wk @ ExuxuTs[k] @ Wk.T
+            EWxyT =  Wk @ ExuyTs[k]
+            sqerr = EyyTs[k] - EWxyT.T - EWxyT + Wk @ ExuxuTs[k] @ Wk.T
             nu = self.nu0 + Ens[k]
             Sigmas[k] = (sqerr + self.Psi0) / (nu + D + 1)
 
