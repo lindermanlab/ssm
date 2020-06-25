@@ -1,7 +1,10 @@
 # Define an autograd extension for HMM normalizer
 import autograd.numpy as np
 import autograd.numpy.random as npr
-from autograd.scipy.special import logsumexp
+try:
+    from scipy.misc import logsumexp
+except ImportError:
+    from scipy.special import logsumexp
 from autograd.scipy.linalg import cholesky_banded, solve_banded, solveh_banded
 from autograd.extend import primitive, defvjp
 from autograd.tracer import getval
