@@ -161,7 +161,7 @@ class SLDS(object):
         self.emissions.params = value[3]
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, num_iters=25):
+    def initialize(self, datas, inputs=None, masks=None, tags=None, verbose = 2, num_iters=25):
         # First initialize the observation model
         self.emissions.initialize(datas, inputs, masks, tags)
 
@@ -171,13 +171,13 @@ class SLDS(object):
         xmasks = [np.ones_like(x, dtype=bool) for x in xs]
 
         # Now run a few iterations of EM on a ARHMM with the variational mean
-        print("Initializing with an ARHMM using {} steps of EM.".format(num_iters))
+        if verbose > 0:
+          print("Initializing with an ARHMM using {} steps of EM.".format(num_iters))
         arhmm = hmm.HMM(self.K, self.D, M=self.M,
                         init_state_distn=copy.deepcopy(self.init_state_distn),
                         transitions=copy.deepcopy(self.transitions),
                         observations=copy.deepcopy(self.dynamics))
-
-        arhmm.fit(xs, inputs=inputs, masks=xmasks, tags=tags,
+        arhmm.fit(xs, inputs=inputs, masks=xmasks, tags=tags, verbose = verbose,
                   method="em", num_iters=num_iters)
 
         self.init_state_distn = copy.deepcopy(arhmm.init_state_distn)
@@ -281,7 +281,7 @@ class SLDS(object):
         return np.nan
 
     @ensure_variational_args_are_lists
-    def _bbvi_elbo(self, variational_posterior, datas, inputs=None, masks=None, tags=None, n_samples=1):
+    def _bbvi_elbo(self, variational_posterior, datas, inputs=None, masks=None, tags=None,  n_samples=1):
         """
         Lower bound on the marginal likelihood p(y | theta)
         using variational posterior q(x; phi) where phi = variational_params
@@ -312,7 +312,7 @@ class SLDS(object):
 
         return elbo / n_samples
 
-    def _fit_bbvi(self, variational_posterior, datas, inputs, masks, tags,
+    def _fit_bbvi(self, variational_posterior, datas, inputs, masks, tags, verbose = 2,
                   learning=True, optimizer="adam", num_iters=100, **kwargs):
         """
         Fit with black box variational inference using a
@@ -337,8 +337,11 @@ class SLDS(object):
 
         # Set up the progress bar
         elbos = [-_objective(params, 0) * T]
-        pbar = trange(num_iters)
-        pbar.set_description("ELBO: {:.1f}".format(elbos[0]))
+        if verbose == 2:
+          pbar = trange(num_iters)
+          pbar.set_description("ELBO: {:.1f}".format(elbos[0]))
+        else:
+          pbar = range(num_iters)
 
         # Run the optimizer
         step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
@@ -350,8 +353,9 @@ class SLDS(object):
             # TODO: Check for convergence -- early stopping
 
             # Update progress bar
-            pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
-            pbar.update()
+            if verbose == 2:
+              pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
+              pbar.update()
 
         # Save the final parameters
         if learning:
@@ -643,6 +647,7 @@ class SLDS(object):
 
     def _fit_laplace_em(self, variational_posterior, datas,
                         inputs=None, masks=None, tags=None,
+                        verbose = 2,
                         num_iters=100,
                         num_samples=1,
                         continuous_optimizer="newton",
@@ -660,8 +665,12 @@ class SLDS(object):
         Assume q(z) is a chain-structured discrete graphical model.
         """
         elbos = [self._laplace_em_elbo(variational_posterior, datas, inputs, masks, tags)]
-        pbar = trange(num_iters)
-        pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
+        
+        if verbose == 2:
+          pbar = trange(num_iters)
+          pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
+        else:
+          pbar = range(num_iters)
 
         for itr in pbar:
             # 1. Update the discrete state posterior q(z) if K>1
@@ -682,7 +691,8 @@ class SLDS(object):
 
             elbos.append(self._laplace_em_elbo(
                 variational_posterior, datas, inputs, masks, tags))
-            pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
+            if verbose == 2:
+              pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
 
         return elbos
 
@@ -722,7 +732,7 @@ class SLDS(object):
         return posterior
 
     @ensure_args_are_lists
-    def fit(self, datas, inputs=None, masks=None, tags=None,
+    def fit(self, datas, inputs=None, masks=None, tags=None, verbose = 2,
             method="laplace_em", variational_posterior="structured_meanfield",
             variational_posterior_kwargs=None,
             initialize=True, num_init_iters=25,
@@ -753,12 +763,12 @@ class SLDS(object):
 
         # Initialize the model parameters
         if initialize:
-            self.initialize(datas, inputs, masks, tags, num_iters=num_init_iters)
+            self.initialize(datas, inputs, masks, tags, verbose = verbose, num_iters=num_init_iters)
 
         # Initialize the variational posterior
         variational_posterior_kwargs = variational_posterior_kwargs or {}
         posterior = self._make_variational_posterior(variational_posterior, datas, inputs, masks, tags, method, **variational_posterior_kwargs)
-        elbos = _fitting_methods[method](posterior, datas, inputs, masks, tags, learning=True, **kwargs)
+        elbos = _fitting_methods[method](posterior, datas, inputs, masks, tags, verbose, learning=True, **kwargs)
         return elbos, posterior
 
     @ensure_args_are_lists

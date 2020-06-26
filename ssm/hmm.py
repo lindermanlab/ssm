@@ -424,7 +424,7 @@ class HMM(object):
 
         return lls
 
-    def _fit_em(self, datas, inputs, masks, tags, num_iters=100, tolerance=0,
+    def _fit_em(self, datas, inputs, masks, tags, verbose = 2, num_iters=100, tolerance=0,
                 init_state_mstep_kwargs={},
                 transitions_mstep_kwargs={},
                 observations_mstep_kwargs={}):
@@ -435,9 +435,12 @@ class HMM(object):
         M-step: analytical maximization of E_{p(z | x)} [log p(x, z; theta)].
         """
         lls = [self.log_probability(datas, inputs, masks, tags)]
-
-        pbar = trange(num_iters)
-        pbar.set_description("LP: {:.1f}".format(lls[-1]))
+        if verbose == 2:
+          pbar = trange(num_iters)
+          pbar.set_description("LP: {:.1f}".format(lls[-1]))
+        else:
+          pbar = range(num_iters)
+          
         for itr in pbar:
             # E step: compute expected latent states with current parameters
             expectations = [self.expected_states(data, input, mask, tag)
@@ -451,18 +454,22 @@ class HMM(object):
 
             # Store progress
             lls.append(self.log_prior() + sum([ll for (_, _, ll) in expectations]))
-            pbar.set_description("LP: {:.1f}".format(lls[-1]))
+            
+            if verbose == 2:
+              pbar.set_description("LP: {:.1f}".format(lls[-1]))
 
             # Check for convergence
             if itr > 0 and abs(lls[-1] - lls[-2]) < tolerance:
-                pbar.set_description("Converged to LP: {:.1f}".format(lls[-1]))
+                if verbose == 2:
+                  pbar.set_description("Converged to LP: {:.1f}".format(lls[-1]))
                 break
 
         return lls
 
     @ensure_args_are_lists
-    def fit(self, datas, inputs=None, masks=None, tags=None,
+    def fit(self, datas, inputs=None, masks=None, tags=None, verbose = 2,
             method="em", initialize=True, **kwargs):
+      
         _fitting_methods = \
             dict(sgd=partial(self._fit_sgd, "sgd"),
                  adam=partial(self._fit_sgd, "adam"),
@@ -483,7 +490,8 @@ class HMM(object):
             if method != "em":
                 raise Exception("Only EM is implemented "
                                 "for Constrained transitions.")
-        return _fitting_methods[method](datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
+       # print(verbose)
+        return _fitting_methods[method](datas, inputs=inputs, masks=masks, tags=tags, verbose = verbose, **kwargs)
 
 
 class HSMM(HMM):
