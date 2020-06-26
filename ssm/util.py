@@ -1,4 +1,5 @@
 from warnings import warn
+from tqdm.auto import trange
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
@@ -168,6 +169,22 @@ def ensure_slds_args_not_none(f):
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return f(self, variational_mean, data, input=input, mask=mask, tag=tag, **kwargs)
     return wrapper
+  
+def ssm_pbar(num_iters, verbose, description, prob):
+    '''Return either progress bar or regular list for iterating. Inputs are:
+  
+      num_iters (int)
+      verbose (int)     - if == 2, return trange object, else returns list
+      description (str) - description for progress bar
+      prob (float)      - values to initialize description fields at
+  
+    '''
+    if verbose == 2:
+        pbar = trange(num_iters)	          
+        pbar.set_description(description.format(*prob))
+    else:
+        pbar = range(num_iters)
+    return pbar
 
 
 def logistic(x):
