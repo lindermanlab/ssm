@@ -10,7 +10,7 @@ from ssm.primitives import hmm_normalizer
 from ssm.messages import hmm_expected_states, hmm_filter, hmm_sample, viterbi
 from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
     ensure_slds_args_not_none, ensure_variational_args_are_lists, \
-    replicate, collapse
+    replicate, collapse, ssm_pbar
 
 import ssm.observations as obs
 import ssm.transitions as trans
@@ -339,7 +339,7 @@ class HMM(object):
         return ell + self.log_prior()
 
     # Model fitting
-    def _fit_sgd(self, optimizer, datas, inputs, masks, tags, num_iters=1000, **kwargs):
+    def _fit_sgd(self, optimizer, datas, inputs, masks, tags, verbose = 2, num_iters=1000, **kwargs):
         """
         Fit the model with maximum marginal likelihood.
         """
@@ -350,9 +350,8 @@ class HMM(object):
             return -obj / T
 
         # Set up the progress bar
-        lls = [-_objective(self.params, 0) * T]
-        pbar = trange(num_iters)
-        pbar.set_description("Epoch {} Itr {} LP: {:.1f}".format(0, 0, lls[-1]))
+        lls  = [-_objective(self.params, 0) * T]
+        pbar = ssm_pbar(num_iters, verbose, "Epoch {} Itr {} LP: {:.1f}", [0, 0, lls[-1]])
 
         # Run the optimizer
         step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
@@ -360,12 +359,13 @@ class HMM(object):
         for itr in pbar:
             self.params, val, g, state = step(value_and_grad(_objective), self.params, itr, state, **kwargs)
             lls.append(-val * T)
-            pbar.set_description("LP: {:.1f}".format(lls[-1]))
-            pbar.update(1)
+            if verbose == 2:
+              pbar.set_description("LP: {:.1f}".format(lls[-1]))
+              pbar.update(1)
 
         return lls
 
-    def _fit_stochastic_em(self, optimizer, datas, inputs, masks, tags, num_epochs=100, **kwargs):
+    def _fit_stochastic_em(self, optimizer, datas, inputs, masks, tags, verbose = 2, num_epochs=100, **kwargs):
         """
         Replace the M-step of EM with a stochastic gradient update using the ELBO computed
         on a minibatch of data.
@@ -408,8 +408,10 @@ class HMM(object):
 
         # Set up the progress bar
         lls = [-_objective(self.params, 0) * T]
-        pbar = trange(num_epochs * M)
-        pbar.set_description("Epoch {} Itr {} LP: {:.1f}".format(0, 0, lls[-1]))
+      #  pbar = trange(num_epochs * M)
+      #  pbar.set_description("Epoch {} Itr {} LP: {:.1f}".format(0, 0, lls[-1]))
+        
+        pbar = ssm_pbar(num_epochs * M, verbose, "Epoch {} Itr {} LP: {:.1f}", [0, 0, lls[-1]])
 
         # Run the optimizer
         step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
@@ -419,8 +421,9 @@ class HMM(object):
             epoch = itr // M
             m = itr % M
             lls.append(-val * T)
-            pbar.set_description("Epoch {} Itr {} LP: {:.1f}".format(epoch, m, lls[-1]))
-            pbar.update(1)
+            if verbose == 2:
+              pbar.set_description("Epoch {} Itr {} LP: {:.1f}".format(epoch, m, lls[-1]))
+              pbar.update(1)
 
         return lls
 
@@ -434,13 +437,10 @@ class HMM(object):
         E step: compute E[z_t] and E[z_t, z_{t+1}] with message passing;
         M-step: analytical maximization of E_{p(z | x)} [log p(x, z; theta)].
         """
-        lls = [self.log_probability(datas, inputs, masks, tags)]
-        if verbose == 2:
-          pbar = trange(num_iters)
-          pbar.set_description("LP: {:.1f}".format(lls[-1]))
-        else:
-          pbar = range(num_iters)
-          
+        lls  = [self.log_probability(datas, inputs, masks, tags)]
+        
+        pbar = ssm_pbar(num_iters, verbose, "LP: {:.1f}", [lls[-1]])
+       
         for itr in pbar:
             # E step: compute expected latent states with current parameters
             expectations = [self.expected_states(data, input, mask, tag)

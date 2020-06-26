@@ -11,7 +11,7 @@ from ssm.optimizers import adam_step, rmsprop_step, sgd_step, lbfgs, \
 from ssm.primitives import hmm_normalizer
 from ssm.messages import hmm_expected_states, viterbi
 from ssm.util import ensure_args_are_lists, \
-    ensure_slds_args_not_none, ensure_variational_args_are_lists
+    ensure_slds_args_not_none, ensure_variational_args_are_lists, ssm_pbar
 
 import ssm.observations as obs
 import ssm.transitions as trans
@@ -337,11 +337,7 @@ class SLDS(object):
 
         # Set up the progress bar
         elbos = [-_objective(params, 0) * T]
-        if verbose == 2:
-          pbar = trange(num_iters)
-          pbar.set_description("ELBO: {:.1f}".format(elbos[0]))
-        else:
-          pbar = range(num_iters)
+        pbar  = ssm_pbar(num_iters, verbose, "LP: {:.1f}", [elbos[0]])
 
         # Run the optimizer
         step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
@@ -665,12 +661,8 @@ class SLDS(object):
         Assume q(z) is a chain-structured discrete graphical model.
         """
         elbos = [self._laplace_em_elbo(variational_posterior, datas, inputs, masks, tags)]
-        
-        if verbose == 2:
-          pbar = trange(num_iters)
-          pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
-        else:
-          pbar = range(num_iters)
+       
+        pbar = ssm_pbar(num_iters, verbose, "ELBO: {:.1f}", [elbos[-1]])
 
         for itr in pbar:
             # 1. Update the discrete state posterior q(z) if K>1
