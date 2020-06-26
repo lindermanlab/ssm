@@ -407,10 +407,7 @@ class HMM(object):
             return -obj / T
 
         # Set up the progress bar
-        lls = [-_objective(self.params, 0) * T]
-      #  pbar = trange(num_epochs * M)
-      #  pbar.set_description("Epoch {} Itr {} LP: {:.1f}".format(0, 0, lls[-1]))
-        
+        lls  = [-_objective(self.params, 0) * T]
         pbar = ssm_pbar(num_epochs * M, verbose, "Epoch {} Itr {} LP: {:.1f}", [0, 0, lls[-1]])
 
         # Run the optimizer

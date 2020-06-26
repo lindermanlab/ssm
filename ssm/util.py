@@ -176,7 +176,7 @@ def ssm_pbar(num_iters, verbose, description, prob):
       num_iters (int)
       verbose (int)     - if == 2, return trange object, else returns list
       description (str) - description for progress bar
-      prob (float)      - value to initialize associated log prob. at 
+      prob (float)      - values to initialize description fields at
   
     '''
     if verbose == 2:
