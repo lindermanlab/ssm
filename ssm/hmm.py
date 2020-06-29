@@ -751,7 +751,7 @@ class HSMM(HMM):
         """
         raise NotImplementedError("Need to get raw expectations for the expected transition probability.")
 
-    def _fit_em(self, datas, inputs, masks, tags, num_iters=100, **kwargs):
+    def _fit_em(self, datas, inputs, masks, tags, verbose = 2, num_iters=100, **kwargs):
         """
         Fit the parameters with expectation maximization.
 
@@ -760,8 +760,8 @@ class HSMM(HMM):
         """
         lls = [self.log_probability(datas, inputs, masks, tags)]
 
-        pbar = trange(num_iters)
-        pbar.set_description("LP: {:.1f}".format(lls[-1]))
+        pbar = ssm_pbar(num_iters, verbose, "LP: {:.1f}", [lls[-1]])
+
         for itr in pbar:
             # E step: compute expected latent states with current parameters
             expectations = [self.expected_states(data, input, mask, tag)
@@ -778,12 +778,14 @@ class HSMM(HMM):
 
             # Store progress
             lls.append(self.log_prior() + sum([ll for (_, _, ll) in expectations]))
-            pbar.set_description("LP: {:.1f}".format(lls[-1]))
+            if verbose == 2:
+                pbar.set_description("LP: {:.1f}".format(lls[-1]))
 
         return lls
 
     @ensure_args_are_lists
-    def fit(self, datas, inputs=None, masks=None, tags=None, method="em", initialize=True, **kwargs):
+    def fit(self, datas, inputs=None, masks=None, tags=None, verbose = 2,
+            method="em", initialize=True, **kwargs):
         _fitting_methods = dict(em=self._fit_em)
 
         if method not in _fitting_methods:
@@ -793,4 +795,4 @@ class HSMM(HMM):
         if initialize:
             self.initialize(datas, inputs=inputs, masks=masks, tags=tags)
 
-        return _fitting_methods[method](datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
+        return _fitting_methods[method](datas, inputs=inputs, masks=masks, tags=tags, verbose = verbose, **kwargs)
