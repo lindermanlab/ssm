@@ -33,13 +33,10 @@ class SLDS(object):
                  init_state_distn=None,
                  transitions="standard",
                  transition_kwargs=None,
-                 hierarchical_transition_tags=None,
                  dynamics="gaussian",
                  dynamics_kwargs=None,
-                 hierarchical_dynamics_tags=None,
                  emissions="gaussian_orthog",
                  emission_kwargs=None,
-                 hierarchical_emission_tags=None,
                  single_subspace=True,
                  **kwargs):
 
@@ -802,10 +799,8 @@ class LDS(SLDS):
     def __init__(self, N, D, *, M=0,
             dynamics="gaussian",
             dynamics_kwargs=None,
-            hierarchical_dynamics_tags=None,
             emissions="gaussian_orthog",
             emission_kwargs=None,
-            hierarchical_emission_tags=None,
             **kwargs):
 
         # Make the dynamics distn
