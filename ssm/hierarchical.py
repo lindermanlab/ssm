@@ -33,13 +33,13 @@ class HierarchicalAutoRegressiveObservations(Observations):
         """
     def __init__(self, K, D, M=0,
                  lags=1,
-                 cond_variance_A=1,
-                 cond_variance_V=1,
-                 cond_variance_b=1,
-                 cond_dof_Sigma=1,
+                 cond_variance_A=0.01,
+                 cond_variance_V=0.01,
+                 cond_variance_b=0.01,
+                 cond_dof_Sigma=10,
                  tags=(None,)):
 
-        super(HierarchicalAutoRegressiveObservations, self).__init__(K, D, M)
+        super().__init__(K, D, M)
 
         # First figure out how many tags/groups
         self.tags = tags
@@ -55,14 +55,39 @@ class HierarchicalAutoRegressiveObservations(Observations):
 
         # Create a group-level AR model
         self.global_ar_model = \
-            AutoRegressiveObservations(K, D, M=M, lags=lags)
+            AutoRegressiveObservations(K, D, M=M, lags=lags,
+                                       initialize="random_rotation")
 
         # Create AR objects for each tag
         self.per_group_ar_models = [
-            AutoRegressiveObservations(K, D, M=M, lags=lags)
+            AutoRegressiveObservations(K, D, M=M, lags=lags,
+                                       mean_A=self.global_ar_model.As,
+                                       variance_A=cond_variance_A,
+                                       mean_V=self.global_ar_model.Vs,
+                                       variance_V=cond_variance_V,
+                                       mean_b=self.global_ar_model.bs,
+                                       variance_b=cond_variance_b,
+                                       mean_Sigma=self.global_ar_model.Sigmas,
+                                       dof_Sigma=cond_dof_Sigma,
+                                       initialize="prior"
+                                       )
             for _ in range(self.G)
         ]
-        self._update_hierarchical_prior()
+
+    def get_As(self, tag):
+        return self.per_group_ar_models[self.tags_to_indices[tag]].As
+
+    def get_Vs(self, tag):
+        return self.per_group_ar_models[self.tags_to_indices[tag]].Vs
+
+    def get_bs(self, tag):
+        return self.per_group_ar_models[self.tags_to_indices[tag]].bs
+
+    def get_Sigmas_init(self, tag):
+        return self.per_group_ar_models[self.tags_to_indices[tag]].Sigmas_init
+
+    def get_Sigmas(self, tag):
+        return self.per_group_ar_models[self.tags_to_indices[tag]].Sigmas
 
     @property
     def params(self):
@@ -96,7 +121,7 @@ class HierarchicalAutoRegressiveObservations(Observations):
 
             for k in range(self.K):
                 lp += invwishart.logpdf(ar.Sigmas[k],
-                                        self.cond_dof_Sigma,
+                                        self.cond_dof_Sigma + self.D + 1,
                                         self.global_ar_model.Sigmas[k])
         return lp
 
@@ -129,10 +154,10 @@ class HierarchicalAutoRegressiveObservations(Observations):
         # Note: we could explore smarter averaging techniques for estimating
         #       the global parameters.  E.g. using uncertainty estimages for
         #       the per-group parameters in a hierarchical Bayesian fashion.
-        self.global_ar_model.As = np.mean([ar.As for ar in self.per_group_ar_models])
-        self.global_ar_model.Vs = np.mean([ar.Vs for ar in self.per_group_ar_models])
-        self.global_ar_model.bs = np.mean([ar.bs for ar in self.per_group_ar_models])
-        self.global_ar_model.Sigmas = np.mean([ar.Sigmas for ar in self.per_group_ar_models])
+        self.global_ar_model.As = np.mean([ar.As for ar in self.per_group_ar_models], axis=0)
+        self.global_ar_model.Vs = np.mean([ar.Vs for ar in self.per_group_ar_models], axis=0)
+        self.global_ar_model.bs = np.mean([ar.bs for ar in self.per_group_ar_models], axis=0)
+        self.global_ar_model.Sigmas = np.mean([ar.Sigmas for ar in self.per_group_ar_models], axis=0)
 
     def _update_hierarchical_prior(self):
         # Update the per-group AR objects to have the global AR model

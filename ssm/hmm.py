@@ -70,7 +70,6 @@ class HMM(object):
 
         # This is the master list of observation classes.
         # When you create a new observation class, add it here.
-        print("test")
         observation_classes = dict(
             gaussian=obs.GaussianObservations,
             diagonal_gaussian=obs.DiagonalGaussianObservations,
@@ -188,7 +187,7 @@ class HMM(object):
             assert input.shape == (T,) + M
 
         # Get the type of the observations
-        dummy_data = self.observations.sample_x(0, np.empty(0,) + D)
+        dummy_data = self.observations.sample_x(0, np.empty(0,) + D, tag=tag)
         dtype = dummy_data.dtype
 
         # Initialize the data array
@@ -203,7 +202,10 @@ class HMM(object):
             # Sample the first state from the initial distribution
             pi0 = self.init_state_distn.initial_state_distn
             z[0] = npr.choice(self.K, p=pi0)
-            data[0] = self.observations.sample_x(z[0], data[:0], input=input[0], with_noise=with_noise)
+            data[0] = self.observations.sample_x(z[0], data[:0],
+                                                 input=input[0],
+                                                 tag=tag,
+                                                 with_noise=with_noise)
 
             # We only need to sample T-1 datapoints now
             T = T - 1
@@ -223,9 +225,14 @@ class HMM(object):
 
         # Fill in the rest of the data
         for t in range(pad, pad+T):
-            Pt = self.transitions.transition_matrices(data[t-1:t+1], input[t-1:t+1], mask=mask[t-1:t+1], tag=tag)[0]
+            Pt = self.transitions.transition_matrices(data[t-1:t+1], input[t-1:t+1],
+                                                      mask=mask[t-1:t+1],
+                                                      tag=tag)[0]
             z[t] = npr.choice(self.K, p=Pt[z[t-1]])
-            data[t] = self.observations.sample_x(z[t], data[:t], input=input[t], tag=tag, with_noise=with_noise)
+            data[t] = self.observations.sample_x(z[t], data[:t],
+                                                 input=input[t],
+                                                 tag=tag,
+                                                 with_noise=with_noise)
 
         # Return the whole data if no prefix is given.
         # Otherwise, just return the simulated part.
@@ -261,7 +268,7 @@ class HMM(object):
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
-        Ez, _, _ = self.expected_states(data, input, mask)
+        Ez, _, _ = self.expected_states(data, input, mask, tag)
         return self.observations.smooth(Ez, data, input, tag)
 
     def log_prior(self):

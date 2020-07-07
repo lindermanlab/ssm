@@ -1,16 +1,11 @@
-import copy
-import warnings
-
 import autograd.numpy as np
 import autograd.numpy.random as npr
 
 from autograd.scipy.special import gammaln, digamma, logsumexp
-from autograd.scipy.special import logsumexp
+from scipy.stats import norm, invwishart
 
-from ssm.util import random_rotation, ensure_args_are_lists, \
-    logistic, logit, one_hot
-from ssm.regression import fit_linear_regression, generalized_newton_studentst_dof
-from ssm.preprocessing import interpolate_data
+from ssm.util import random_rotation, ensure_args_are_lists, logit, one_hot
+from ssm.regression import generalized_newton_studentst_dof
 from ssm.cstats import robust_ar_statistics
 from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
 import ssm.stats as stats
@@ -696,7 +691,7 @@ class _AutoRegressiveObservationsBase(Observations):
     where L is the number of lags and u_t is the input.
     """
     def __init__(self, K, D, M=0, lags=1):
-        super(_AutoRegressiveObservationsBase, self).__init__(K, D, M)
+        super().__init__(K, D, M)
 
         # Distribution over initial point
         self.mu_init = np.zeros((K, D))
@@ -786,18 +781,10 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                  mean_b=None,
                  variance_b=1e8,
                  mean_Sigma=1e-4,
-                 dof_Sigma=1e-4
+                 dof_Sigma=1e-4,
+                 initialize="random_rotation"
                  ):
-        super(AutoRegressiveObservations, self).\
-            __init__(K, D, M, lags=lags)
-
-        # Initialize the dynamics and the noise covariances
-        self._As = .80 * np.array([
-                np.column_stack([random_rotation(D), np.zeros((D, (lags-1) * D))])
-            for _ in range(K)])
-
-        self._sqrt_Sigmas_init = np.tile(np.eye(D)[None, ...], (K, 1, 1))
-        self._sqrt_Sigmas = npr.randn(K, D, D)
+        super().__init__(K, D, M, lags=lags)
 
         # Set the prior
         bcast_and_repeat = lambda x, k: np.repeat(x[None, ...], k, axis=0)
@@ -812,8 +799,8 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         mean_V = np.zeros((K, D, M)) if mean_V is None else mean_V * np.ones((K, D, M))
         assert mean_V.shape == (K, D, M)
 
-        mean_b = np.zeros((K, D, 1)) if mean_b is None else mean_b * np.ones((K, D, 1))
-        assert mean_b.shape == (K, D, 1)
+        mean_b = np.zeros((K, D)) if mean_b is None else mean_b * np.ones((K, D))
+        assert mean_b.shape == (K, D)
 
         if np.isscalar(mean_Sigma):
             mean_Sigma = bcast_and_repeat(mean_Sigma * np.eye(D), K)
@@ -823,6 +810,32 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                        mean_V, variance_V,
                        mean_b, variance_b,
                        mean_Sigma, dof_Sigma)
+
+        # Initialize the dynamics and the noise covariances
+        self._sqrt_Sigmas_init = np.tile(np.eye(D)[None, ...], (K, 1, 1))
+        self._sqrt_Sigmas = 0.01 * npr.randn(K, D, D)
+        if initialize.lower() == "random_rotation":
+            self._As = .80 * np.array([
+                                          np.column_stack(
+                                              [random_rotation(D, theta=np.pi / 25), np.zeros((D, (lags - 1) * D))])
+                                          for _ in range(K)])
+
+        elif initialize.lower() == "prior":
+            self.As = norm.rvs(mean_A, np.sqrt(variance_A))
+            self.Vs = norm.rvs(mean_V, np.sqrt(variance_V))
+            self.bs = norm.rvs(mean_b, np.sqrt(variance_b))
+
+            Sigmas = self.Sigmas.copy()
+            for k in range(self.K):
+                # nu = dof_Sigma + D + 1
+                # E[Sigma] = Psi / dof_Sigma
+                # Psi = E[Sigma] * dof_Sigma
+                Psi = mean_Sigma[k] * dof_Sigma
+                Sigmas[k] = invwishart.rvs(dof_Sigma + D + 1, Psi)
+            self.Sigmas = Sigmas
+
+        else:
+            raise Exception("Invalid initialization method: {}".format(initialize))
 
     @property
     def A(self):
@@ -893,8 +906,11 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         # h0: (K, D, D * lags + M + 1)
         assert E_A.shape == (K, D, D * lags)
         assert E_V.shape == (K, D, M)
-        assert E_b.shape == (K, D, 1)
-        self.h0 = np.concatenate([E_A / var_A, E_V / var_V, E_b / var_b], axis=2)
+        assert E_b.shape == (K, D)
+        self.h0 = np.concatenate([E_A / var_A, E_V / var_V, E_b[..., None] / var_b], axis=2)
+
+        # Note:  we have to transpose h0 per convention in other AR classes
+        self.h0 = np.swapaxes(self.h0, -1, -2)
 
         # Set natural parameters of inverse Wishart prior on Sigma
         # Note: might have to scale Psi0 somehow per the m step below
@@ -1081,7 +1097,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             EWxyT =  Wk @ ExuyTs[k]
             sqerr = EyyTs[k] - EWxyT.T - EWxyT + Wk @ ExuxuTs[k] @ Wk.T
             nu = self.nu0 + Ens[k]
-            Sigmas[k] = (sqerr + self.Psi0) / (nu + D + 1)
+            Sigmas[k] = (sqerr + self.Psi0[k]) / (nu + D + 1)
 
         # If any states are unused, set their parameters to a perturbation of a used state
         unused = np.where(Ens < 1)[0]
