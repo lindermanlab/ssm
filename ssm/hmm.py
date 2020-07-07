@@ -1,22 +1,19 @@
 from functools import partial
-from tqdm.auto import trange
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd import value_and_grad
 
-from ssm.optimizers import adam_step, rmsprop_step, sgd_step, convex_combination
+from ssm.optimizers import adam_step, rmsprop_step, sgd_step
 from ssm.primitives import hmm_normalizer
 from ssm.messages import hmm_expected_states, hmm_filter, hmm_sample, viterbi
 from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
-    ensure_slds_args_not_none, ensure_variational_args_are_lists, \
     replicate, collapse, ssm_pbar
 
 import ssm.observations as obs
+import ssm.hierarchical as hier
 import ssm.transitions as trans
 import ssm.init_state_distns as isd
-import ssm.hierarchical as hier
-import ssm.emissions as emssn
 
 __all__ = ['HMM', 'HSMM']
 
@@ -36,9 +33,9 @@ class HMM(object):
     def __init__(self, K, D, M=0, init_state_distn=None,
                  transitions='standard',
                  transition_kwargs=None,
-                 hierarchical_transition_tags=None,
-                 observations="gaussian", observation_kwargs=None,
-                 hierarchical_observation_tags=None, **kwargs):
+                 observations="gaussian",
+                 observation_kwargs=None,
+                 **kwargs):
 
         # Make the initial state distribution
         if init_state_distn is None:
@@ -66,18 +63,14 @@ class HMM(object):
                     format(transitions, list(transition_classes.keys())))
 
             transition_kwargs = transition_kwargs or {}
-            transitions = \
-                hier.HierarchicalTransitions(transition_classes[transitions], K, D, M=M,
-                                        tags=hierarchical_transition_tags,
-                                        **transition_kwargs) \
-                if hierarchical_transition_tags is not None \
-                else transition_classes[transitions](K, D, M=M, **transition_kwargs)
+            transitions = transition_classes[transitions](K, D, M=M, **transition_kwargs)
         if not isinstance(transitions, trans.Transitions):
             raise TypeError("'transitions' must be a subclass of"
                             " ssm.transitions.Transitions")
 
         # This is the master list of observation classes.
         # When you create a new observation class, add it here.
+        print("test")
         observation_classes = dict(
             gaussian=obs.GaussianObservations,
             diagonal_gaussian=obs.DiagonalGaussianObservations,
@@ -101,6 +94,7 @@ class HMM(object):
             robust_autoregressive=obs.RobustAutoRegressiveObservations,
             diagonal_robust_ar=obs.RobustAutoRegressiveDiagonalNoiseObservations,
             diagonal_robust_autoregressive=obs.RobustAutoRegressiveDiagonalNoiseObservations,
+            hierarchical_ar=hier.HierarchicalAutoRegressiveObservations
             )
 
         if isinstance(observations, str):
@@ -110,12 +104,7 @@ class HMM(object):
                     format(observations, list(observation_classes.keys())))
 
             observation_kwargs = observation_kwargs or {}
-            observations = \
-                hier.HierarchicalObservations(observation_classes[observations], K, D, M=M,
-                                        tags=hierarchical_observation_tags,
-                                        **observation_kwargs) \
-                if hierarchical_observation_tags is not None \
-                else observation_classes[observations](K, D, M=M, **observation_kwargs)
+            observations = observation_classes[observations](K, D, M=M, **observation_kwargs)
         if not isinstance(observations, obs.Observations):
             raise TypeError("'observations' must be a subclass of"
                             " ssm.observations.Observations")

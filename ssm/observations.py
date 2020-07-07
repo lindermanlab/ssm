@@ -779,10 +779,15 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
     The parameters are fit via maximum likelihood estimation.
     """
     def __init__(self, K, D, M=0, lags=1,
-                 l2_penalty_A=1e-8,
-                 l2_penalty_b=1e-8,
-                 l2_penalty_V=1e-8,
-                 nu0=1e-4, Psi0=1e-4):
+                 mean_A=None,
+                 variance_A=1e8,
+                 mean_V=None,
+                 variance_V=1e8,
+                 mean_b=None,
+                 variance_b=1e8,
+                 mean_Sigma=1e-4,
+                 dof_Sigma=1e-4
+                 ):
         super(AutoRegressiveObservations, self).\
             __init__(K, D, M, lags=lags)
 
@@ -794,20 +799,30 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         self._sqrt_Sigmas_init = np.tile(np.eye(D)[None, ...], (K, 1, 1))
         self._sqrt_Sigmas = npr.randn(K, D, D)
 
-        # Set natural parameters of Gaussian prior on (A, V, b) weight matrix
-        J0_diag = np.concatenate((l2_penalty_A * np.ones(D * lags),
-                                  l2_penalty_V * np.ones(M),
-                                  l2_penalty_b * np.ones(1)))
-        self.J0 = np.tile(np.diag(J0_diag)[None, :, :], (K, 1, 1))
+        # Set the prior
+        bcast_and_repeat = lambda x, k: np.repeat(x[None, ...], k, axis=0)
+        if mean_A is None:
+            mean_A = bcast_and_repeat(
+                np.concatenate((np.zeros((D * (lags - 1), D)),
+                                np.eye(D))), K)
+        else:
+            mean_A = mean_A * np.ones((K, D, D * lags))
+        assert mean_A.shape == (K, D, D * lags)
 
-        h0 = np.concatenate((np.zeros((D * (lags - 1), D)),
-                             l2_penalty_A * np.eye(D),
-                             np.zeros((M + 1, D))))
-        self.h0 = np.tile(h0[None, :, :], (K, 1, 1))
+        mean_V = np.zeros((K, D, M)) if mean_V is None else mean_V * np.ones((K, D, M))
+        assert mean_V.shape == (K, D, M)
 
-        # Set natural parameters of inverse Wishart prior on Sigma
-        self.nu0 = nu0
-        self.Psi0 = Psi0 * np.eye(D) if np.isscalar(Psi0) else Psi0
+        mean_b = np.zeros((K, D, 1)) if mean_b is None else mean_b * np.ones((K, D, 1))
+        assert mean_b.shape == (K, D, 1)
+
+        if np.isscalar(mean_Sigma):
+            mean_Sigma = bcast_and_repeat(mean_Sigma * np.eye(D), K)
+        assert mean_Sigma.shape == (K, D, D) and np.all(np.linalg.eigvals(mean_Sigma) > 0)
+
+        self.set_prior(mean_A, variance_A,
+                       mean_V, variance_V,
+                       mean_b, variance_b,
+                       mean_Sigma, dof_Sigma)
 
     @property
     def A(self):
@@ -853,6 +868,40 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
     def params(self, value):
         self._sqrt_Sigmas = value[-1]
         super(AutoRegressiveObservations, self.__class__).params.fset(self, value[:-1])
+
+    def set_prior(self, E_A, var_A, E_V, var_V, E_b, var_b, E_Sigma, dof_Sigma):
+        """
+        :param E_A:          (K, D, D * lags) array
+        :param var_A:        positive scalar
+        :param E_V:          (K, D, M) array
+        :param var_V:        positive scalar
+        :param E_b:          (K, D) array
+        :param var_b:        positive scalar
+        :param E_Sigma:      (K, D, D) array of psd matrices
+        :param var_Sigma:    positive scalar
+        """
+        # Compute natural parameters of Gaussian prior on (A, V, b) weight matrix
+        # given these means and variances
+        K, D, M, lags = self.K, self.D, self.M, self.lags
+
+        assert all([(np.isscalar(x) and x > 0) for x in [var_A, var_V, var_b]])
+        J0_diag = np.concatenate((1 / var_A * np.ones(D * lags),
+                                  1 / var_V * np.ones(M),
+                                  1 / var_b * np.ones(1)))
+        self.J0 = np.tile(np.diag(J0_diag)[None, :, :], (K, 1, 1))
+
+        # h0: (K, D, D * lags + M + 1)
+        assert E_A.shape == (K, D, D * lags)
+        assert E_V.shape == (K, D, M)
+        assert E_b.shape == (K, D, 1)
+        self.h0 = np.concatenate([E_A / var_A, E_V / var_V, E_b / var_b], axis=2)
+
+        # Set natural parameters of inverse Wishart prior on Sigma
+        # Note: might have to scale Psi0 somehow per the m step below
+        assert np.isscalar(dof_Sigma) and dof_Sigma > 0
+        assert E_Sigma.shape == (K, D, D) and np.all(np.linalg.eigvalsh(E_Sigma) > 0)
+        self.nu0 = dof_Sigma
+        self.Psi0 = E_Sigma
 
     def permute(self, perm):
         super(AutoRegressiveObservations, self).permute(perm)
