@@ -734,7 +734,6 @@ class _AutoRegressiveObservationsBase(Observations):
         As, bs, Vs, mu0s = self.As, self.bs, self.Vs, self.mu_init
 
         # Instantaneous inputs
-        mus = np.empty((K, T, D))
         mus = []
         for k, (A, b, V, mu0) in enumerate(zip(As, bs, Vs, mu0s)):
             # Initial condition
@@ -781,7 +780,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                  mean_b=None,
                  variance_b=1e8,
                  mean_Sigma=1e-4,
-                 dof_Sigma=1e-4,
+                 extra_dof_Sigma=1e-4,
                  initialize="random_rotation"
                  ):
         super().__init__(K, D, M, lags=lags)
@@ -794,31 +793,27 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                                 np.eye(D))), K)
         else:
             mean_A = mean_A * np.ones((K, D, D * lags))
-        assert mean_A.shape == (K, D, D * lags)
-
         mean_V = np.zeros((K, D, M)) if mean_V is None else mean_V * np.ones((K, D, M))
-        assert mean_V.shape == (K, D, M)
-
         mean_b = np.zeros((K, D)) if mean_b is None else mean_b * np.ones((K, D))
-        assert mean_b.shape == (K, D)
 
         if np.isscalar(mean_Sigma):
             mean_Sigma = bcast_and_repeat(mean_Sigma * np.eye(D), K)
-        assert mean_Sigma.shape == (K, D, D) and np.all(np.linalg.eigvals(mean_Sigma) > 0)
 
         self.set_prior(mean_A, variance_A,
                        mean_V, variance_V,
                        mean_b, variance_b,
-                       mean_Sigma, dof_Sigma)
+                       mean_Sigma, extra_dof_Sigma)
 
         # Initialize the dynamics and the noise covariances
         self._sqrt_Sigmas_init = np.tile(np.eye(D)[None, ...], (K, 1, 1))
         self._sqrt_Sigmas = 0.01 * npr.randn(K, D, D)
+
+        # Initialize the dynamics parameters
         if initialize.lower() == "random_rotation":
-            self._As = .80 * np.array([
-                                          np.column_stack(
-                                              [random_rotation(D, theta=np.pi / 25), np.zeros((D, (lags - 1) * D))])
-                                          for _ in range(K)])
+            self._As = .80 * np.array(
+                [np.column_stack([random_rotation(D, theta=np.pi / 25),
+                                  np.zeros((D, (lags - 1) * D))])
+                 for _ in range(K)])
 
         elif initialize.lower() == "prior":
             self.As = norm.rvs(mean_A, np.sqrt(variance_A))
@@ -830,8 +825,8 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 # nu = dof_Sigma + D + 1
                 # E[Sigma] = Psi / dof_Sigma
                 # Psi = E[Sigma] * dof_Sigma
-                Psi = mean_Sigma[k] * dof_Sigma
-                Sigmas[k] = invwishart.rvs(dof_Sigma + D + 1, Psi)
+                Psi = mean_Sigma[k] * extra_dof_Sigma
+                Sigmas[k] = invwishart.rvs(extra_dof_Sigma + D + 1, Psi)
             self.Sigmas = Sigmas
 
         else:
@@ -882,42 +877,77 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         self._sqrt_Sigmas = value[-1]
         super(AutoRegressiveObservations, self.__class__).params.fset(self, value[:-1])
 
-    def set_prior(self, E_A, var_A, E_V, var_V, E_b, var_b, E_Sigma, dof_Sigma):
+    def set_prior(self, mean_A, variance_A,
+                  mean_V, variance_V,
+                  mean_b, variance_b,
+                  mean_Sigma, extra_dof_Sigma):
         """
         :param E_A:          (K, D, D * lags) array
-        :param var_A:        positive scalar
+        :param variance_A:        positive scalar
         :param E_V:          (K, D, M) array
-        :param var_V:        positive scalar
+        :param variance_V:        positive scalar
         :param E_b:          (K, D) array
-        :param var_b:        positive scalar
+        :param variance_b:        positive scalar
         :param E_Sigma:      (K, D, D) array of psd matrices
         :param var_Sigma:    positive scalar
         """
-        # Compute natural parameters of Gaussian prior on (A, V, b) weight matrix
-        # given these means and variances
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
-        assert all([(np.isscalar(x) and x > 0) for x in [var_A, var_V, var_b]])
-        J0_diag = np.concatenate((1 / var_A * np.ones(D * lags),
-                                  1 / var_V * np.ones(M),
-                                  1 / var_b * np.ones(1)))
+        # Check inputs
+        assert all([(np.isscalar(x) and x > 0) for x
+                    in [variance_A, variance_V, variance_b]])
+        assert mean_A.shape == (K, D, D * lags)
+        assert mean_V.shape == (K, D, M)
+        assert mean_b.shape == (K, D)
+        assert np.isscalar(extra_dof_Sigma) and extra_dof_Sigma > 0
+        assert mean_Sigma.shape == (K, D, D) and np.all(np.linalg.eigvalsh(mean_Sigma) > 0)
+
+        # Store the mean parameters
+        self.mean_A = mean_A
+        self.variance_A = variance_A
+        self.mean_V = mean_V
+        self.variance_V = variance_V
+        self.mean_b = mean_b
+        self.variance_b = variance_b
+        self.mean_Sigma = mean_Sigma
+        self.extra_dof_Sigma = extra_dof_Sigma
+
+        # Compute natural parameters of Gaussian prior on (A, V, b) weight matrix
+        # given these means and variances
+        J0_diag = np.concatenate((1 / variance_A * np.ones(D * lags),
+                                  1 / variance_V * np.ones(M),
+                                  1 / variance_b * np.ones(1)))
         self.J0 = np.tile(np.diag(J0_diag)[None, :, :], (K, 1, 1))
 
         # h0: (K, D, D * lags + M + 1)
-        assert E_A.shape == (K, D, D * lags)
-        assert E_V.shape == (K, D, M)
-        assert E_b.shape == (K, D)
-        self.h0 = np.concatenate([E_A / var_A, E_V / var_V, E_b[..., None] / var_b], axis=2)
+        self.h0 = np.concatenate([mean_A / variance_A,
+                                  mean_V / variance_V,
+                                  mean_b[..., None] / variance_b], axis=2)
 
         # Note:  we have to transpose h0 per convention in other AR classes
         self.h0 = np.swapaxes(self.h0, -1, -2)
 
         # Set natural parameters of inverse Wishart prior on Sigma
         # Note: might have to scale Psi0 somehow per the m step below
-        assert np.isscalar(dof_Sigma) and dof_Sigma > 0
-        assert E_Sigma.shape == (K, D, D) and np.all(np.linalg.eigvalsh(E_Sigma) > 0)
-        self.nu0 = dof_Sigma
-        self.Psi0 = E_Sigma
+        self.nu0 = extra_dof_Sigma + D + 1
+        self.Psi0 = mean_Sigma * extra_dof_Sigma
+
+    def log_prior(self):
+        lp = np.sum(norm.logpdf(self.As, self.mean_A,
+                                np.sqrt(self.variance_A)))
+
+        lp += np.sum(norm.logpdf(self.Vs, self.mean_V,
+                                 np.sqrt(self.variance_V)))
+
+        lp += np.sum(norm.logpdf(self.bs, self.mean_b,
+                                 np.sqrt(self.variance_b)))
+
+        for k in range(self.K):
+            lp += invwishart.logpdf(
+                self.Sigmas[k],
+                self.extra_dof_Sigma + self.D + 1,
+                self.mean_Sigma[k] * self.extra_dof_Sigma)
+        return lp
 
     def permute(self, perm):
         super(AutoRegressiveObservations, self).permute(perm)
@@ -1097,7 +1127,8 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             EWxyT =  Wk @ ExuyTs[k]
             sqerr = EyyTs[k] - EWxyT.T - EWxyT + Wk @ ExuxuTs[k] @ Wk.T
             nu = self.nu0 + Ens[k]
-            Sigmas[k] = (sqerr + self.Psi0[k]) / (nu + D + 1)
+            Sigmas[k] = (sqerr + self.Psi0[k]) / nu
+            # Sigmas[k] = (sqerr + 1e-8 * np.eye(D)) / (1e-8 + Ens[k])
 
         # If any states are unused, set their parameters to a perturbation of a used state
         unused = np.where(Ens < 1)[0]
@@ -1109,7 +1140,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 Vs[k] = Vs[i] + 0.01 * npr.randn(*Vs[i].shape)
                 bs[k] = bs[i] + 0.01 * npr.randn(*bs[i].shape)
                 Sigmas[k] = Sigmas[i]
-                
+
         # Update parameters via their setter
         self.As = As
         self.Vs = Vs

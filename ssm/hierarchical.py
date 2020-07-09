@@ -31,11 +31,10 @@ class HierarchicalAutoRegressiveObservations(Observations):
 
         where nu specifies the degrees of freedom.
         """
-    def __init__(self, K, D, M=0,
-                 lags=1,
-                 cond_variance_A=0.01,
-                 cond_variance_V=0.01,
-                 cond_variance_b=0.01,
+    def __init__(self, K, D, M=0, lags=1,
+                 cond_variance_A=0.001,
+                 cond_variance_V=0.001,
+                 cond_variance_b=0.001,
                  cond_dof_Sigma=10,
                  tags=(None,)):
 
@@ -68,7 +67,7 @@ class HierarchicalAutoRegressiveObservations(Observations):
                                        mean_b=self.global_ar_model.bs,
                                        variance_b=cond_variance_b,
                                        mean_Sigma=self.global_ar_model.Sigmas,
-                                       dof_Sigma=cond_dof_Sigma,
+                                       extra_dof_Sigma=cond_dof_Sigma,
                                        initialize="prior"
                                        )
             for _ in range(self.G)
@@ -107,28 +106,18 @@ class HierarchicalAutoRegressiveObservations(Observations):
         self.global_ar_model.initialize(datas, inputs, masks, tags)
         self._update_hierarchical_prior()
 
+        # Copy global parameters to per-group models
+        for ar in self.per_group_ar_models:
+            ar.As = self.global_ar_model.As.copy()
+            ar.Vs = self.global_ar_model.Vs.copy()
+            ar.bs = self.global_ar_model.bs.copy()
+            ar.Sigmas = self.global_ar_model.Sigmas.copy()
+
     def log_prior(self):
         lp = 0
         for ar in self.per_group_ar_models:
-            lp += np.sum(norm.logpdf(ar.As, self.global_ar_model.As,
-                                     np.sqrt(self.cond_variance_A)))
-
-            lp += np.sum(norm.logpdf(ar.Vs, self.global_ar_model.Vs,
-                                     np.sqrt(self.cond_variance_V)))
-
-            lp += np.sum(norm.logpdf(ar.bs, self.global_ar_model.bs,
-                                     np.sqrt(self.cond_variance_b)))
-
-            for k in range(self.K):
-                lp += invwishart.logpdf(ar.Sigmas[k],
-                                        self.cond_dof_Sigma + self.D + 1,
-                                        self.global_ar_model.Sigmas[k])
+            lp += ar.log_prior()
         return lp
-
-
-    def _compute_mus(self, data, input, mask, tag):
-        return self.per_group_ar_models[self.tags_to_indices[tag]].\
-            _compute_mus(data, input, mask, tag)
 
     def log_likelihoods(self, data, input, mask, tag):
         return self.per_group_ar_models[self.tags_to_indices[tag]].\
@@ -137,18 +126,19 @@ class HierarchicalAutoRegressiveObservations(Observations):
     def _m_step_group(self, this_tag, expectations, datas, inputs, masks, tags,
                       continuous_expectations=None):
         # Pull out the subset of data that corresponds to this tag
-        expts = [e for e, t in zip(expectations, tags) if t == this_tag]
-        datas = [d for d, t in zip(datas, tags) if t == this_tag]
-        inpts = [i for i, t in zip(inputs, tags) if t == this_tag]
-        masks = [m for m, t in zip(masks, tags) if t == this_tag]
-        cexps = [c for c, t in zip(continuous_expectations, tags) if t == this_tag] \
+        texpts = [e for e, t in zip(expectations, tags) if t == this_tag]
+        tdatas = [d for d, t in zip(datas, tags)        if t == this_tag]
+        tinpts = [i for i, t in zip(inputs, tags)       if t == this_tag]
+        tmasks = [m for m, t in zip(masks, tags)        if t == this_tag]
+        ttags =  [t for t    in tags                    if t == this_tag]
+        tcexps = [c for c, t in zip(continuous_expectations, tags) if t == this_tag] \
             if continuous_expectations is not None else None
 
         # Call m-step on the group AR model with this subset of data
         # Note: this assumes that the per-group model prior is centered
         #       on the global AR parameters
         self.per_group_ar_models[self.tags_to_indices[this_tag]].\
-            m_step(expts, datas, inpts, masks, tags, cexps)
+            m_step(texpts, tdatas, tinpts, tmasks, ttags, tcexps)
 
     def _m_step_global(self):
         # Note: we could explore smarter averaging techniques for estimating
