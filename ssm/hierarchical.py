@@ -113,6 +113,11 @@ class HierarchicalAutoRegressiveObservations(Observations):
             ar.bs = self.global_ar_model.bs.copy()
             ar.Sigmas = self.global_ar_model.Sigmas.copy()
 
+            ar.As = norm.rvs(self.global_ar_model.As, np.sqrt(self.cond_variance_A))
+            ar.Vs = norm.rvs(self.global_ar_model.Vs, np.sqrt(self.cond_variance_V))
+            ar.bs = norm.rvs(self.global_ar_model.bs, np.sqrt(self.cond_variance_b))
+            ar.Sigmas = self.global_ar_model.Sigmas.copy()
+
     def log_prior(self):
         lp = 0
         for ar in self.per_group_ar_models:
