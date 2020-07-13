@@ -1,3 +1,5 @@
+from warnings import warn
+
 import autograd.numpy as np
 import autograd.numpy.random as npr
 
@@ -43,6 +45,7 @@ class Observations(object):
         raise NotImplementedError
 
     def m_step(self, expectations, datas, inputs, masks, tags,
+               sufficient_stats=None,
                optimizer="bfgs", **kwargs):
         """
         If M-step cannot be done in closed form for the observations, default to SGD.
@@ -75,6 +78,40 @@ class Observations(object):
         #                Optimization via Laplace-EM may be slow. Consider using an \
         #                alternative posterior and inference method. ")
         raise NotImplementedError
+
+
+class ExponentialFamilyObservations(Observations):
+    """
+    Special case where the observation likelihood belongs
+    to the exponential family and has closed-form sufficient
+    statistics. Then all you need for the M-step are those
+    sufficient statistics (or rather, their expectation under
+    the posterior distribution on the latent states).  This
+    special property enables stochatic EM and SVI-like algorithms.
+    """
+
+    def expected_sufficient_stats(self, expectations, datas, inputs, masks, tags):
+        """
+        Compute expected sufficient statistics of a given dataset.
+        The ESS are summed over datapoints in the given data array(s).
+        """
+        raise NotImplementedError
+
+
+    def m_step(self, expectations, datas, inputs, masks, tags,
+               sufficient_stats=None,
+               **kwargs):
+        """
+        ExponentialFamilyObservations allow for M-steps that only
+        rely on sufficient statistics of the data.
+
+        Still, we can default to the generic m-step function of
+        performing gradient ascent on the expected log joint, if
+        the exact m-step with sufficient statistics is not implemented.
+        """
+        warn("You should implement the exact m-step with sufficient "
+             "stats for {}!".format(self.__class__))
+        Observations.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
 
 class GaussianObservations(Observations):
@@ -991,7 +1028,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
         return np.row_stack((ll_init, ll_ar))
 
-    def _get_sufficient_statistics(self, expectations, datas, inputs):
+    def expected_sufficient_stats(self, expectations, datas, inputs, masks, tags):
         K, D, M, lags = self.K, self.D, self.M, self.lags
         D_in = D * lags + M + 1
 
@@ -1000,6 +1037,10 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         ExuyTs = np.zeros((K, D_in, D))
         EyyTs = np.zeros((K, D, D))
         Ens = np.zeros(K)
+
+        # Return early if no data is given
+        if len(expectations) == 0:
+            return ExuxuTs, ExuyTs, EyyTs, Ens
 
         # Iterate over data arrays and discrete states
         for (Ez, _, _), data, input in zip(expectations, datas, inputs):
@@ -1089,7 +1130,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         return ExuxuTs, ExuyTs, EyyTs, Ens
 
     def m_step(self, expectations, datas, inputs, masks, tags,
-               continuous_expectations=None, **kwargs):
+               sufficient_stats=None, **kwargs):
         """Compute M-step for Gaussian Auto Regressive Observations.
 
         If `continuous_expectations` is not None, this function will
@@ -1106,13 +1147,19 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
         # Collect sufficient statistics
-        if continuous_expectations is None:
-            ExuxuTs, ExuyTs, EyyTs, Ens = self._get_sufficient_statistics(expectations, datas, inputs)
-        else:
+        if sufficient_stats is None:
             ExuxuTs, ExuyTs, EyyTs, Ens = \
-                self._extend_given_sufficient_statistics(expectations, continuous_expectations, inputs)
+                self.expected_sufficient_stats(expectations,
+                                               datas,
+                                               inputs,
+                                               masks,
+                                               tags)
+        else:
+            # ExuxuTs, ExuyTs, EyyTs, Ens = \
+            #     self._extend_given_sufficient_statistics(expectations, continuous_expectations, inputs)
+            ExuxuTs, ExuyTs, EyyTs, Ens = sufficient_stats
 
-        # Solve the linear regressions
+            # Solve the linear regressions
         As = np.zeros((K, D, D * lags))
         Vs = np.zeros((K, D, M))
         bs = np.zeros((K, D))

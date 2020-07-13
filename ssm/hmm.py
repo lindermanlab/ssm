@@ -4,7 +4,8 @@ import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd import value_and_grad
 
-from ssm.optimizers import adam_step, rmsprop_step, sgd_step
+from ssm.optimizers import adam_step, rmsprop_step, sgd_step, \
+    convex_combination, geometric_learning_rate
 from ssm.primitives import hmm_normalizer
 from ssm.messages import hmm_expected_states, hmm_filter, hmm_sample, viterbi
 from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
@@ -375,7 +376,7 @@ class HMM(object):
             epoch = itr // M
             m = itr % M
             i = perm[epoch][m]
-            return datas[i], inputs[i], masks[i], tags[i][i]
+            return datas[i], inputs[i], masks[i], tags[i]
 
         # Define the objective (negative ELBO)
         def _objective(params, itr):
@@ -418,6 +419,124 @@ class HMM(object):
               pbar.set_description("Epoch {} Itr {} LP: {:.1f}".format(epoch, m, lls[-1]))
               pbar.update(1)
 
+        return lls
+
+    def _fit_stochastic_em_conjugate(self, datas, inputs, masks, tags,
+                                     verbose=2,
+                                     num_epochs=100,
+                                     tolerance=0,
+                                     learning_rate=geometric_learning_rate):
+        """
+        Fit the parameters with stochastic EM, assuming that the observations
+        and transitions are exponential family distributions with closed-form
+        sufficient statistics.
+
+        Initialize:
+            - Initialize the running average sufficient statistics.  E.g. set
+              them to the stats from the prior if you have one, or to zero o.w.
+
+        E-step:
+            - grab a minibatch of data (e.g. one of your data arrays)
+            - compute E[z_t] and E[z_t, z_{t+1}] for that minibatch
+
+        M-step:
+            - compute expected sufficient statistics of the transition and
+              observation models from this minibatch. Note: these are summed
+              over datapoints in the minibatch.
+
+            - take a convex combination of ESS from this minibatch and your
+              running average.
+            - then set parameters to maximize the likelihood using these
+              averaged sufficent statistics.
+
+        References:
+
+            - Cappé, Olivier, and Eric Moulines. "On‐line expectation–maximization
+              algorithm for latent data models." Journal of the Royal Statistical
+              Society: Series B (Statistical Methodology) 71.3 (2009): 593-613.
+
+            - Hoffman, Matthew D., et al. "Stochastic variational inference."
+              The Journal of Machine Learning Research 14.1 (2013): 1303-1347.
+
+        TODO:
+            - Specify learning rates
+            - Control how log likelihoods are reported
+
+        """
+        # Store the log likelihoods (per minibatch)
+        lls = []
+
+        # Initialize the progress bar
+        pbar = ssm_pbar(num_epochs, verbose, "Initializing...", [])
+
+        # Initialize the sufficient statistics by calling without data
+        args = [], [], [], [], []
+        # init_state_suff_stats = self.init_state_distn.expected_sufficient_stats(*args)
+        # transition_suff_stats = self.transitions.expected_sufficient_stats(*args)
+        observation_suff_stats = self.observations.expected_sufficient_stats(*args)
+
+        # A helper to grab a minibatch of data
+        num_datas = len(datas)
+        T_total = sum([data.shape[0] for data in datas])
+        perm = [np.random.permutation(num_datas) for _ in range(num_epochs)]
+        def _get_minibatch(itr):
+            epoch = itr // num_datas
+            m = itr % num_datas
+            i = perm[epoch][m]
+            return datas[i], inputs[i], masks[i], tags[i]
+
+        # TODO: Initialize learning rate schedule
+
+        for itr in pbar:
+            # Grab a minibatch of data
+            data, input, mask, tag = _get_minibatch(itr)
+
+            # E step: compute expected latent states with current parameters
+            #         _for this particular data array_.
+            expectations = self.expected_states(data, input, mask, tag)
+
+            # Store progress
+            lls.append(self.log_prior() + expectations[2] * T_total / data.shape[0])
+
+            # M step: Get expected sufficient statistics for this data
+            #         and combine them with the running average.
+            # Note:   The ESS are summed over datapoints in the minibatch.
+            #         Minibatches of different length will lead to parameter
+            #         updates that vary in magnitude depending on the size of
+            #         the minibatch.
+            args = [expectations], [data], [input], [mask], [tag]
+            # init_state_suff_stats = convex_combination(
+            #     init_state_suff_stats,
+            #     self.init_state_distn.expected_sufficient_stats(*args),
+            #     learning_rate(itr))
+            #
+            # transition_suff_stats = convex_combination(
+            #     transition_suff_stats,
+            #     self.transitions.expected_sufficient_stats(*args),
+            #     learning_rate(itr))
+
+            observation_suff_stats = convex_combination(
+                observation_suff_stats,
+                self.observations.expected_sufficient_stats(*args),
+                learning_rate(itr))
+
+            # M step: update the parameters with those stats.
+            args = None, None, None, None, None
+            # self.init_state_distn.m_step(*args, sufficient_stats=init_state_suff_stats)
+            # self.transitions.m_step(*args, sufficient_stats=transition_suff_stats)
+            self.observations.m_step(*args, sufficient_stats=observation_suff_stats)
+
+            if verbose == 2:
+                pbar.set_description("LP: {:.1f}".format(lls[-1]))
+
+            # Check for convergence
+            if itr > 0 and abs(lls[-1] - lls[-2]) < tolerance:
+                if verbose == 2:
+                    pbar.set_description("Converged to LP: {:.1f}".format(lls[-1]))
+                break
+
+        # Store the final log probability
+        lls.append(self.log_probability(datas, inputs, masks, tags))
         return lls
 
     def _fit_em(self, datas, inputs, masks, tags,
@@ -475,6 +594,7 @@ class HMM(object):
                  em=self._fit_em,
                  stochastic_em=partial(self._fit_stochastic_em, "adam"),
                  stochastic_em_sgd=partial(self._fit_stochastic_em, "sgd"),
+                 stochastic_em_conj=self._fit_stochastic_em_conjugate
                  )
 
         if method not in _fitting_methods:
@@ -484,12 +604,13 @@ class HMM(object):
         if initialize:
             self.initialize(datas, inputs=inputs, masks=masks, tags=tags)
 
+        # TODO: Move this!
         if isinstance(self.transitions,
                       trans.ConstrainedStationaryTransitions):
             if method != "em":
                 raise Exception("Only EM is implemented "
                                 "for Constrained transitions.")
-       # print(verbose)
+
         return _fitting_methods[method](datas, inputs=inputs, masks=masks, tags=tags, verbose = verbose, **kwargs)
 
 

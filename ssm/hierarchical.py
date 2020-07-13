@@ -152,6 +152,8 @@ class HierarchicalAutoRegressiveObservations(Observations):
         self.global_ar_model.As = np.mean([ar.As for ar in self.per_group_ar_models], axis=0)
         self.global_ar_model.Vs = np.mean([ar.Vs for ar in self.per_group_ar_models], axis=0)
         self.global_ar_model.bs = np.mean([ar.bs for ar in self.per_group_ar_models], axis=0)
+
+        # TODO: Determine the correct MLE for Sigma given Sigma_i ~ IW(Sigma, nu)
         self.global_ar_model.Sigmas = np.mean([ar.Sigmas for ar in self.per_group_ar_models], axis=0)
 
     def _update_hierarchical_prior(self):
