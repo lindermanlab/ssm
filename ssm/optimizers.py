@@ -18,7 +18,7 @@ from ssm.primitives import solve_symm_block_tridiag
 
 
 def geometric_learning_rate(itr, delay=1, forgetting_rate=0.75):
-    return (itr + delay) ** forgetting_rate
+    return (itr + delay) ** (-forgetting_rate)
 
 
 def convex_combination(curr, target, alpha):
