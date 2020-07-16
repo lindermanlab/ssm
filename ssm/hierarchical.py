@@ -39,6 +39,7 @@ class HierarchicalAutoRegressiveObservations(Observations):
                  tags=(None,)):
 
         super().__init__(K, D, M)
+        self.lags = lags
 
         # First figure out how many tags/groups
         self.tags = tags
@@ -128,6 +129,16 @@ class HierarchicalAutoRegressiveObservations(Observations):
         return self.per_group_ar_models[self.tags_to_indices[tag]].\
             log_likelihoods(data, input, mask, tag)
 
+    def expected_sufficient_stats(self, expectations, datas, inputs, masks, tags):
+        # assumes that each input is a list of length 1
+        if len(tags) == 0:
+            # initializing; return zeros
+            idx = 0
+        else:
+            idx = self.tags_to_indices[tags[0]]
+        return self.per_group_ar_models[idx].expected_sufficient_stats(
+            expectations, datas, inputs, masks, tags)
+
     def _m_step_group(self, this_tag, expectations, datas, inputs, masks, tags,
                       continuous_expectations=None):
         # Pull out the subset of data that corresponds to this tag
@@ -135,7 +146,7 @@ class HierarchicalAutoRegressiveObservations(Observations):
         tdatas = [d for d, t in zip(datas, tags)        if t == this_tag]
         tinpts = [i for i, t in zip(inputs, tags)       if t == this_tag]
         tmasks = [m for m, t in zip(masks, tags)        if t == this_tag]
-        ttags =  [t for t    in tags                    if t == this_tag]
+        ttags  = [t for t    in tags                    if t == this_tag]
         tcexps = [c for c, t in zip(continuous_expectations, tags) if t == this_tag] \
             if continuous_expectations is not None else None
 
@@ -165,16 +176,22 @@ class HierarchicalAutoRegressiveObservations(Observations):
                          self.global_ar_model.bs, self.cond_variance_b,
                          self.global_ar_model.Sigmas, self.cond_dof_Sigma)
 
-
     def m_step(self, expectations, datas, inputs, masks, tags, num_iter=1, **kwargs):
-        for itr in range(num_iter):
-            # Update the per-group weights
-            for tag in self.tags:
-                self._m_step_group(tag, expectations, datas, inputs, masks, tags)
 
-            # Update the shared weights
-            self._m_step_global()
-            self._update_hierarchical_prior()
+        if kwargs.get('sufficient_stats', None):
+            # assume fitting with stochastic_em_conj; default to standard m step for this batch
+            self.per_group_ar_models[self.tags_to_indices[tags[0]]].m_step(
+                expectations, datas, inputs, masks, tags, **kwargs)
+        else:
+            # assume fitting with em; run in batch mode
+            for itr in range(num_iter):
+                # Update the per-group weights
+                for tag in self.tags:
+                    self._m_step_group(tag, expectations, datas, inputs, masks, tags)
+
+                # Update the shared weights
+                self._m_step_global()
+                self._update_hierarchical_prior()
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         return self.per_group_ar_models[self.tags_to_indices[tag]]. \

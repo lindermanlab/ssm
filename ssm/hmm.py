@@ -425,7 +425,8 @@ class HMM(object):
                                      verbose=2,
                                      num_epochs=100,
                                      tolerance=0,
-                                     learning_rate=geometric_learning_rate):
+                                     learning_rate=geometric_learning_rate,
+                                     **kwargs):
         """
         Fit the parameters with stochastic EM, assuming that the observations
         and transitions are exponential family distributions with closed-form
@@ -479,14 +480,6 @@ class HMM(object):
         # transition_suff_stats = self.transitions.expected_sufficient_stats(*args)
         observation_suff_stats = self.observations.expected_sufficient_stats(*args)
 
-        # A helper to grab a minibatch of data
-        # perm = [np.random.permutation(num_datas) for _ in range(num_epochs)]
-        # def _get_minibatch(itr):
-        #     epoch = itr // num_datas
-        #     m = itr % num_datas
-        #     i = perm[epoch][m]
-        #     return datas[i], inputs[i], masks[i], tags[i]
-
         # TODO: Initialize learning rate schedule
 
         for epoch in epoch_pbar:
@@ -529,9 +522,11 @@ class HMM(object):
                     1 - learning_rate(epoch * num_datas + i))
 
                 # M step: update the parameters with those stats.
-                args = None, None, None, None, None
+                args = None, None, None, None, [tag]
                 # self.init_state_distn.m_step(*args, sufficient_stats=init_state_suff_stats)
                 # self.transitions.m_step(*args, sufficient_stats=transition_suff_stats)
+                # self.init_state_distn.m_step([expectations], [data], [input], [mask], [tag])
+                # self.transitions.m_step([expectations], [data], [input], [mask], [tag])
                 self.observations.m_step(*args, sufficient_stats=observation_suff_stats)
 
                 # # Check for convergence
@@ -541,8 +536,8 @@ class HMM(object):
                 #     break
 
             # Compute the log probability of the full dataset
-            # if verbose == 2:
-            #     epoch_lps.append(self.log_probability(datas, inputs, masks, tags))
+            if verbose == 2:
+                epoch_lps.append(self.log_probability(datas, inputs, masks, tags))
             #     epoch_pbar.set_description("LP: {:.1f}".format(epoch_lps[-1]))
 
         return epoch_lps, inner_lps
@@ -593,7 +588,7 @@ class HMM(object):
         return lls
 
     @ensure_args_are_lists
-    def fit(self, datas, inputs=None, masks=None, tags=None, verbose = 2,
+    def fit(self, datas, inputs=None, masks=None, tags=None, verbose=2,
             method="em", initialize=True, **kwargs):
       
         _fitting_methods = \
@@ -619,7 +614,8 @@ class HMM(object):
                 raise Exception("Only EM is implemented "
                                 "for Constrained transitions.")
 
-        return _fitting_methods[method](datas, inputs=inputs, masks=masks, tags=tags, verbose = verbose, **kwargs)
+        return _fitting_methods[method](
+            datas, inputs=inputs, masks=masks, tags=tags, verbose=verbose, **kwargs)
 
 
 class HSMM(HMM):
