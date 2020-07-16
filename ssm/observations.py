@@ -137,7 +137,7 @@ class GaussianObservations(ExponentialFamilyObservations):
     To convert the NIW parameters into natural parameters, we have,
 
         a = \nu_0 + d + 2
-        B = \Psi_0
+        B = \Psi_0 + \kappa_0 \mu_0 \mu_0^T
         c = \kappa_0 \mu_0
         d = \kappa_0
 
@@ -151,8 +151,7 @@ class GaussianObservations(ExponentialFamilyObservations):
     and the natural parameters are (d+1, 0, 0, 0). See Gelman et al page 73
     for more details.
     """
-    def __init__(self, K, D, M=0,
-                 prior_stats=None):
+    def __init__(self, K, D, M=0, prior=None):
         super(GaussianObservations, self).__init__(K, D, M)
 
         self.mus = npr.randn(K, D)
@@ -160,18 +159,16 @@ class GaussianObservations(ExponentialFamilyObservations):
 
         # Initialize the prior distribution to a normal inverse-Wishart with
         # effectively zero observed datapoints
-        if prior_stats is None:
-            self.prior_stats = (
-                (D + 1) * np.ones(K),
-                np.zeros((K, D, D)),
-                np.zeros((K, D)),
-                np.zeros(K)
-            )
+        if prior is None:
+            self.prior = [(D+1, np.zeros((D, D)), np.zeros(D), 0) for _ in range(K)]
+
         else:
-            assert len(prior_stats) == 4
-            assert all([s.shape == shp for s, shp in
-                        zip(prior_stats, [(K,), (K, D, D), (K, D), (K,)])])
-            self.prior_stats = prior_stats
+            assert len(prior) == K
+            for prms in prior:
+                assert len(prms) == 4
+                assert all([s.shape == shp for s, shp in
+                            zip(prms, [(K,), (K, D, D), (K, D), (K,)])])
+            self.prior = prior
 
     @property
     def params(self):
@@ -200,23 +197,19 @@ class GaussianObservations(ExponentialFamilyObservations):
         # parameter regimes (otherwise the density does not normalize).
         # We do not constrain the parameters to be well specified, since
         # it is not strictly necessary for EM.  Thus, we only compute
-        # the log prior if their is a density.
-
-        # Convert natural parameters of prior to NIW mean parameters
-        a, B, c, d = self.prior_stats
-        nu0 = a - self.D - 2
-        Psi0 = B
-        mu0 = c / d
-        kappa0 = d
-
+        # the log prior if there is a density.
         lp = 0
         for k in range(self.K):
-            if kappa0[k] > 0:
-                lp += np.sum(multivariate_normal.logpdf(
-                    self.mus[k], mu0[k], self.Sigmas[k] / kappa0[k]))
+            # Convert natural parameters of prior to standard NIW parameters
+            nu0, Psi0, mu0, kappa0 = \
+                stats.normal_invwishart_natural_to_standard(*self.prior[k])
 
-            if nu0[k] >= self.D:
-                lp += invwishart.logpdf(self.Sigmas[k], nu0[k], Psi0[k])
+            if kappa0 > 0:
+                lp += np.sum(multivariate_normal.logpdf(
+                    self.mus[k], mu0, self.Sigmas[k] / kappa0))
+
+            if nu0 >= self.D:
+                lp += invwishart.logpdf(self.Sigmas[k], nu0, Psi0)
         return lp
 
     @ensure_args_are_lists
@@ -268,7 +261,8 @@ class GaussianObservations(ExponentialFamilyObservations):
             sum_x += np.einsum('tk, td -> kd', Ez, x)
             sum_xxT += np.einsum('tk, td, te -> kde', Ez, x, x)
 
-        return sum_n, sum_xxT, sum_x, sum_n
+        sufficient_stats = list(zip(sum_n, sum_xxT, sum_x, sum_n))
+        return sufficient_stats
 
     def m_step(self, expectations, datas, inputs, masks, tags,
                sufficient_stats=None, **kwargs):
@@ -276,19 +270,6 @@ class GaussianObservations(ExponentialFamilyObservations):
         if sufficient_stats is None:
             sufficient_stats = self.expected_sufficient_stats(
                 expectations, datas, inputs, masks, tags)
-
-        # Combine the expected sufficient statistics with the prior statistics
-        a_post, B_post, c_post, d_post = \
-            (ps + ss for ps, ss in zip(self.prior_stats, sufficient_stats))
-
-        # Convert posterior stats to NIW parameters
-        nu_post = a_post - self.D - 2
-        Psi_post = B_post
-        mu_post = c_post / d_post
-        kappa_post = d_post
-
-        # There is something wrong with Psi_post!
-        raise Exception()
 
         # Solve for the MAP estimate of the means and covariances
         # Recall
@@ -305,23 +286,28 @@ class GaussianObservations(ExponentialFamilyObservations):
         # and the mode of this inverse Wishart distribution is at
         #
         #   \Sigma_{MAP} = \Psi_post / (\nu_post + D + 2)
-        #                = \Psi_post / (\nu_0 + En + D + 2)
+        #       = (\Psi_0 + sum_xxT - sum_x sum_x.T / (\kappa_0 + sum_n)) / (\nu_0 + sum_n + D + 2)
+        #
+        # In the uninformative prior limit of \Psi_0 = 0, \kappa_0 = 0, and \nu_0 = -1,
+        # the MAP estimate reduces to
+        #
+        #   \Sigma_{MAP} = (sum_xxT - sum_x sum_x.T / sum_n) / (sum_n + D + 1)
         #
         # Compare this to the maximum likelihood estimate
         #
-        #   \Sigma_{MLE} =
-        self.mus = mu_post
-
-
-        # Set the means and covariances
-        import ipdb; ipdb.set_trace()
+        #   \Sigma_{MLE} = (sum_xxT - sum_x sum_x.T / sum_n) / \sum_n
+        #
+        # We see that \Sigma_{MAP} is subject to a bit more shrinkage than the MLE, and
+        # in the limit of large n they are equal.
         mus = np.zeros((self.K, self.D))
         Sigmas = np.zeros((self.K, self.D, self.D))
         for k in range(self.K):
-            mus[k] = (sum_x[k] + self.h0[k]) / (sum_n[k] + self.J0[k])
-            EmuxT = np.outer(mus[k], sum_x[k])
-            sqerr = sum_xxT[k] - EmuxT - EmuxT.T + sum_n[k] * np.outer(mus[k], mus[k])
-            Sigmas[k] = (sqerr + self.Psi0[k]) / (sum_n[k] + self.nu0)
+            post_stats = [x+y for x,y in zip(self.prior[k], sufficient_stats[k])]
+            nu_post, Psi_post, mu_post, kappa_post = \
+                stats.normal_invwishart_natural_to_standard(*post_stats)
+            mus[k] = mu_post
+            Sigmas[k] = invwishart.mode(nu_post + 1, Psi_post)
+
         self.mus = mus
         self.Sigmas = Sigmas
 
