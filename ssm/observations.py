@@ -306,7 +306,6 @@ class GaussianObservations(ExponentialFamilyObservations):
             nu_post, Psi_post, mu_post, kappa_post = \
                 stats.normal_invwishart_natural_to_standard(*post_stats)
             mus[k] = mu_post
-            # self.Sigmas = Psi_post / (nu_post + self.D + 2)
             Sigmas[k] = invwishart.mode(nu_post + 1, Psi_post)
 
         self.mus = mus
