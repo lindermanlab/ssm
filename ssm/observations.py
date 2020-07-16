@@ -4,7 +4,7 @@ import autograd.numpy as np
 import autograd.numpy.random as npr
 
 from autograd.scipy.special import gammaln, digamma, logsumexp
-from scipy.stats import norm, invwishart
+from scipy.stats import norm, invwishart, multivariate_normal
 
 from ssm.util import random_rotation, ensure_args_are_lists, logit, one_hot
 from ssm.regression import generalized_newton_studentst_dof
@@ -114,11 +114,64 @@ class ExponentialFamilyObservations(Observations):
         Observations.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
 
-class GaussianObservations(Observations):
-    def __init__(self, K, D, M=0):
+class GaussianObservations(ExponentialFamilyObservations):
+    """
+    Model:
+
+        x_t | z_t = k ~ N(\mu_k, \Sigma_k)
+
+    Prior:
+
+        \mu_k | \Sigma_k ~ N(\mu_k | \mu_0, \Sigma_k / \kappa_0)
+                \Sigma_k ~ IW(\Sigma_k | \Psi_0, \nu_0)
+
+    The sufficient statistics of the data and prior are,
+
+        a. I[z_t = k]                    -1/2 \log |\Sigma_k|,
+        B. I[z_t = k] * x_t x_t^\top     -1/2 \Sigma_k^{-1},
+        c. I[z_t = k] * x_t              \Sigma_k^{-1} \mu_k,
+        d. I[z_t = k]                    -1/2 \mu_k^\top \Sigma_k^{-1} \mu_k
+
+    These sufficient statistics correspond to a normal-inverse Wishart (NIW) prior.
+
+    To convert the NIW parameters into natural parameters, we have,
+
+        a = \nu_0 + d + 2
+        B = \Psi_0
+        c = \kappa_0 \mu_0
+        d = \kappa_0
+
+    We default to a non-informative prior with \nu_0 = -1, \Psi_0 = 0,
+    \kappa_0 = 0, and \mu_0 = 0.  (The prior mean \mu_0 is arbitrary when
+    \kappa_0 = 0, since the Gaussian prior on \mu has infinite variance.)
+    In this setting, the prior is proportional to,
+
+        p(\mu, \Sigma) \propto |\Sigma|^{-(d+1)/2}
+
+    and the natural parameters are (d+1, 0, 0, 0). See Gelman et al page 73
+    for more details.
+    """
+    def __init__(self, K, D, M=0,
+                 prior_stats=None):
         super(GaussianObservations, self).__init__(K, D, M)
+
         self.mus = npr.randn(K, D)
         self._sqrt_Sigmas = npr.randn(K, D, D)
+
+        # Initialize the prior distribution to a normal inverse-Wishart with
+        # effectively zero observed datapoints
+        if prior_stats is None:
+            self.prior_stats = (
+                (D + 1) * np.ones(K),
+                np.zeros((K, D, D)),
+                np.zeros((K, D)),
+                np.zeros(K)
+            )
+        else:
+            assert len(prior_stats) == 4
+            assert all([s.shape == shp for s, shp in
+                        zip(prior_stats, [(K,), (K, D, D), (K, D), (K,)])])
+            self.prior_stats = prior_stats
 
     @property
     def params(self):
@@ -135,6 +188,36 @@ class GaussianObservations(Observations):
     @property
     def Sigmas(self):
         return np.matmul(self._sqrt_Sigmas, np.swapaxes(self._sqrt_Sigmas, -1, -2))
+
+    @Sigmas.setter
+    def Sigmas(self, value):
+        assert value.shape == (self.K, self.D, self.D)
+        self._sqrt_Sigmas = np.linalg.cholesky(value + 1e-8 * np.eye(self.D))
+
+    def log_prior(self):
+        # Convert prior stats to a normal inverse-Wishart distribution
+        # Note that the NIW prior is only properly specified in certain
+        # parameter regimes (otherwise the density does not normalize).
+        # We do not constrain the parameters to be well specified, since
+        # it is not strictly necessary for EM.  Thus, we only compute
+        # the log prior if their is a density.
+
+        # Convert natural parameters of prior to NIW mean parameters
+        a, B, c, d = self.prior_stats
+        nu0 = a - self.D - 2
+        Psi0 = B
+        mu0 = c / d
+        kappa0 = d
+
+        lp = 0
+        for k in range(self.K):
+            if kappa0[k] > 0:
+                lp += np.sum(multivariate_normal.logpdf(
+                    self.mus[k], mu0[k], self.Sigmas[k] / kappa0[k]))
+
+            if nu0[k] >= self.D:
+                lp += invwishart.logpdf(self.Sigmas[k], nu0[k], Psi0[k])
+        return lp
 
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
@@ -166,23 +249,81 @@ class GaussianObservations(Observations):
         sqrt_Sigmas = self._sqrt_Sigmas if with_noise else np.zeros((self.K, self.D, self.D))
         return mus[z] + np.dot(sqrt_Sigmas[z], npr.randn(D))
 
-    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        K, D = self.K, self.D
-        J = np.zeros((K, D))
-        h = np.zeros((K, D))
-        for (Ez, _, _), y in zip(expectations, datas):
-            J += np.sum(Ez[:, :, None], axis=0)
-            h += np.sum(Ez[:, :, None] * y[:, None, :], axis=0)
-        self.mus = h / J
+    def expected_sufficient_stats(self, expectations, datas, inputs, masks, tags):
+        """
+        Sufficient statistics are
 
-        # Update the variance
-        sqerr = np.zeros((K, D, D))
-        weight = np.zeros((K,))
-        for (Ez, _, _), y in zip(expectations, datas):
-            resid = y[:, None, :] - self.mus
-            sqerr += np.sum(Ez[:, :, None, None] * resid[:, :, None, :] * resid[:, :, :, None], axis=0)
-            weight += np.sum(Ez, axis=0)
-        self._sqrt_Sigmas = np.linalg.cholesky(sqerr / weight[:, None, None] + 1e-8 * np.eye(self.D))
+            En[k]   = \sum_t E[z_t = k]
+            ExxT[k] = \sum_t E[z_t = k] * x[t] x[t].T
+            Ex[k]   = \sum_t E[z_t = k] * x[t]
+            En[k]   = \sum_t E[z_t = k]
+
+        """
+        sum_n = np.zeros(self.K)
+        sum_xxT = np.zeros((self.K, self.D, self.D))
+        sum_x = np.zeros((self.K, self.D))
+
+        for (Ez, _, _), x in zip(expectations, datas):
+            sum_n += np.sum(Ez, axis=0)
+            sum_x += np.einsum('tk, td -> kd', Ez, x)
+            sum_xxT += np.einsum('tk, td, te -> kde', Ez, x, x)
+
+        return sum_n, sum_xxT, sum_x, sum_n
+
+    def m_step(self, expectations, datas, inputs, masks, tags,
+               sufficient_stats=None, **kwargs):
+
+        if sufficient_stats is None:
+            sufficient_stats = self.expected_sufficient_stats(
+                expectations, datas, inputs, masks, tags)
+
+        # Combine the expected sufficient statistics with the prior statistics
+        a_post, B_post, c_post, d_post = \
+            (ps + ss for ps, ss in zip(self.prior_stats, sufficient_stats))
+
+        # Convert posterior stats to NIW parameters
+        nu_post = a_post - self.D - 2
+        Psi_post = B_post
+        mu_post = c_post / d_post
+        kappa_post = d_post
+
+        # There is something wrong with Psi_post!
+        raise Exception()
+
+        # Solve for the MAP estimate of the means and covariances
+        # Recall
+        #   p(\mu, \Sigma | x, z) \propto
+        #       N(\mu | \mu_post, \Sigma / \kappa_post) \times
+        #       IW(\Sigma | \nu_post, \Psi_post)
+        #
+        # The optimal mean is \mu_{MAP} = \mu_post; the same as the MLE.
+        # Substituting this in, we have
+        #
+        #   p(\mu_{MAP}, \Sigma | x, z) \propto
+        #       IW(\Sigma | \nu_post + 1, \Psi_post)
+        #
+        # and the mode of this inverse Wishart distribution is at
+        #
+        #   \Sigma_{MAP} = \Psi_post / (\nu_post + D + 2)
+        #                = \Psi_post / (\nu_0 + En + D + 2)
+        #
+        # Compare this to the maximum likelihood estimate
+        #
+        #   \Sigma_{MLE} =
+        self.mus = mu_post
+
+
+        # Set the means and covariances
+        import ipdb; ipdb.set_trace()
+        mus = np.zeros((self.K, self.D))
+        Sigmas = np.zeros((self.K, self.D, self.D))
+        for k in range(self.K):
+            mus[k] = (sum_x[k] + self.h0[k]) / (sum_n[k] + self.J0[k])
+            EmuxT = np.outer(mus[k], sum_x[k])
+            sqerr = sum_xxT[k] - EmuxT - EmuxT.T + sum_n[k] * np.outer(mus[k], mus[k])
+            Sigmas[k] = (sqerr + self.Psi0[k]) / (sum_n[k] + self.nu0)
+        self.mus = mus
+        self.Sigmas = Sigmas
 
     def smooth(self, expectations, data, input, tag):
         """
@@ -190,6 +331,7 @@ class GaussianObservations(Observations):
         of latent discrete states.
         """
         return expectations.dot(self.mus)
+
 
 class ExponentialObservations(Observations):
     def __init__(self, K, D, M=0):
@@ -236,6 +378,7 @@ class ExponentialObservations(Observations):
         of latent discrete states.
         """
         return expectations.dot(1/np.exp(self.log_lambdas))
+
 
 class DiagonalGaussianObservations(Observations):
     def __init__(self, K, D, M=0):
@@ -614,7 +757,7 @@ class BernoulliObservations(Observations):
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
-        ps = 1 / (1 + np.exp(self.logit_ps))
+        ps = 1 / (1 + np.exp(-self.logit_ps))
         return expectations.dot(ps)
 
 
@@ -1159,7 +1302,19 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             #     self._extend_given_sufficient_statistics(expectations, continuous_expectations, inputs)
             ExuxuTs, ExuyTs, EyyTs, Ens = sufficient_stats
 
-            # Solve the linear regressions
+        # Solve the linear regressions
+        #
+        # Note: this is performing the M-step in two stages, first updating
+        #       weights W = (A, V, b) as if the observation variance was identity,
+        #       then updating the variance given the new weights.  This is only an
+        #       issue when there is a non-trivial prior on the weights and the
+        #       covariance matrix, since otherwise the optimal weights are independent
+        #       of the covariance of the errors.  When there is a strong prior, as in a
+        #       hierarchical model, you technically have to account for the covariance
+        #       of the errors when updating weights, since it affects how the prior and
+        #       likelihood are combined.  Alternatively, we could use a conjugate
+        #       matrix-normal-inverse-Wishart (MNIW) prior on (W, Sigma) jointly and
+        #       then solve for the mode of this posterior.
         As = np.zeros((K, D, D * lags))
         Vs = np.zeros((K, D, M))
         bs = np.zeros((K, D))
@@ -1173,9 +1328,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             # Solve for the MAP estimate of the covariance
             EWxyT =  Wk @ ExuyTs[k]
             sqerr = EyyTs[k] - EWxyT.T - EWxyT + Wk @ ExuxuTs[k] @ Wk.T
-            nu = self.nu0 + Ens[k]
-            Sigmas[k] = (sqerr + self.Psi0[k]) / nu
-            # Sigmas[k] = (sqerr + 1e-8 * np.eye(D)) / (1e-8 + Ens[k])
+            Sigmas[k] = (sqerr + self.Psi0[k]) / (Ens[k] + self.nu0)
 
         # If any states are unused, set their parameters to a perturbation of a used state
         unused = np.where(Ens < 1)[0]
