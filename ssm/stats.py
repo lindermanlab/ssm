@@ -671,3 +671,34 @@ def exponential_logpdf(data, lambdas, mask=None):
     # Compute log pdf
     lls = np.log(lambdas) - lambdas * data
     return np.sum(lls * mask, axis=-1)
+
+
+def normal_invwishart_natural_to_standard(a, B, c, d):
+    """
+    The normal-IW prior is equivalent to:
+
+        \mu_k | \Sigma_k ~ N(\mu_k | \mu_0, \Sigma_k / \kappa_0)
+        \Sigma_k ~ IW(\Sigma_k | \Psi_0, \nu_0)
+
+    The sufficient statistics are,
+
+        -1/2 \log |\Sigma_k|,
+        -1/2 \Sigma_k^{-1},
+        \Sigma_k^{-1} \mu_k,
+        -1/2 \mu_k^\top \Sigma_k^{-1} \mu_k
+
+    The natural parameters are
+
+        a = \nu_0 + d + 2
+        B = \Psi_0 + \kappa_0 \mu_0 \mu_0^T
+        c = \kappa_0 \mu_0
+        d = \kappa_0
+
+    This function converts natural parameters back into standard parameters
+    """
+    dim = c.shape[0]
+    nu0 = a - dim - 2
+    mu0 = c / (d + 1e-16)
+    kappa0 = d
+    Psi0 = B - kappa0 * np.outer(mu0, mu0)
+    return nu0, Psi0, mu0, kappa0
