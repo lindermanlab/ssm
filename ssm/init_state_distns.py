@@ -9,6 +9,7 @@ from autograd import grad
 
 from ssm.util import ensure_args_are_lists
 
+
 class InitialStateDistribution(object):
     def __init__(self, K, D, M=0):
         self.K, self.D, self.M = K, D, M
@@ -43,9 +44,27 @@ class InitialStateDistribution(object):
     def log_prior(self):
         return 0
 
-    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        pi0 = sum([Ez[0] for Ez, _, _ in expectations]) + 1e-8
-        self.log_pi0 = np.log(pi0 / pi0.sum())
+    def expected_sufficient_stats(self, expectations, datas, inputs, masks, tags):
+        """
+        Sufficient statistics are
+
+            Ez0 = E[z_0 = k]
+
+        """
+        # Return early if no data is given
+        if len(expectations) == 0:
+            return np.zeros(self.K)
+        Ez0 = sum([Ez[0] for Ez, _, _ in expectations]) + 1e-8
+        return Ez0
+
+    def m_step(self, expectations, datas, inputs, masks, tags, sufficient_stats=None, **kwargs):
+        """Compute M-step for initial state distribution."""
+        # Collect sufficient statistics
+        if sufficient_stats is None:
+            Ez0 = self.expected_sufficient_stats(expectations, datas, inputs, masks, tags)
+        else:
+            Ez0 = sufficient_stats
+        self.log_pi0 = np.log(Ez0 / Ez0.sum())
 
 
 class FixedInitialStateDistribution(InitialStateDistribution):
