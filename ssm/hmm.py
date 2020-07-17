@@ -538,6 +538,10 @@ class HMM(object):
                 #         pbar.set_description("Converged to LP: {:.1f}".format(lls[-1]))
                 #     break
 
+            # Update the shared weights
+            self.observations._m_step_global()
+            self.observations._update_hierarchical_prior()
+
             # Compute the log probability of the full dataset
             if verbose == 2:
                 epoch_lps.append(self.log_probability(datas, inputs, masks, tags))
