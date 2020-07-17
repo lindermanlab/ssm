@@ -97,7 +97,6 @@ class ExponentialFamilyObservations(Observations):
         """
         raise NotImplementedError
 
-
     def m_step(self, expectations, datas, inputs, masks, tags,
                sufficient_stats=None,
                **kwargs):

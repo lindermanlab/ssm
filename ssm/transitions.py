@@ -122,7 +122,7 @@ class StationaryTransitions(Transitions):
         """
         # Return early if no data is given
         if len(expectations) == 0:
-            return np.zeros(self.K, self.K)
+            return np.zeros((self.K, self.K))
         sum_Ezzp1 = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations])
         return sum_Ezzp1
 

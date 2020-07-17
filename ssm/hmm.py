@@ -476,8 +476,8 @@ class HMM(object):
 
         # Initialize the sufficient statistics by calling without data
         args = [], [], [], [], []
-        # init_state_suff_stats = self.init_state_distn.expected_sufficient_stats(*args)
-        # transition_suff_stats = self.transitions.expected_sufficient_stats(*args)
+        init_state_suff_stats = self.init_state_distn.expected_sufficient_stats(*args)
+        transition_suff_stats = self.transitions.expected_sufficient_stats(*args)
         observation_suff_stats = self.observations.expected_sufficient_stats(*args)
 
         # TODO: Initialize learning rate schedule
@@ -506,27 +506,30 @@ class HMM(object):
                 #         updates that vary in magnitude depending on the size of
                 #         the minibatch.
                 args = [expectations], [data], [input], [mask], [tag]
-                # init_state_suff_stats = convex_combination(
-                #     init_state_suff_stats,
-                #     self.init_state_distn.expected_sufficient_stats(*args),
-                #     learning_rate(itr))
-                #
-                # transition_suff_stats = convex_combination(
-                #     transition_suff_stats,
-                #     self.transitions.expected_sufficient_stats(*args),
-                #     learning_rate(itr))
+
+                # convex combo is computed as
+                # alpha * curr_suff_stats + (1 - alpha) * avg_suff_stats
+                alpha = learning_rate(epoch * num_datas + i, forgetting_rate=0.75)
+
+                init_state_suff_stats = convex_combination(
+                    self.init_state_distn.expected_sufficient_stats(*args),
+                    init_state_suff_stats,
+                    alpha)
+
+                transition_suff_stats = convex_combination(
+                    self.transitions.expected_sufficient_stats(*args),
+                    transition_suff_stats,
+                    alpha)
 
                 observation_suff_stats = convex_combination(
-                    observation_suff_stats,
                     self.observations.expected_sufficient_stats(*args),
-                    1 - learning_rate(epoch * num_datas + i))
+                    observation_suff_stats,
+                    alpha)
 
                 # M step: update the parameters with those stats.
                 args = None, None, None, None, [tag]
-                # self.init_state_distn.m_step(*args, sufficient_stats=init_state_suff_stats)
-                # self.transitions.m_step(*args, sufficient_stats=transition_suff_stats)
-                # self.init_state_distn.m_step([expectations], [data], [input], [mask], [tag])
-                # self.transitions.m_step([expectations], [data], [input], [mask], [tag])
+                self.init_state_distn.m_step(*args, sufficient_stats=init_state_suff_stats)
+                self.transitions.m_step(*args, sufficient_stats=transition_suff_stats)
                 self.observations.m_step(*args, sufficient_stats=observation_suff_stats)
 
                 # # Check for convergence
