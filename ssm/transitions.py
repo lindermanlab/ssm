@@ -80,6 +80,7 @@ class Transitions(object):
         terms = np.array([-1 * hess(x[None,:], Ezzp1) for x, Ezzp1 in zip(data, expected_joints)])
         return terms
 
+
 class StationaryTransitions(Transitions):
     """
     Standard Hidden Markov Model with fixed initial distribution and transition matrix.
@@ -112,9 +113,27 @@ class StationaryTransitions(Transitions):
         log_Ps = self.log_Ps - logsumexp(self.log_Ps, axis=1, keepdims=True)
         return log_Ps[None, :, :]
 
-    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        P = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations])
-        P /= P.sum(axis=-1, keepdims=True)
+    def expected_sufficient_stats(self, expectations, datas, inputs, masks, tags):
+        """
+        Sufficient statistics are
+
+            sum_Ezzp1 = \sum_t E[z_{t} = j, z_{t+1} = k]
+
+        """
+        # Return early if no data is given
+        if len(expectations) == 0:
+            return np.zeros(self.K, self.K)
+        sum_Ezzp1 = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations])
+        return sum_Ezzp1
+
+    def m_step(self, expectations, datas, inputs, masks, tags, sufficient_stats=None, **kwargs):
+        """Compute M-step for stationary transition matrix."""
+        # Collect sufficient statistics
+        if sufficient_stats is None:
+            sum_Ezzp1 = self.expected_sufficient_stats(expectations, datas, inputs, masks, tags)
+        else:
+            sum_Ezzp1 = sufficient_stats
+        P = sum_Ezzp1 / sum_Ezzp1.sum(axis=-1, keepdims=True)
         self.log_Ps = np.log(P + LOG_EPS)
 
     def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
@@ -205,6 +224,7 @@ class StickyTransitions(StationaryTransitions):
         T, D = data.shape
         return np.zeros((T-1, D, D))
 
+
 class InputDrivenTransitions(StickyTransitions):
     """
     Hidden Markov Model whose transition probabilities are
@@ -256,6 +276,7 @@ class InputDrivenTransitions(StickyTransitions):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
         T, D = data.shape
         return np.zeros((T-1, D, D))
+
 
 class RecurrentTransitions(InputDrivenTransitions):
     """
@@ -309,6 +330,7 @@ class RecurrentTransitions(InputDrivenTransitions):
                     ( np.einsum('tn, ni, nj ->tij', -vtilde, self.Rs, self.Rs) \
                     + np.einsum('ti, tj -> tij', Rv, Rv))
         return -1 * hess
+
 
 class RecurrentOnlyTransitions(Transitions):
     """

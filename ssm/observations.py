@@ -1878,7 +1878,6 @@ class RobustAutoRegressiveObservationsNoInput(RobustAutoRegressiveObservations):
                      l2_penalty_V=l2_penalty_V)
 
 
-
 class RobustAutoRegressiveDiagonalNoiseObservations(
     _RobustAutoRegressiveObservationsMixin, AutoRegressiveDiagonalNoiseObservations):
     """
