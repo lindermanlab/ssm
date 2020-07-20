@@ -509,7 +509,7 @@ class HMM(object):
 
                 # convex combo is computed as
                 # alpha * curr_suff_stats + (1 - alpha) * avg_suff_stats
-                alpha = learning_rate(epoch * num_datas + i, forgetting_rate=0.75)
+                alpha = learning_rate(epoch * num_datas + i, forgetting_rate=0.3)
 
                 init_state_suff_stats = convex_combination(
                     self.init_state_distn.expected_sufficient_stats(*args),
