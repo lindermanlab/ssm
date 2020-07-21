@@ -21,17 +21,18 @@ def geometric_learning_rate(itr, delay=1, forgetting_rate=0.75):
     return (itr + delay) ** (-forgetting_rate)
 
 
-def convex_combination(curr, target, alpha):
+def convex_combination(curr, target, step_size):
     """
-    Output next = (1-alpha) * target + alpha * curr
+    Output next = step_size * target + (1 - step_size) * curr
     where target, curr, and next can be trees of nested
     containers with arrays/scalars at the leaves.
     Assume curr and target have the same structure.
     """
-    assert alpha >= 0 and alpha <= 1
+    assert step_size >= 0 and step_size <= 1
     _curr, unflatten = flatten(curr)
     _target, _ = flatten(target)
-    return unflatten(alpha * _curr + (1-alpha) * _target)
+    return unflatten((1 - step_size) * _curr + step_size * _target)
+    # return unflatten(np.nansum([(1 - step_size) * _curr, step_size * _target], axis=0))
 
 
 def unflatten_optimizer_step(step):

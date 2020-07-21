@@ -2,6 +2,7 @@ import autograd.numpy as np
 from scipy.stats import norm, invwishart
 
 from ssm.observations import Observations, AutoRegressiveObservations
+from ssm.optimizers import convex_combination
 
 
 class HierarchicalAutoRegressiveObservations(Observations):
@@ -129,32 +130,46 @@ class HierarchicalAutoRegressiveObservations(Observations):
         return self.per_group_ar_models[self.tags_to_indices[tag]].\
             log_likelihoods(data, input, mask, tag)
 
+    def compute_sample_size(self, datas, inputs, masks, tags):
+        sample_sizes = np.zeros(self.G)
+        for g, (ar_model, tag) in enumerate(zip(self.per_group_ar_models, self.tags)):
+            if any([t == tag for t in tags]):
+                # Pull out the subset of data that corresponds to this tag
+                tdatas = [d for d, t in zip(datas, tags)        if t == tag]
+                tinpts = [i for i, t in zip(inputs, tags)       if t == tag]
+                tmasks = [m for m, t in zip(masks, tags)        if t == tag]
+                ttags  = [t for t    in tags                    if t == tag]
+            
+                # Compute total sample size for this tag
+                sample_sizes[g] = ar_model.compute_sample_size(tdatas, tinpts, tmasks, ttags)
+
+        return sample_sizes
+
     def expected_sufficient_stats(self, expectations, datas, inputs, masks, tags):
         # assumes that each input is a list of length 1
-        if len(tags) == 0:
-            # initializing; return zeros
-            idx = 0
-        else:
-            idx = self.tags_to_indices[tags[0]]
-        return self.per_group_ar_models[idx].expected_sufficient_stats(
-            expectations, datas, inputs, masks, tags)
+        stats = []
+        for ar_model, tag in zip(self.per_group_ar_models, self.tags):
 
-    def _m_step_group(self, this_tag, expectations, datas, inputs, masks, tags,
-                      continuous_expectations=None):
-        # Pull out the subset of data that corresponds to this tag
-        texpts = [e for e, t in zip(expectations, tags) if t == this_tag]
-        tdatas = [d for d, t in zip(datas, tags)        if t == this_tag]
-        tinpts = [i for i, t in zip(inputs, tags)       if t == this_tag]
-        tmasks = [m for m, t in zip(masks, tags)        if t == this_tag]
-        ttags  = [t for t    in tags                    if t == this_tag]
-        tcexps = [c for c, t in zip(continuous_expectations, tags) if t == this_tag] \
-            if continuous_expectations is not None else None
+            if any([t == tag for t in tags]):
+                # Pull out the subset of data that corresponds to this tag
+                texpts = [e for e, t in zip(expectations, tags) if t == tag]
+                tdatas = [d for d, t in zip(datas, tags)        if t == tag]
+                tinpts = [i for i, t in zip(inputs, tags)       if t == tag]
+                tmasks = [m for m, t in zip(masks, tags)        if t == tag]
+                ttags  = [t for t    in tags                    if t == tag]
+            
+                # Compute expected sufficient stats for this subset of data
+                these_stats = ar_model.expected_sufficient_stats(texpts, 
+                                                                 tdatas, 
+                                                                 tinpts, 
+                                                                 tmasks, 
+                                                                 ttags)
 
-        # Call m-step on the group AR model with this subset of data
-        # Note: this assumes that the per-group model prior is centered
-        #       on the global AR parameters
-        self.per_group_ar_models[self.tags_to_indices[this_tag]].\
-            m_step(texpts, tdatas, tinpts, tmasks, ttags, tcexps)
+                stats.append(these_stats)
+            else:
+                stats.append(None)
+
+        return stats
 
     def _m_step_global(self):
         # Note: we could explore smarter averaging techniques for estimating
@@ -176,22 +191,83 @@ class HierarchicalAutoRegressiveObservations(Observations):
                          self.global_ar_model.bs, self.cond_variance_b,
                          self.global_ar_model.Sigmas, self.cond_dof_Sigma)
 
-    def m_step(self, expectations, datas, inputs, masks, tags, num_iter=1, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags,
+               sufficient_stats=None, 
+               **kwargs):
 
-        if kwargs.get('sufficient_stats', None):
-            # assume fitting with stochastic_em_conj; default to standard m step for this batch
-            self.per_group_ar_models[self.tags_to_indices[tags[0]]].m_step(
-                expectations, datas, inputs, masks, tags, **kwargs)
+        # Collect sufficient statistics for each group
+        if sufficient_stats is None:
+            sufficient_stats = \
+                self.expected_sufficient_stats(expectations,
+                                               datas,
+                                               inputs,
+                                               masks,
+                                               tags)
         else:
-            # assume fitting with em; run in batch mode
-            for itr in range(num_iter):
-                # Update the per-group weights
-                for tag in self.tags:
-                    self._m_step_group(tag, expectations, datas, inputs, masks, tags)
+            assert isinstance(sufficient_stats, list) and \
+                   len(sufficient_stats) == self.G
 
-                # Update the shared weights
-                self._m_step_global()
-                self._update_hierarchical_prior()
+        # Update the per-group weights
+        for ar_model, stats in zip(self.per_group_ar_models, sufficient_stats):
+            # Note: this is going to perform M-steps even for groups that 
+            #       are not present in this minibatch.  Hopefully this isn't
+            #       too much extra overhead.
+            if stats is not None:
+                ar_model.m_step(None, None, None, None, None, 
+                                sufficient_stats=stats)
+
+        # Update the shared weights
+        self._m_step_global()
+        self._update_hierarchical_prior()
+
+    def stochastic_m_step(self, 
+                          optimizer_state,
+                          total_sample_size,
+                          expectations,
+                          datas,
+                          inputs,
+                          masks,
+                          tags,
+                          step_size=0.5):
+        """
+        """
+        # Get the expected sufficient statistics for this minibatch
+        # Note: this is an array of length num_groups (self.G)
+        #       and entries in the array are None if there is no
+        #       data with the corresponding tag in this minibatch.
+        stats = self.expected_sufficient_stats(expectations,
+                                               datas,
+                                               inputs,
+                                               masks,
+                                               tags)
+
+        # Scale the statistics by the total sample size on a per-group basis
+        this_sample_size = self.compute_sample_size(datas, inputs, masks, tags)
+        for g in range(self.G):
+            if stats[g] is not None:
+                stats[g] = tuple(map(lambda x: x * total_sample_size[g] / this_sample_size[g], stats[g]))
+
+        # Combine them with the running average sufficient stats
+        if optimizer_state is not None:
+            # we've seen some data before, but not necessarily from all groups
+            for g in range(self.G):
+                if optimizer_state[g] is not None and stats[g] is not None:
+                    # we've seen this group before and we have data for it. 
+                    # update its stats.
+                    stats[g] = convex_combination(optimizer_state[g], stats[g], step_size)
+                elif optimizer_state[g] is not None and stats[g] is None:
+                    # we've seen this group before but not in this minibatch.
+                    # pass existing stats through.
+                    stats[g] = optimizer_state[g]
+        else:
+            # first time we're seeing any data.  return this minibatch's stats.
+            pass
+
+        # Call the regular m-step with these sufficient statistics
+        self.m_step(None, None, None, None, None, sufficient_stats=stats)
+
+        # Return the update state (i.e. the new stats)
+        return stats
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         return self.per_group_ar_models[self.tags_to_indices[tag]]. \

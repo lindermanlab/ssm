@@ -10,7 +10,7 @@ from autograd import hessian
 from ssm.util import one_hot, logistic, relu, rle, ensure_args_are_lists, LOG_EPS, DIV_EPS
 from ssm.regression import fit_multiclass_logistic_regression, fit_negative_binomial_integer_r
 from ssm.stats import multivariate_normal_logpdf
-from ssm.optimizers import adam, bfgs, lbfgs, rmsprop, sgd
+from ssm.optimizers import adam, bfgs, lbfgs, rmsprop, sgd, convex_combination
 
 
 class Transitions(object):
@@ -113,6 +113,9 @@ class StationaryTransitions(Transitions):
         log_Ps = self.log_Ps - logsumexp(self.log_Ps, axis=1, keepdims=True)
         return log_Ps[None, :, :]
 
+    def compute_sample_size(self, datas, inputs, masks, tags):
+        return sum([data.shape[0] - 1 for data in datas])
+
     def expected_sufficient_stats(self, expectations, datas, inputs, masks, tags):
         """
         Sufficient statistics are
@@ -135,6 +138,37 @@ class StationaryTransitions(Transitions):
             sum_Ezzp1 = sufficient_stats
         P = sum_Ezzp1 / sum_Ezzp1.sum(axis=-1, keepdims=True)
         self.log_Ps = np.log(P + LOG_EPS)
+
+    def stochastic_m_step(self, 
+                          optimizer_state, 
+                          total_sample_size,
+                          expectations, 
+                          datas,
+                          inputs,
+                          masks, 
+                          tags,
+                          step_size=0.5):
+
+        # Get the expected sufficient statistics for this minibatch
+        stats = self.expected_sufficient_stats(expectations,
+                                               datas,
+                                               inputs,
+                                               masks,
+                                               tags)
+
+        # Scale the stats by the fraction of the sample size
+        this_sample_size = self.compute_sample_size(datas, inputs, masks, tags)
+        stats *= total_sample_size /  this_sample_size
+
+        # Combine them with the running average sufficient stats
+        if optimizer_state is not None:
+            stats = convex_combination(optimizer_state, stats, step_size)
+
+        # Call the regular m-step with these sufficient statistics
+        self.m_step(None, None, None, None, None, sufficient_stats=stats)
+
+        # Return the update state (i.e. the new stats)
+        return stats
 
     def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian

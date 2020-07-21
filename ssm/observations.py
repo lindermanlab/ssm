@@ -9,7 +9,7 @@ from scipy.stats import norm, invwishart, multivariate_normal
 from ssm.util import random_rotation, ensure_args_are_lists, logit, one_hot
 from ssm.regression import generalized_newton_studentst_dof
 from ssm.cstats import robust_ar_statistics
-from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
+from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs, convex_combination
 import ssm.stats as stats
 
 class Observations(object):
@@ -241,6 +241,9 @@ class GaussianObservations(ExponentialFamilyObservations):
         sqrt_Sigmas = self._sqrt_Sigmas if with_noise else np.zeros((self.K, self.D, self.D))
         return mus[z] + np.dot(sqrt_Sigmas[z], npr.randn(D))
 
+    def compute_sample_size(self, datas, inputs, masks, tags):
+        return sum([data.shape[0] for data in datas])
+
     def expected_sufficient_stats(self, expectations, datas, inputs, masks, tags):
         """
         Sufficient statistics are
@@ -309,6 +312,37 @@ class GaussianObservations(ExponentialFamilyObservations):
 
         self.mus = mus
         self.Sigmas = Sigmas
+
+    def stochastic_m_step(self, 
+                          optimizer_state, 
+                          total_sample_size,
+                          expectations, 
+                          datas,
+                          inputs,
+                          masks, 
+                          tags,
+                          step_size=0.5):
+
+        # Get the expected sufficient statistics for this minibatch
+        stats = self.expected_sufficient_stats(expectations,
+                                               datas,
+                                               inputs,
+                                               masks,
+                                               tags)
+
+        # Scale the stats by the fraction of the sample size
+        this_sample_size = self.compute_sample_size(datas, inputs, masks, tags)
+        stats = tuple(map(lambda x: x * total_sample_size / this_sample_size, stats))
+
+        # Combine them with the running average sufficient stats
+        if optimizer_state is not None:
+            stats = convex_combination(optimizer_state, stats, step_size)
+
+        # Call the regular m-step with these sufficient statistics
+        self.m_step(None, None, None, None, None, sufficient_stats=stats)
+
+        # Return the update state (i.e. the new stats)
+        return stats
 
     def smooth(self, expectations, data, input, tag):
         """
@@ -1156,6 +1190,9 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
         return np.row_stack((ll_init, ll_ar))
 
+    def compute_sample_size(self, datas, inputs, masks, tags):
+        return sum([data.shape[0] - self.lags for data in datas])
+
     def expected_sufficient_stats(self, expectations, datas, inputs, masks, tags):
         K, D, M, lags = self.K, self.D, self.M, self.lags
         D_in = D * lags + M + 1
@@ -1331,6 +1368,38 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         self.Vs = Vs
         self.bs = bs
         self.Sigmas = Sigmas
+
+    def stochastic_m_step(self, 
+                          optimizer_state,
+                          total_sample_size,
+                          expectations,
+                          datas,
+                          inputs,
+                          masks,
+                          tags,
+                          step_size=0.5):
+        """
+        """
+        # Get the expected sufficient statistics for this minibatch
+        stats = self.expected_sufficient_stats(expectations,
+                                               datas,
+                                               inputs,
+                                               masks,
+                                               tags)
+
+        # Scale the stats by the fraction of the sample size
+        this_sample_size = self.compute_sample_size(datas, inputs, masks, tags)
+        stats = tuple(map(lambda x: x * total_sample_size /  this_sample_size, stats))
+
+        # Combine them with the running average sufficient stats
+        if optimizer_state is not None:
+            stats = convex_combination(optimizer_state, stats, step_size)
+
+        # Call the regular m-step with these sufficient statistics
+        self.m_step(None, None, None, None, None, sufficient_stats=stats)
+
+        # Return the update state (i.e. the new stats)
+        return stats
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, As, bs, Vs = self.D, self.As, self.bs, self.Vs
