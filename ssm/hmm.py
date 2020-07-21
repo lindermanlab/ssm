@@ -635,7 +635,6 @@ class HMM(object):
 
                 # M step: update the parameters with those stats.
                 for i, distn in enumerate(distributions):
-
                     m_step_states[i] = distn.stochastic_m_step(m_step_states[i], 
                                                                total_sample_sizes[i],
                                                                [expectations], 
