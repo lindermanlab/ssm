@@ -53,10 +53,10 @@ def forward_pass(pi0,
     # Check if we have heterogeneous transition matrices.
     # If not, save memory by passing in log_Ps of shape (1, K, K)
     hetero = (Ps.shape[0] == T-1)
-    alphas[0] = np.log(pi0 + LOG_EPS) + log_likes[0]
+    alphas[0] = np.log(pi0) + log_likes[0]
     for t in range(T-1):
         m = np.max(alphas[t])
-        alphas[t+1] = np.log(np.dot(np.exp(alphas[t] - m), Ps[t * hetero]) + LOG_EPS) + m + log_likes[t+1]
+        alphas[t+1] = np.log(np.dot(np.exp(alphas[t] - m), Ps[t * hetero])) + m + log_likes[t+1]
     return logsumexp(alphas[T-1])
 
 
@@ -120,7 +120,7 @@ def backward_pass(Ps,
     for t in range(T-2,-1,-1):
         tmp = log_likes[t+1] + betas[t+1]
         m = np.max(tmp)
-        betas[t] = np.log(np.dot(Ps[t * hetero], np.exp(tmp - m)) + LOG_EPS) + m
+        betas[t] = np.log(np.dot(Ps[t * hetero], np.exp(tmp - m))) + m
 
 
 

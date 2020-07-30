@@ -113,9 +113,14 @@ class StationaryTransitions(Transitions):
         return log_Ps[None, :, :]
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        K = self.K
         P = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations])
-        P /= P.sum(axis=-1, keepdims=True)
-        self.log_Ps = np.log(P + LOG_EPS)
+        P = np.nan_to_num(P / P.sum(axis=-1, keepdims=True))
+
+        # Set rows that are all zero to uniform
+        P = np.where(P.sum(axis=-1, keepdims=True) == 0, 1.0 / K, P)
+        log_P = np.log(P)
+        self.log_Ps = log_P - logsumexp(log_P, axis=-1, keepdims=True)
 
     def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
@@ -155,7 +160,7 @@ class ConstrainedStationaryTransitions(StationaryTransitions):
         self.transition_mask = transition_mask
         Ps = Ps * transition_mask
         Ps /= Ps.sum(axis=-1, keepdims=True)
-        self.log_Ps = np.log(Ps + LOG_EPS)
+        self.log_Ps = np.log(Ps)
         self.log_Ps[~transition_mask] = -np.inf
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
