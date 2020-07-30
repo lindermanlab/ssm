@@ -825,7 +825,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
     @b.setter
     def b(self, value):
         assert value.shape == self.bs[0].shape
-        self.bs[0] == value
+        self.bs[0] = value
 
     @property
     def Sigmas_init(self):
