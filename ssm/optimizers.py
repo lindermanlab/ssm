@@ -31,8 +31,9 @@ def convex_combination(curr, target, step_size):
     assert step_size >= 0 and step_size <= 1
     _curr, unflatten = flatten(curr)
     _target, _ = flatten(target)
-    return unflatten((1 - step_size) * _curr + step_size * _target)
-    # return unflatten(np.nansum([(1 - step_size) * _curr, step_size * _target], axis=0))
+    # return unflatten((1 - step_size) * _curr + step_size * _target)
+    return unflatten(np.nansum([(1 - step_size) * _curr, 
+                                step_size * _target], axis=0))
 
 
 def unflatten_optimizer_step(step):

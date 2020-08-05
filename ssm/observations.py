@@ -5,6 +5,7 @@ import autograd.numpy.random as npr
 
 from autograd.scipy.special import gammaln, digamma, logsumexp
 from scipy.stats import norm, invwishart, multivariate_normal
+import scipy.stats as spstats
 
 from ssm.util import random_rotation, ensure_args_are_lists, logit, one_hot
 from ssm.regression import generalized_newton_studentst_dof
@@ -89,11 +90,13 @@ class ExponentialFamilyObservations(Observations):
     the posterior distribution on the latent states).  This
     special property enables stochatic EM and SVI-like algorithms.
     """
-
     def expected_sufficient_stats(self, expectations, datas, inputs, masks, tags):
         """
         Compute expected sufficient statistics of a given dataset.
         The ESS are summed over datapoints in the given data array(s).
+
+        :returns: a tuple of expected sufficient statistics, each
+                  entry in the tuple is an array.
         """
         raise NotImplementedError
 
@@ -111,6 +114,50 @@ class ExponentialFamilyObservations(Observations):
         warn("You should implement the exact m-step with sufficient "
              "stats for {}!".format(self.__class__))
         Observations.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
+    
+    # Stochastic expectation maximization    
+    def compute_sample_size(self, datas, inputs, masks, tags):
+        """
+        Count the number of data points in the given data arrays.
+        This is necessary for the stochastic_m_step function.
+        """
+        return sum([data.shape[0] for data in datas])
+
+    def stochastic_m_step(self, 
+                          optimizer_state, 
+                          total_sample_size,
+                          expectations, 
+                          datas,
+                          inputs,
+                          masks, 
+                          tags,
+                          step_size=0.5):
+        """
+        Perform a stochastic M-step. For exponential family models,
+        keep a running average of expected sufficient statistics in
+        the `optimizer_state`, and update it with the given minibatch
+        of datas.
+        """
+        # Get the expected sufficient statistics for this minibatch
+        stats = self.expected_sufficient_stats(expectations,
+                                               datas,
+                                               inputs,
+                                               masks,
+                                               tags)
+
+        # Scale the stats by the fraction of the sample size
+        this_sample_size = self.compute_sample_size(datas, inputs, masks, tags)
+        stats = tuple(map(lambda x: x * total_sample_size / this_sample_size, stats))
+
+        # Combine them with the running average sufficient stats
+        if optimizer_state is not None:
+            stats = convex_combination(optimizer_state, stats, step_size)
+
+        # Call the regular m-step with these sufficient statistics
+        self.m_step(None, None, None, None, None, sufficient_stats=stats)
+
+        # Return the update state (i.e. the new stats)
+        return stats
 
 
 class GaussianObservations(ExponentialFamilyObservations):
@@ -204,7 +251,7 @@ class GaussianObservations(ExponentialFamilyObservations):
                 stats.normal_invwishart_natural_to_standard(*self.prior[k])
 
             if kappa0 > 0:
-                lp += np.sum(multivariate_normal.logpdf(
+                lp += np.sum(spstats.multivariate_normal.logpdf(
                     self.mus[k], mu0, self.Sigmas[k] / kappa0))
 
             if nu0 >= self.D:
@@ -240,9 +287,6 @@ class GaussianObservations(ExponentialFamilyObservations):
         D, mus = self.D, self.mus
         sqrt_Sigmas = self._sqrt_Sigmas if with_noise else np.zeros((self.K, self.D, self.D))
         return mus[z] + np.dot(sqrt_Sigmas[z], npr.randn(D))
-
-    def compute_sample_size(self, datas, inputs, masks, tags):
-        return sum([data.shape[0] for data in datas])
 
     def expected_sufficient_stats(self, expectations, datas, inputs, masks, tags):
         """
@@ -313,90 +357,12 @@ class GaussianObservations(ExponentialFamilyObservations):
         self.mus = mus
         self.Sigmas = Sigmas
 
-    def stochastic_m_step(self, 
-                          optimizer_state, 
-                          total_sample_size,
-                          expectations, 
-                          datas,
-                          inputs,
-                          masks, 
-                          tags,
-                          step_size=0.5):
-
-        # Get the expected sufficient statistics for this minibatch
-        stats = self.expected_sufficient_stats(expectations,
-                                               datas,
-                                               inputs,
-                                               masks,
-                                               tags)
-
-        # Scale the stats by the fraction of the sample size
-        this_sample_size = self.compute_sample_size(datas, inputs, masks, tags)
-        stats = tuple(map(lambda x: x * total_sample_size / this_sample_size, stats))
-
-        # Combine them with the running average sufficient stats
-        if optimizer_state is not None:
-            stats = convex_combination(optimizer_state, stats, step_size)
-
-        # Call the regular m-step with these sufficient statistics
-        self.m_step(None, None, None, None, None, sufficient_stats=stats)
-
-        # Return the update state (i.e. the new stats)
-        return stats
-
     def smooth(self, expectations, data, input, tag):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
         return expectations.dot(self.mus)
-
-
-class ExponentialObservations(Observations):
-    def __init__(self, K, D, M=0):
-        super(ExponentialObservations, self).__init__(K, D, M)
-        self.log_lambdas = npr.randn(K, D)
-
-    @property
-    def params(self):
-        return self.log_lambdas
-
-    @params.setter
-    def params(self, value):
-        self.log_lambdas = value
-
-    def permute(self, perm):
-        self.log_lambdas = self.log_lambdas[perm]
-
-    @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None):
-        # Initialize with KMeans
-        from sklearn.cluster import KMeans
-        data = np.concatenate(datas)
-        km = KMeans(self.K).fit(data)
-        self.log_lambdas = -np.log(km.cluster_centers_ + 1e-3)
-
-    def log_likelihoods(self, data, input, mask, tag):
-        lambdas = np.exp(self.log_lambdas)
-        mask = np.ones_like(data, dtype=bool) if mask is None else mask
-        return stats.exponential_logpdf(data[:, None, :], lambdas, mask=mask[:, None, :])
-
-    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
-        lambdas = np.exp(self.log_lambdas)
-        return npr.exponential(1/lambdas[z])
-
-    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        x = np.concatenate(datas)
-        weights = np.concatenate([Ez for Ez, _, _ in expectations])
-        for k in range(self.K):
-            self.log_lambdas[k] = -np.log(np.average(x, axis=0, weights=weights[:,k]) + 1e-16)
-
-    def smooth(self, expectations, data, input, tag):
-        """
-        Compute the mean observation under the posterior distribution
-        of latent discrete states.
-        """
-        return expectations.dot(1/np.exp(self.log_lambdas))
 
 
 class DiagonalGaussianObservations(Observations):
@@ -780,6 +746,119 @@ class BernoulliObservations(Observations):
         return expectations.dot(ps)
 
 
+class ExponentialObservations(ExponentialFamilyObservations):
+    """
+    Model:
+
+        x_t | z_t = k ~ Exp(\lambdas_k)
+        
+    Density: 
+    
+        p(x_t | z_t=k) = \lambdas_k exp\{-\lambdas_k  x_t\} 
+
+    Prior:
+
+        \lambda_k ~ Ga(\lambda_k | \alpha_0, \beta_0)
+
+    The sufficient statistics of the data and prior are,
+
+        a. I[z_t = k]                    \log \lambda_k
+        b. I[z_t = k] * x_t              \lambda_k
+
+    These sufficient statistics correspond to the gamma prior.
+
+    To convert the gamma parameters into natural parameters, we have,
+
+        a = \alpha_0 - 1
+        b = \beta_0
+        
+    We default to a non-informative prior with \alpha_0 = 0, \beta_0 = 0.
+    """
+    def __init__(self, K, D, M=0, prior=None):
+        super(ExponentialObservations, self).__init__(K, D, M)
+        self.log_lambdas = npr.randn(K, D)
+        
+        # Prior contains the natural parameters of a gamma prior
+        if prior is None:
+            # Default to uninformative prior
+            self.prior = [(-np.ones(D), np.zeros(D)) for _ in range(K)] 
+        else:
+            # Make sure the prior stats are the correct shape
+            assert len(prior) == K
+            for pstats in prior:
+                assert isinstance(pstats, tuple) and len(pstats) == 2
+                assert pstats[0].shape == (D,)
+                assert pstats[1].shape == (D,)
+
+    @property
+    def params(self):
+        return self.log_lambdas
+
+    @params.setter
+    def params(self, value):
+        self.log_lambdas = value
+
+    def permute(self, perm):
+        self.log_lambdas = self.log_lambdas[perm]
+
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
+        # Initialize with KMeans
+        from sklearn.cluster import KMeans
+        data = np.concatenate(datas)
+        km = KMeans(self.K).fit(data)
+        self.log_lambdas = -np.log(km.cluster_centers_ + 1e-3)
+
+    def log_likelihoods(self, data, input, mask, tag):
+        lambdas = np.exp(self.log_lambdas)
+        mask = np.ones_like(data, dtype=bool) if mask is None else mask
+        return stats.exponential_logpdf(data[:, None, :], lambdas, mask=mask[:, None, :])
+
+    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
+        lambdas = np.exp(self.log_lambdas)
+        return npr.exponential(1/lambdas[z])
+    
+    def expected_sufficient_stats(self, expectations, datas, inputs, masks, tags):
+        """
+        Sufficient statistics are:
+            En[k]   = \sum_t E[z_t = k]
+            Ex[k]   = \sum_t E[z_t = k] * x[t]
+        """
+        sum_n = np.zeros(self.K)
+        sum_x = np.zeros((self.K, self.D))
+
+        for (Ez, _, _), x in zip(expectations, datas):
+            sum_n += np.sum(Ez, axis=0)
+            sum_x += np.einsum('tk, td -> kd', Ez, x)
+        
+        sufficient_stats = list(zip(sum_n, sum_x))
+        return sufficient_stats
+
+    def m_step(self, expectations, datas, inputs, masks, tags, 
+               sufficient_stats=None, **kwargs):
+        # x = np.concatenate(datas)
+        # weights = np.concatenate([Ez for Ez, _, _ in expectations])
+        if sufficient_stats is None:
+            sufficient_stats = self.expected_sufficient_stats(expectations, 
+                                                              datas, 
+                                                              inputs, 
+                                                              masks, 
+                                                              tags)
+            
+        for k in range(self.K):
+            post_stats = [x+y for x,y in zip(self.prior[k], sufficient_stats[k])]
+            alpha_post, beta_post = stats.gamma_natural_to_standard(*post_stats)
+            self.log_lambdas[k] = np.log(alpha_post / (beta_post + 1))
+            # self.log_lambdas[k] = -np.log(np.average(x, axis=0, weights=weights[:,k]) + 1e-16)
+
+    def smooth(self, expectations, data, input, tag):
+        """
+        Compute the mean observation under the posterior distribution
+        of latent discrete states.
+        """
+        return expectations.dot(1/np.exp(self.log_lambdas))
+
+
 class PoissonObservations(Observations):
 
     def __init__(self, K, D, M=0):
@@ -1015,9 +1094,9 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                  for _ in range(K)])
 
         elif initialize.lower() == "prior":
-            self.As = norm.rvs(mean_A, np.sqrt(variance_A))
-            self.Vs = norm.rvs(mean_V, np.sqrt(variance_V))
-            self.bs = norm.rvs(mean_b, np.sqrt(variance_b))
+            self.As = spstats.norm.rvs(mean_A, np.sqrt(variance_A))
+            self.Vs = spstats.norm.rvs(mean_V, np.sqrt(variance_V))
+            self.bs = spstats.norm.rvs(mean_b, np.sqrt(variance_b))
 
             Sigmas = self.Sigmas.copy()
             for k in range(self.K):
@@ -1132,17 +1211,17 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         self.Psi0 = mean_Sigma * extra_dof_Sigma
 
     def log_prior(self):
-        lp = np.sum(norm.logpdf(self.As, self.mean_A,
-                                np.sqrt(self.variance_A)))
+        lp = np.sum(spstats.norm.logpdf(self.As, self.mean_A,
+                                        np.sqrt(self.variance_A)))
 
-        lp += np.sum(norm.logpdf(self.Vs, self.mean_V,
-                                 np.sqrt(self.variance_V)))
+        lp += np.sum(spstats.norm.logpdf(self.Vs, self.mean_V,
+                                         np.sqrt(self.variance_V)))
 
-        lp += np.sum(norm.logpdf(self.bs, self.mean_b,
-                                 np.sqrt(self.variance_b)))
+        lp += np.sum(spstats.norm.logpdf(self.bs, self.mean_b,
+                                         np.sqrt(self.variance_b)))
 
         for k in range(self.K):
-            lp += invwishart.logpdf(
+            lp += spstats.invwishart.logpdf(
                 self.Sigmas[k],
                 self.extra_dof_Sigma + self.D + 1,
                 self.mean_Sigma[k] * self.extra_dof_Sigma)
