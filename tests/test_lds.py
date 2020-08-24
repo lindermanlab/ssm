@@ -3,6 +3,7 @@ import ssm
 from ssm.util import SEED
 import copy
 import scipy
+import itertools as it
 
 from autograd import elementwise_grad
 import autograd.numpy as np
@@ -17,43 +18,6 @@ from ssm.primitives import \
     cholesky_lds, solve_lds, lds_sample, lds_mean, \
     convert_lds_to_block_tridiag
 
-TRANSITIONS_NAMES = [
-    "stationary",
-    "sticky",
-    "inputdriven",
-    "recurrent",
-    "recurrent_only",
-    # "rbf_recurrent",
-    # "nn_recurrent",
-    ]
-
-DYNAMICS_NAMES = [
-    "none",
-    "gaussian",
-    "diagonal_gaussian",
-    "studentst",
-    "diagonal_t",
-    ]
-
-# Exclude the identity emissions (for now)
-# because they require N == D
-EMISSIONS_NAMES = [
-    "gaussian",
-    "gaussian_orthog",
-    "gaussian_nn",
-    "studentst",
-    "studentst_orthog",
-    "studentst_nn",
-    "poisson",
-    "poisson_orthog",
-    "poisson_nn",
-    "bernoulli",
-    "bernoulli_orthog",
-    "bernoulli_nn",
-    "autoregressive",
-    "autoregressive_orthog",
-    "autoregressive_nn",
-    ]
 
 def make_lds_parameters(T=20, D=2):
     As = npr.randn(T-1, D, D)
@@ -443,49 +407,97 @@ def test_lds_log_probability_perf(T=1000, D=10, N_iter=10):
     stop = time.time()
     print("Time per iter: {:.4f}".format((stop - start) / N_iter))
 
-def test_lds_sample_and_fit(T=100, N=15, K=3, D=10):
+def test_lds_sample_and_fit(T=100, N=15, K=3, D=10, num_cases=25):
+    
+    TRANSITIONS_NAMES = [
+        "stationary",
+        "sticky",
+        "inputdriven",
+        "recurrent",
+        "recurrent_only",
+        # "rbf_recurrent",
+        # "nn_recurrent",
+        ]
+
+    DYNAMICS_NAMES = [
+        "none",
+        "gaussian",
+        "diagonal_gaussian",
+        "studentst",
+        "diagonal_t",
+        ]
+
+    # Exclude the identity emissions (for now)
+    # because they require N == D
+    EMISSIONS_NAMES = [
+        "gaussian",
+        "gaussian_orthog",
+        "gaussian_nn",
+        "studentst",
+        "studentst_orthog",
+        "studentst_nn",
+        "poisson",
+        "poisson_orthog",
+        "poisson_nn",
+        "bernoulli",
+        "bernoulli_orthog",
+        "bernoulli_nn",
+        # "autoregressive",
+        # "autoregressive_orthog",
+        # "autoregressive_nn",
+        ]
+    METHODS = ["bbvi"]
+    
     # method_name --> allowable posteriors
-    methods = {
+    POSTERIORS = {
         "bbvi": ["mf", "lds"],
         # "laplace_em": ["structured_meanfield"]
     }
+    
+    test_cases = list(
+        it.product(DYNAMICS_NAMES, 
+                   EMISSIONS_NAMES, 
+                   TRANSITIONS_NAMES,
+                   METHODS)
+    )
+    
+    # Choose a random subset of combinations
+    test_case_indices = npr.choice(len(test_cases), size=num_cases)
 
     # Test SLDS and RSLDS
     print("Testing SLDS and RSLDS...")
-    for dynamics in DYNAMICS_NAMES:
-        for emissions in EMISSIONS_NAMES:
-            for transitions in TRANSITIONS_NAMES:
-                for method in methods:
-                    for posterior in methods[method]:
-                        npr.seed(seed=SEED)
-                        print("Fitting: "
-                              "transitions = {},"
-                              "dynamics = {}, "
-                              "emissions = {}, "
-                              "method = {}, "
-                              "posterior = {}, ".format(
-                                transitions,
-                                dynamics,
-                                emissions,
-                                method,
-                                posterior
-                            )
-                        )
-                        true_slds = ssm.SLDS(N, K, D,
-                                            transitions=transitions,
-                                            dynamics=dynamics,
-                                            emissions=emissions)
-                        z, x, y = true_slds.sample(T)
+    for idx in test_case_indices:
+        dynamics, emissions, transitions, method = test_cases[idx]
+        for posterior in POSTERIORS[method]:
+            npr.seed(seed=SEED)
+            print("Fitting: "
+                    "transitions = {},"
+                    "dynamics = {}, "
+                    "emissions = {}, "
+                    "method = {}, "
+                    "posterior = {}, ".format(
+                    transitions,
+                    dynamics,
+                    emissions,
+                    method,
+                    posterior
+                )
+            )
+            true_slds = ssm.SLDS(N, K, D,
+                                transitions=transitions,
+                                dynamics=dynamics,
+                                emissions=emissions)
+            z, x, y = true_slds.sample(T)
 
-                        fit_slds = ssm.SLDS(N, K, D,
-                                            transitions=transitions,
-                                            dynamics=dynamics,
-                                            emissions=emissions)
-                        fit_slds.fit(y,
-                                     method=method,
-                                     variational_posterior=posterior,
-                                     num_init_iters=2,
-                                     num_iters=2)
+            fit_slds = ssm.SLDS(N, K, D,
+                                transitions=transitions,
+                                dynamics=dynamics,
+                                emissions=emissions)
+            fit_slds.fit(y,
+                            method=method,
+                            variational_posterior=posterior,
+                            num_init_iters=2,
+                            num_iters=2)
 
 
 def lbfgs_newton_perf_comparison(T=100, N=15, K=3, D=10, ntrials=5, n_iters=20):
@@ -528,58 +540,71 @@ def lbfgs_newton_perf_comparison(T=100, N=15, K=3, D=10, ntrials=5, n_iters=20):
     lbfgs_time /= ntrials
     print("Avg time/iter with lbfgs: {:.4f}".format(lbfgs_time))
 
-def test_laplace_em(T=100, N=15, K=3, D=10):
+def test_laplace_em(T=100, N=15, K=3, D=10, num_cases=25):
     # Check that laplace-em works for each transition and emission model
     # so long as the dynamics are linear-gaussian.
-    for transitions in ["stationary",
-                        "sticky",
-                        "inputdriven",
-                        "recurrent",
-                        "recurrent_only",
-                        ]:
+    DYNAMICS_NAMES = ["gaussian"]
+    EMISSIONS_NAMES = ["gaussian", 
+                       "gaussian_orthog", 
+                       "poisson", 
+                       "poisson_orthog", 
+                       "bernoulli", 
+                       "bernoulli_orthog"]
+    TRANSITIONS_NAMES = ["stationary", 
+                         "sticky", 
+                         "inputdriven", 
+                         "recurrent", 
+                         "recurrent_only"]
+    INPUT_DIMS = [0, 1]
+    
+    test_cases = list(
+        it.product(DYNAMICS_NAMES, 
+                   EMISSIONS_NAMES, 
+                   TRANSITIONS_NAMES,
+                   INPUT_DIMS)
+    )
+    
+    # Choose a random subset of combinations
+    test_case_indices = npr.choice(len(test_cases), size=num_cases)
 
-        for emissions in ["gaussian",
-                          "gaussian_orthog",
-                          "poisson",
-                          "poisson_orthog",
-                          "bernoulli",
-                          "bernoulli_orthog",
-                          ]:
-            for input_dim in [0, 1]:
-                true_slds = ssm.SLDS(N, K, D, M=input_dim,
-                                     transitions=transitions,
-                                     dynamics="gaussian",
-                                     emissions=emissions)
+    # Test SLDS and RSLDS
+    print("Testing SLDS and RSLDS...")
+    for idx in test_case_indices:
+        dynamics, emissions, transitions, input_dim = test_cases[idx]    
+        true_slds = ssm.SLDS(N, K, D, M=input_dim,
+                                transitions=transitions,
+                                dynamics="gaussian",
+                                emissions=emissions)
 
-                # Test with a random number of data arrays
-                num_datas = npr.randint(1, 5)
-                Ts = T + npr.randint(20, size=num_datas)
-                us = [npr.randn(Ti, input_dim) for Ti in Ts]
-                datas = [true_slds.sample(Ti, input=u) for Ti, u in zip(Ts, us)]
-                zs, xs, ys = list(zip(*datas))
+        # Test with a random number of data arrays
+        num_datas = npr.randint(1, 5)
+        Ts = T + npr.randint(20, size=num_datas)
+        us = [npr.randn(Ti, input_dim) for Ti in Ts]
+        datas = [true_slds.sample(Ti, input=u) for Ti, u in zip(Ts, us)]
+        zs, xs, ys = list(zip(*datas))
 
-                # Fit an SLDS to the data
-                fit_slds = ssm.SLDS(N, K, D, M=input_dim,
-                                    transitions=transitions,
-                                    dynamics="gaussian",
-                                    emissions=emissions)
-                try:
-                    fit_slds.fit(ys,
-                                 inputs=us,
-                                 initialize=True,
-                                 num_init_iters=2,
-                                 num_iters=5)
+        # Fit an SLDS to the data
+        fit_slds = ssm.SLDS(N, K, D, M=input_dim,
+                            transitions=transitions,
+                            dynamics="gaussian",
+                            emissions=emissions)
+        try:
+            fit_slds.fit(ys,
+                            inputs=us,
+                            initialize=True,
+                            num_init_iters=2,
+                            num_iters=5)
 
-                # So that we can still interrupt the test.
-                except KeyboardInterrupt:
-                    raise
+        # So that we can still interrupt the test.
+        except KeyboardInterrupt:
+            raise
 
-                # So that we know which test case fails...
-                except:
-                    print("Error during fit with Laplace-EM. Failed with:")
-                    print("Emissions = {}".format(emissions))
-                    print("Transitions = {}".format(transitions))
-                    raise
+        # So that we know which test case fails...
+        except:
+            print("Error during fit with Laplace-EM. Failed with:")
+            print("Emissions = {}".format(emissions))
+            print("Transitions = {}".format(transitions))
+            raise
 
 def test_laplace_em_hessian(N=5, K=3, D=2, T=20):
     for transitions in ["standard", "recurrent", "recurrent_only"]:
