@@ -23,8 +23,8 @@ TRANSITIONS_NAMES = [
     "inputdriven",
     "recurrent",
     "recurrent_only",
-    "rbf_recurrent",
-    "nn_recurrent",
+    # "rbf_recurrent",
+    # "nn_recurrent",
     ]
 
 DYNAMICS_NAMES = [

@@ -427,7 +427,7 @@ class SLDS(object):
         elp = np.sum(Ez[0] * log_pi0)
         elp += np.sum(Ezzp1 * log_Ps)
         elp += np.sum(Ez * log_likes)
-        # assert np.all(np.isfinite(elp))
+        assert np.all(np.isfinite(elp))
         return -1 * elp / scale
 
     # We also need the hessian of the of the expected log joint
@@ -643,7 +643,7 @@ class SLDS(object):
                         verbose = 2,
                         num_iters=100,
                         num_samples=1,
-                        continuous_optimizer="newton",
+                        continuous_optimizer="lbfgs",
                         continuous_tolerance=1e-4,
                         continuous_maxiter=100,
                         emission_optimizer="lbfgs",

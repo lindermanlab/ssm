@@ -101,7 +101,14 @@ def _generic_sgd(method, loss, x0, callback=None, num_iters=200, state=None, ful
         return x
 
 
-def _generic_minimize(method, loss, x0, verbose=False, num_iters=1000, state=None, full_output=False, suppress_warnings=False, **kwargs):
+def _generic_minimize(method, loss, x0,
+                      verbose=False,
+                      num_iters=1000,
+                      tol=1e-4,
+                      state=None,
+                      full_output=False,
+                      suppress_warnings=False,
+                      **kwargs):
     """
     Minimize a given loss function with scipy.optimize.minimize.
     """
@@ -130,7 +137,7 @@ def _generic_minimize(method, loss, x0, verbose=False, num_iters=1000, state=Non
                       method=method,
                       callback=callback if verbose else None,
                       options=dict(maxiter=num_iters, disp=verbose),
-                      tol=1e-4,
+                      tol=tol,
                       **kwargs)
     if verbose:
         print("{} completed with message: \n{}".format(method, result.message))
