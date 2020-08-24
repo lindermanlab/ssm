@@ -398,7 +398,7 @@ class GaussianEmissions(_GaussianEmissionsMixin, _LinearEmissions):
                datas, inputs, masks, tags,
                optimizer="bfgs", maxiter=100, **kwargs):
 
-        if self.single_subspace and np.all(masks):
+        if self.single_subspace and all([np.all(mask) for mask in masks]):
             # Return exact m-step updates for C, F, d, and inv_etas
             # stack across all datas
             x = np.vstack(continuous_expectations)
