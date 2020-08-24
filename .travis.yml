@@ -1,21 +1,22 @@
 sudo: false
 language: python
 python:
-    - "3.6"
+- '3.6'
 before_install:
-  - if [[ "$TRAVIS_PYTHON_VERSION" == "2.7" ]]; then
-      wget https://repo.continuum.io/miniconda/Miniconda2-latest-Linux-x86_64.sh -O miniconda.sh;
-    else
-      wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh;
-    fi
-  - bash miniconda.sh -b -p $HOME/miniconda
-  - export PATH="$HOME/miniconda/bin:$PATH"
-  - conda update --yes conda
-  - conda config --add channels conda-forge
+- if [[ "$TRAVIS_PYTHON_VERSION" == "2.7" ]]; then wget https://repo.continuum.io/miniconda/Miniconda2-latest-Linux-x86_64.sh
+  -O miniconda.sh; else wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh
+  -O miniconda.sh; fi
+- bash miniconda.sh -b -p $HOME/miniconda
+- export PATH="$HOME/miniconda/bin:$PATH"
+- conda update --yes conda
+- conda config --add channels conda-forge
 install:
-  - conda install --yes python=$TRAVIS_PYTHON_VERSION pip cython nose
-  - pip install git+https://github.com/mattjj/pybasicbayes
-  - pip install git+https://github.com/mattjj/pyhsmm
-  - pip install git+https://github.com/mattjj/pylds
-  - pip install -v -e .
+- conda install --yes python=$TRAVIS_PYTHON_VERSION pip cython nose
+- pip install git+https://github.com/mattjj/pybasicbayes
+- pip install git+https://github.com/mattjj/pyhsmm
+- pip install git+https://github.com/mattjj/pylds
+- pip install -v -e .
 script: nosetests
+notifications:
+  slack:
+    secure: CtUbUyDs5YAKRyAhvg0vzt2Y6i1e6evaa/AZXrkM41Z5i1VsMR7Tl0QA5yDDcihrXL5EFrh0y7ObLsUdh2u9sCEU7BW8dkGaLNU2V4HsU1b6jwxUHAL2+2u2NoS2IL34l3v35qv5N9Fe4PKPvg1hucMGINOaBRfgDzxsdM42ssyArc1daPQ2wpPszScPRTjifnN1ZkNdWMqKv4EO6CJrIzFrKh0+bO879Jqv2MlWSazKpQg4J5fwYtEfeVLPM58YBJKx2YXhe65Kl0kuQnqc897JfJTjLwpfn7gVDsiX4EOrcWloeKsoGTbOAQCAfJ5ABNiQPhycroNS3reRLQlLtV0aBPkvylQGwd8+FIkvZR4Qazc4IRiQSElu+htbJDaw1+XrcQ0pZ7dWv9zm3y0PgbBE+Ms6KnZweRRawY0XGfNvXilqjOFwUTS0lnG/p9no4DUyrgyyjo1j6Yu99lMBk2sPvTqoD9TYnCqmCXnEck08SRnX9jGgJgNwH+E+7TJNC95MZtMFtiBJaDrV9MKmyJKmXAKWr+Vtym0ySZ9KFjjdSpKpa61PUswTJJytJYpl9bP3dK5WOqeRgchl+p53gIa9lZD/2N6NbR9PVlmfil+tpIGRW7S+1lA9PSukQIMeHiP+aDqNvsIhO4EGnr/0B3P4X52eefZzHhuonp4zFJQ=
