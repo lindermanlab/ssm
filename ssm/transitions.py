@@ -114,7 +114,7 @@ class StationaryTransitions(Transitions):
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         K = self.K
-        P = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations]) + 1e-16
+        P = sum([np.sum(Ezzp1, axis=0) for _, Ezzp1, _ in expectations]) + 1e-32
         P = np.nan_to_num(P / P.sum(axis=-1, keepdims=True))
 
         # Set rows that are all zero to uniform
