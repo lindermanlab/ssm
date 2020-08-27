@@ -14,19 +14,19 @@ from autograd.misc import flatten
 from autograd.wrap_util import wraps
 
 from scipy.optimize import minimize
-from ssm.primitives import solve_symm_block_tridiag
+# from ssm.primitives import solve_symm_block_tridiag
 
-def convex_combination(curr, target, alpha):
+def convex_combination(curr_params, new_params, step_size):
     """
-    Output next = (1-alpha) * target + alpha * curr
+    Output next = step_size * target + (1-step_size) * curr
     where target, curr, and next can be trees of nested
     containers with arrays/scalars at the leaves.
     Assume curr and target have the same structure.
     """
-    assert alpha >= 0 and alpha <= 1
-    _curr, unflatten = flatten(curr)
-    _target, _ = flatten(target)
-    return unflatten(alpha * _curr + (1-alpha) * _target)
+    assert step_size >= 0 and step_size <= 1
+    _curr_params, unflatten = flatten(curr_params)
+    _new_params, _ = flatten(new_params)
+    return unflatten((1 - step_size) * _curr_params + step_size * _new_params)
 
 
 def unflatten_optimizer_step(step):

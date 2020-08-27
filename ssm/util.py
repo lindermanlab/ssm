@@ -1,5 +1,7 @@
 from warnings import warn
 from tqdm.auto import trange
+import inspect
+from functools import wraps
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
@@ -12,6 +14,76 @@ from scipy.special import gammaln, digamma, polygamma
 SEED = hash("ssm") % (2**32)
 LOG_EPS = 1e-16
 DIV_EPS = 1e-16
+
+def format_dataset(f):
+    sig = inspect.signature(f)
+
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        # Get the `dataset` argument
+        bound_args = sig.bind(*args, **kwargs)
+        dataset = bound_args.arguments['dataset']
+
+        # Make sure dataset is a list of dictionaries
+        if isinstance(dataset, (list, tuple)):
+            assert all([isinstance(d, dict) and "data" in d for d in dataset])
+        elif isinstance(dataset, dict):
+            assert "data" in dataset
+            dataset = [dataset]
+        elif isinstance(dataset, np.ndarray):
+            dataset = [dict(data=dataset)]
+
+        # Update the bound arguments
+        bound_args.arguments['dataset'] = dataset
+
+        # Call the function
+        return f(*bound_args.args, **bound_args.kwargs)
+
+    return wrapper
+
+
+def sum_tuples(a, b):
+    assert a or b
+    if a is None:
+        return b
+    elif b is None:
+        return a
+    else:
+        return tuple(ai + bi for ai, bi in zip(a, b))
+
+
+def weighted_sum_stats(stats, weights=None):
+    if weights is None:
+        return tuple(np.sum(s, axis=0) for s in stats)
+    else:
+        return tuple(np.einsum('n,n...->...', weights, s) for s in stats)
+
+
+@format_dataset
+def num_datapoints(dataset):
+    if all(["weights" in data_dict for data_dict in dataset]):
+        return sum([data_dict["weights"].sum() for data_dict in dataset])
+    else:
+        return sum([data_dict["data"].shape[0] for data_dict in dataset])
+
+
+def generalized_outer(xs, ys):
+    """
+    Compute a generalized outer product.
+
+    xs: list of 2d arrays, all with the same leading dimension
+    ys: list of 2d arrays, all with the same leading dimension (same as xs too)
+    """
+    xs = xs if isinstance(xs, (tuple, list)) else [xs]
+    ys = ys if isinstance(ys, (tuple, list)) else [ys]
+
+    block_array = [
+        [np.einsum('ni,nj->nij', x ,y) for y in ys]
+        for x in xs]
+
+    return np.concatenate([
+        np.concatenate(row, axis=2)
+        for row in block_array], axis=1)
 
 def compute_state_overlap(z1, z2, K1=None, K2=None):
     assert z1.dtype == int and z2.dtype == int
@@ -86,102 +158,18 @@ def random_rotation(n, theta=None):
     return q.dot(out).dot(q.T)
 
 
-def ensure_args_are_lists(f):
-    def wrapper(self, datas, inputs=None, masks=None, tags=None, **kwargs):
-        datas = [datas] if not isinstance(datas, (list, tuple)) else datas
-
-        M = (self.M,) if isinstance(self.M, int) else self.M
-        assert isinstance(M, tuple)
-
-        if inputs is None:
-            inputs = [np.zeros((data.shape[0],) + M) for data in datas]
-        elif not isinstance(inputs, (list, tuple)):
-            inputs = [inputs]
-
-        if masks is None:
-            masks = [np.ones_like(data, dtype=bool) for data in datas]
-        elif not isinstance(masks, (list, tuple)):
-            masks = [masks]
-
-        if tags is None:
-            tags = [None] * len(datas)
-        elif not isinstance(tags, (list, tuple)):
-            tags = [tags]
-
-        return f(self, datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
-
-    return wrapper
-
-
-def ensure_variational_args_are_lists(f):
-    def wrapper(self, arg0, datas, inputs=None, masks=None, tags=None, **kwargs):
-        datas = [datas] if not isinstance(datas, (list, tuple)) else datas
-
-        try:
-            M = (self.M,) if isinstance(self.M, int) else self.M
-        except:
-            # self does not have M if self is a variational posterior object
-            # in that case, arg0 is a model, which does have an M parameter
-            M = (arg0.M,) if isinstance(arg0.M, int) else arg0.M
-
-        assert isinstance(M, tuple)
-
-        if inputs is None:
-            inputs = [np.zeros((data.shape[0],) + M) for data in datas]
-        elif not isinstance(inputs, (list, tuple)):
-            inputs = [inputs]
-
-        if masks is None:
-            masks = [np.ones_like(data, dtype=bool) for data in datas]
-        elif not isinstance(masks, (list, tuple)):
-            masks = [masks]
-
-        if tags is None:
-            tags = [None] * len(datas)
-        elif not isinstance(tags, (list, tuple)):
-            tags = [tags]
-
-        return f(self, arg0, datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
-
-    return wrapper
-
-
-def ensure_args_not_none(f):
-    def wrapper(self, data, input=None, mask=None, tag=None, **kwargs):
-        assert data is not None
-
-        M = (self.M,) if isinstance(self.M, int) else self.M
-        assert isinstance(M, tuple)
-        input = np.zeros((data.shape[0],) + M) if input is None else input
-
-        mask = np.ones_like(data, dtype=bool) if mask is None else mask
-        return f(self, data, input=input, mask=mask, tag=tag, **kwargs)
-    return wrapper
-
-
-def ensure_slds_args_not_none(f):
-    def wrapper(self, variational_mean, data, input=None, mask=None, tag=None, **kwargs):
-        assert variational_mean is not None
-        assert data is not None
-        M = (self.M,) if isinstance(self.M, int) else self.M
-        assert isinstance(M, tuple)
-        input = np.zeros((data.shape[0],) + M) if input is None else input
-        mask = np.ones_like(data, dtype=bool) if mask is None else mask
-        return f(self, variational_mean, data, input=input, mask=mask, tag=tag, **kwargs)
-    return wrapper
-  
-def ssm_pbar(num_iters, verbose, description, prob):
+def ssm_pbar(num_iters, verbose, description, *args):
     '''Return either progress bar or regular list for iterating. Inputs are:
-  
+
       num_iters (int)
       verbose (int)     - if == 2, return trange object, else returns list
       description (str) - description for progress bar
-      prob (float)      - values to initialize description fields at
-  
+      args     - values to initialize description fields at
+
     '''
     if verbose == 2:
-        pbar = trange(num_iters)	          
-        pbar.set_description(description.format(*prob))
+        pbar = trange(num_iters)
+        pbar.set_description(description.format(*args))
     else:
         pbar = range(num_iters)
     return pbar
