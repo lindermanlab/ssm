@@ -1,20 +1,79 @@
 from functools import partial
 from tqdm.auto import trange
+from textwrap import dedent
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
 
-from ssm.util import ssm_pbar, format_dataset, num_datapoints
+from ssm.util import ssm_pbar, format_dataset, num_datapoints, Verbosity
 
 from ssm.hmm.initial_state import make_initial_state
 from ssm.hmm.transitions import make_transitions
-from ssm.hmm.observations import make_observations
+from ssm.hmm.observations import make_observations, OBSERVATION_CLASSES
 from ssm.hmm.posteriors import HMMPosterior
 
 class HMM(object):
-    """
-    Hidden Markov model.
-    """
+    __doc__ = """
+    A Hidden Markov model is a probabilistic state space model with
+    discrete latent states that change over time.
+
+    Dataset formatting:
+
+    The methods of this class consume a `dataset`, which can be given
+    in a number of ways:
+    - A numpy array where the first dimension is the number
+        of time steps.
+
+    - A dictionary with a `data` key and numpy array value.
+        The dictionary may also include other properties of the data,
+        which may affect the transition or observation distributions.
+        For example, it may include `covariates`.
+
+    - A list of dictionaries, one for each "batch" of data.  Each
+        dictionary must be formatted as above.
+
+    Args:
+
+    num_states: integer number of discrete latent states.
+
+    initial_state: string specification of initial state distribution.
+        Currently, we support the following values:
+        - uniform
+
+    transitions: specification of the transition distribution.  This can
+        be a string, a transition matrix, or an instance of
+        `ssm.hmm.transitions.Transitions`.
+
+        If given a string, it must be one of:
+        - "standard" or "stationary": the standard setup with a
+        transition matrix that does not change over time.
+
+        If given a matrix, it must be shape `(num_states, num_states)` and
+        be row-stochastic (i.e. non-negative with rows that sum to 1).
+
+        If given an object, it must be an instance of
+        `ssm.hmm.transitions.Transitions.`
+
+    observations: specification of the transition distribution.  This can
+        be a string or a list of `ssm.distributions.Distribution` objects
+        of length number of states.
+
+        If given a string, it must be one of: \n{observations}
+
+        Otherwise, it must be a list of `ssm.distributions.Distribution`
+        objects of length number of states.
+
+    initial_state_kwargs:  keyword arguments passed to the `InitialState`
+        constructor.
+
+    transitions_kwargs:  keyword arguments passed to the `Transitions`
+        constructor.
+
+    observation_kwargs:  keyword arguments passed to the `Observations`
+        constructor.
+    """.format(observations='\n'.join('\t- ' + key for key in
+                                      OBSERVATION_CLASSES.keys()))
+
     def __init__(self, num_states,
                  initial_state="uniform",
                  transitions="standard",
@@ -33,11 +92,9 @@ class HMM(object):
 
     @property
     def transition_matrix(self):
-        """Compute the transition matrix (or transition matrices, if
-        the model is nonstationary).  In some cases, the transition matrix
-        may depend on the data; e.g. the data may contain covariates that
-        modulate the transition probabilities, or the transition probabilities
-        may be a function of past observations.
+        """The transition matrix of the HMM.  This only works if the
+        transition distribution is stationary or "standard."  Otherwise,
+        use `hmm.transitions.get_transition_matrix(data, **kwargs)`
         """
         from ssm.hmm.transitions import StationaryTransitions
         if not isinstance(self.transitions, StationaryTransitions):
@@ -49,12 +106,6 @@ class HMM(object):
 
     @transition_matrix.setter
     def transition_matrix(self, value):
-        """Compute the transition matrix (or transition matrices, if
-        the model is nonstationary).  In some cases, the transition matrix
-        may depend on the data; e.g. the data may contain covariates that
-        modulate the transition probabilities, or the transition probabilities
-        may be a function of past observations.
-        """
         from ssm.hmm.transitions import StationaryTransitions
         if not isinstance(self.transitions, StationaryTransitions):
             raise Exception(
@@ -63,14 +114,21 @@ class HMM(object):
                 "`hmm.transitions.set_transition_matrix(data, **kwargs).")
         return self.transitions.set_transition_matrix(value)
 
-
     @property
     def observation_distributions(self):
+        """
+        A list of distribution objects specifying the conditional
+        probability of the data under each discrete latent state.
+        """
         return self.observations.observations
 
     @format_dataset
     def initialize(self, dataset):
-        """Initialize parameters given data.
+        """Initialize parameters based on the given dataset.
+
+        Args:
+
+        dataset: see help(HMM) for details
         """
         self.initial_state.initialize(dataset)
         self.transitions.initialize(dataset)
@@ -79,6 +137,10 @@ class HMM(object):
     def permute(self, perm):
         """
         Permute the discrete latent states.
+
+        Args:
+        perm: a numpy array of integers {0, ..., num_states - 1}
+            in the new desired order.
         """
         assert np.all(np.sort(perm) == np.arange(self.num_states))
         self.initial_state.permute(perm)
@@ -91,43 +153,59 @@ class HMM(object):
                self.observations.log_prior()
 
     @format_dataset
+    def average_log_likelihood(self, dataset):
+        """Compute the average log likelihood of data in this dataset.
+        This does not include the prior probability of the model parameters.
+
+        Note: This requires performing posterior inference of the latent states,
+        so in addition to the log probability we return the posterior distributions.
+
+        Args:
+
+        dataset: see help(HMM) for details
+        """
+        posteriors = [HMMPosterior(self, data_dict) for data_dict in dataset]
+        lp = np.sum([p.marginal_likelihood() for p in posteriors])
+        return lp / num_datapoints(dataset), posteriors
+
+    @format_dataset
     def average_log_prob(self, dataset):
-        """Compute the log probability of a dataset.  This requires
-        performing posterior inference of the latent states.
+        """Compute the average log probability of data in this dataset.
+
+        Note: This requires performing posterior inference of the latent states,
+        so in addition to the log probability we return the posterior distributions.
+
+        Args:
+
+        dataset: see help(HMM) for details
         """
         posteriors = [HMMPosterior(self, data_dict) for data_dict in dataset]
         lp = self.log_prior()
         lp += np.sum([p.marginal_likelihood() for p in posteriors])
         return lp / num_datapoints(dataset), posteriors
 
-    def sample(self, num_timesteps,
-               prefix=None,
-               covariates=None,
-               **kwargs):
+    def sample(self, num_timesteps, prefix=None, covariates=None, **kwargs):
         """
         Sample synthetic data from the model. Optionally, condition on a given
         prefix (preceding discrete states and data).
 
-        Parameters
-        ----------
-        num_timesteps : int
-            number of time steps to sample
+        Args
+        num_timesteps: integer number of time steps to sample
 
-        prefix : (state_prefix, data_prefix)
-            Optional prefix of discrete states and data
-            `state_prefix` must be an array of integers taking values 0...num_states-1.
-            `data_prefix` must be an array of the same length that has preceding observations.
+        prefix: optional tuple of (state_prefix, data_prefix)
+        - `state_prefix` must be an array of integers taking values
+           {0...num_states-1.
+        - `data_prefix` must be an array of the same length that has preceding
+          observations.
 
-        covariates : (T, ...) array_like
-            Optional inputs to specify for sampling
+        covariates: optional array with leading dimension `num_timesteps` that
+        specifies the covariates necessary for sampling.
 
-        Returns
-        -------
-        z_sample : array_like of type int
-            Sequence of sampled discrete states
+        Returns:
 
-        x_sample : (T x observation_dim) array_like
-            Array of sampled data
+        states: a numpy array with the sampled discrete states
+
+        data: a numpy array of sampled data
         """
 
         # Check the covariates
@@ -170,6 +248,10 @@ class HMM(object):
     def infer_posterior(self, dataset):
         """Compute the posterior distribution for a given dataset using
         this model's parameters.
+
+        Args:
+
+        dataset: see help(HMM) for details
         """
         posteriors = [HMMPosterior(self, data) for data in dataset]
         return posteriors[0] if len(posteriors) == 1 else posteriors
@@ -225,12 +307,9 @@ class HMM(object):
                            num_iters=100,
                            step_size_delay=1.0,
                            step_size_forgetting_rate=0.5,
-                           verbosity=2):
-        """
-        Fit the HMM with stochastic expectation-maximization (EM).
-        """
+                           verbosity=Verbosity.LOUD):
         # Initialize the step size schedule
-        step_sizes = np.power(np.arange(num_iters) + step_size_delay,
+        step_sizes = np.power(np.arange(num_iters * len(dataset)) + step_size_delay,
                               -step_size_forgetting_rate)
 
         # Make sure the first step size is 1!
@@ -242,7 +321,7 @@ class HMM(object):
 
         def validation_log_prob():
             if validation_dataset is None:
-                return 0
+                return np.nan
 
             lp = self.log_prior()
             for batch in validation_dataset:
@@ -269,9 +348,9 @@ class HMM(object):
 
         # Run stochastic EM algorithm
         batch_log_probs = []
-        if verbosity >= 2: print("Computing initial log probability...")
+        if verbosity >= Verbosity.LOUD: print("Computing initial log probability...")
         validation_log_probs = [validation_log_prob()]
-        if verbosity >= 2: print("Done.")
+        if verbosity >= Verbosity.LOUD: print("Done.")
 
         pbar = ssm_pbar(num_iters, verbosity,
                         "Validation LP: {:.2f} Batch LP {:.2f}",
@@ -289,13 +368,13 @@ class HMM(object):
 
                 # Update per-batch progress bar
                 if verbosity >= 2:
-                    pbar.set_description("Epoch LP: {:.2f} Batch LP: {:.2f}"\
+                    pbar.set_description("Validation LP: {:.2f} Batch LP: {:.2f}"\
                         .format(validation_log_probs[-1], batch_log_probs[-1]))
 
             # Compute complete log prob and update pbar
             validation_log_probs.append(validation_log_prob())
             if verbosity >= 2:
-                pbar.set_description("Validation LP: {:.2f} Batch LP: {:.2f}"\
+                pbar.set_description("Validation LP: {:2f} Batch LP: {:.2f}"\
                         .format(validation_log_probs[-1], batch_log_probs[-1]))
                 pbar.update(1)
 
@@ -307,11 +386,28 @@ class HMM(object):
         return np.array(validation_log_probs), posteriors
 
     @format_dataset
-    def fit(self, dataset,
-            method="em",
-            initialize=True,
-            verbose=2,
-            **kwargs):
+    def fit(self, dataset, method="em", initialize=True,
+            verbose=Verbosity.LOUD, **kwargs):
+        """
+        Fit the parameters of the HMM using the specified method.
+
+        Args:
+
+        dataset: see `help(HMM)` for details.
+
+        method: specification of how to fit the data.  Must be one
+        of the following strings:
+        - em
+        - stochastic_em
+
+        initialize: boolean flag indicating whether to initialize the
+        model before running the specified method.
+
+        verbose: specify how verbose the print-outs should be.  See
+        `ssm.util.Verbosity`.
+
+        **kwargs: keyword arguments are passed to the given fitting method.
+        """
         _fitting_methods = dict(
             em=self._fit_em,
             stochastic_em=self._fit_stochastic_em,
@@ -322,8 +418,9 @@ class HMM(object):
                             format(method, _fitting_methods.keys()))
 
         if initialize:
-            if verbose >= 2: print("Initializing...")
+            # TODO: allow for kwargs to initialize
+            if verbose >= Verbosity.LOUD : print("Initializing...")
             self.initialize(dataset)
-            if verbose >= 2: print("Done.")
+            if verbose >= Verbosity.LOUD: print("Done.")
 
         return _fitting_methods[method](dataset, **kwargs)

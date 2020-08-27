@@ -39,7 +39,8 @@ class Bernoulli(ExponentialFamilyDistribution):
 
     @probs.setter
     def probs(self, value):
-        self._logits = spsp.logit(value)
+        with np.errstate(divide='ignore'):
+            self._logits = spsp.logit(value)
 
     def log_prior(self):
         return self.prior.log_prob(self.probs)
@@ -104,7 +105,8 @@ class Beta(ConjugatePrior):
 
     @shape1.setter
     def shape1(self, value):
-        self._log_shape1 = np.log(value)
+        with np.errstate(divide='ignore'):
+            self._log_shape1 = np.log(value)
 
     @property
     def shape0(self):
@@ -112,7 +114,8 @@ class Beta(ConjugatePrior):
 
     @shape0.setter
     def shape0(self, value):
-        self._log_shape0 = np.log(value)
+        with np.errstate(divide='ignore'):
+            self._log_shape0 = np.log(value)
 
     def log_prob(self, data, **kwargs):
         return spst.beta.logpdf(data, self.shape1, self.shape0)
@@ -182,7 +185,8 @@ class Binomial(ExponentialFamilyDistribution):
 
     @probs.setter
     def probs(self, value):
-        self._logits = spsp.logit(value)
+        with np.errstate(divide='ignore'):
+            self._logits = spsp.logit(value)
 
     def log_prior(self):
         return self.prior.log_prob(self.probs)
@@ -223,7 +227,8 @@ class Categorical(ExponentialFamilyDistribution):
 
     @probs.setter
     def probs(self, value):
-        self._logits = np.log(value)
+        with np.errstate(divide='ignore'):
+            self._logits = np.log(value)
 
     @property
     def num_categories(self):

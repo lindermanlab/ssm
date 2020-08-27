@@ -116,7 +116,8 @@ class StationaryTransitions(Transitions):
         return np.sum([d.log_prior() for d in self.conditional_dists])
 
     def log_transition_matrices(self, data, **kwargs):
-        return np.log(self.get_transition_matrix())
+        with np.errstate(divide='ignore'):
+            return np.log(self.get_transition_matrix())
 
     def permute(self, perm):
         """

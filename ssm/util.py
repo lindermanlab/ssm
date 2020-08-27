@@ -2,6 +2,7 @@ from warnings import warn
 from tqdm.auto import trange
 import inspect
 from functools import wraps
+from enum import IntEnum
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
@@ -14,6 +15,12 @@ from scipy.special import gammaln, digamma, polygamma
 SEED = hash("ssm") % (2**32)
 LOG_EPS = 1e-16
 DIV_EPS = 1e-16
+
+class Verbosity(IntEnum):
+    OFF = 0
+    QUIET = 1
+    LOUD = 2
+    DEBUG = 3
 
 def format_dataset(f):
     sig = inspect.signature(f)
@@ -167,7 +174,7 @@ def ssm_pbar(num_iters, verbose, description, *args):
       args     - values to initialize description fields at
 
     '''
-    if verbose == 2:
+    if verbose >= Verbosity.QUIET:
         pbar = trange(num_iters)
         pbar.set_description(description.format(*args))
     else:
