@@ -937,7 +937,6 @@ class NormalInverseGamma(ConjugatePrior):
     def dimension(self):
         return 1
 
-    # TODO: Reparameterize parameters so that they can be optimized with autograd.
     @property
     def unconstrained_params(self):
         return ()
@@ -965,7 +964,7 @@ class NormalInverseGamma(ConjugatePrior):
                 mean, self.mu0, np.sqrt(variance / self.kappa0)))
 
         if self.alpha0 > 0:
-            # TODO: Use autograd versions of the logpdf's
+            # TODO: Use JAX versions of the logpdf's
             import scipy.stats
             lp += scipy.stats.invgamma.logpdf(
                 variance, self.alpha0, scale=self.beta0)
@@ -1082,7 +1081,6 @@ class NormalInverseWishart(ConjugatePrior):
     def dimension(self):
         return self.mu0.shape[0]
 
-    # TODO: Reparameterize parameters so that they can be optimized with autograd.
     @property
     def unconstrained_params(self):
         return ()
@@ -1111,7 +1109,7 @@ class NormalInverseWishart(ConjugatePrior):
                 mean, self.mu0, covariance_matrix / self.kappa0))
 
         if self.nu0 >= self.dimension:
-            # TODO: Use autograd versions of the logpdf's
+            # TODO: Use JAX versions of the logpdf's
             import scipy.stats
             lp += scipy.stats.invwishart.logpdf(
                 covariance_matrix, self.nu0, self.Psi0)
