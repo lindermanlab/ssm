@@ -1,7 +1,8 @@
-import autograd.numpy as np
-import autograd.numpy.random as npr
-import autograd.scipy.special as spsp
-import autograd.scipy.stats as spst
+import jax.numpy as np
+import jax.scipy.special as spsp
+import jax.scipy.stats as spst
+from jax import jit
+import jax.random
 from functools import partial
 
 from ssm.distributions.base import Distribution, \
@@ -39,8 +40,9 @@ class Bernoulli(ExponentialFamilyDistribution):
 
     @probs.setter
     def probs(self, value):
-        with np.errstate(divide='ignore'):
-            self._logits = spsp.logit(value)
+        # with np.errstate(divide='ignore'):
+        #     self._logits = spsp.logit(value)
+        self._logits = spsp.logit(value)
 
     def log_prior(self):
         return self.prior.log_prob(self.probs)
@@ -105,8 +107,9 @@ class Beta(ConjugatePrior):
 
     @shape1.setter
     def shape1(self, value):
-        with np.errstate(divide='ignore'):
-            self._log_shape1 = np.log(value)
+        # with np.errstate(divide='ignore'):
+        #     self._log_shape1 = np.log(value)
+        self._log_shape1 = np.log(value)
 
     @property
     def shape0(self):
@@ -114,8 +117,9 @@ class Beta(ConjugatePrior):
 
     @shape0.setter
     def shape0(self, value):
-        with np.errstate(divide='ignore'):
-            self._log_shape0 = np.log(value)
+        # with np.errstate(divide='ignore'):
+        #     self._log_shape0 = np.log(value)
+        self._log_shape0 = np.log(value)
 
     def log_prob(self, data, **kwargs):
         return spst.beta.logpdf(data, self.shape1, self.shape0)
@@ -185,8 +189,9 @@ class Binomial(ExponentialFamilyDistribution):
 
     @probs.setter
     def probs(self, value):
-        with np.errstate(divide='ignore'):
-            self._logits = spsp.logit(value)
+        # with np.errstate(divide='ignore'):
+        #     self._logits = spsp.logit(value)
+        self._logits = spsp.logit(value)
 
     def log_prior(self):
         return self.prior.log_prob(self.probs)
@@ -227,8 +232,9 @@ class Categorical(ExponentialFamilyDistribution):
 
     @probs.setter
     def probs(self, value):
-        with np.errstate(divide='ignore'):
-            self._logits = np.log(value)
+        # with np.errstate(divide='ignore'):
+        #     self._logits = np.log(value)
+        self._logits = np.log(value)
 
     @property
     def num_categories(self):
@@ -305,8 +311,17 @@ class Dirichlet(ConjugatePrior):
         self._log_concentration = np.log(value)
 
     def log_prob(self, data, **kwargs):
-        return spst.dirichlet.logpdf(data, self.concentration) \
-            if np.all(self.concentration > 0) else 0
+        if np.all(self.concentration > 0):
+            # The scipy/JAX implementation does not work well with float32 rounding errors
+            # lp = spst.dirichlet.logpdf(data / data.sum(axis=-1), self.concentration)
+            lp = spsp.gammaln(self.concentration.sum())
+            lp -= spsp.gammaln(self.concentration).sum()
+            lp += ((self.concentration - 1) * np.log(data + 1e-8)).sum()
+            assert np.all(np.isfinite(lp))
+            return lp
+        else:
+            return 0
+
 
     @property
     def mode(self):
@@ -692,11 +707,11 @@ class MultivariateNormal(ExponentialFamilyDistribution):
     def log_prior(self):
         return self.prior.log_prob((self.mean, self.covariance_matrix))
 
-    def sample(self, size=(), **kwargs):
+    def sample(self, rng, **kwargs):
         """Return a sample from the distribution.
         """
-        return npr.multivariate_normal(
-            self.mean, self.covariance_matrix, size=size)
+        return jax.random.multivariate_normal(
+            rng, self.mean, self.covariance_matrix)
 
     def log_prob(self, data, **kwargs):
         return spst.multivariate_normal.logpdf(

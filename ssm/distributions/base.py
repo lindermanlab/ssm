@@ -1,12 +1,12 @@
 from warnings import warn
 from functools import partial
 
-import autograd.numpy as np
-import autograd.scipy.special as spsp
-import autograd.scipy.stats as spst
-from autograd.misc import flatten
+import jax.numpy as np
+import jax.scipy.special as spsp
+import jax.scipy.stats as spst
+from jax.flatten_util import ravel_pytree
 
-from ssm.optimizers import bfgs, convex_combination
+from ssm.optimizers import minimize, convex_combination
 from ssm.util import sum_tuples, weighted_sum_stats, \
     format_dataset, num_datapoints
 
@@ -36,6 +36,9 @@ class Distribution(object):
         pass
 
     def log_prior(self):
+        """Evaluate prior probability of this distribution's parameters
+        using its `self.prior` Distribution object.
+        """
         raise NotImplementedError
 
     def log_prob(self, data, **kwargs):
@@ -48,14 +51,10 @@ class Distribution(object):
         """
         raise NotImplementedError
 
-    def sample(self, **kwargs):
+    def sample(self, rng, **kwargs):
         """Return a sample from the distribution.
         """
         raise NotImplementedError
-
-    @format_dataset
-    def preprocess(self, dataset):
-        pass
 
     @format_dataset
     def fit_proximal(self, dataset, step_size,
@@ -70,7 +69,7 @@ class Distribution(object):
         if optimizer_state is not None:
             proximal_point = optimizer_state["proximal_point"]
             def regularizer(params):
-                flat_params, _ = flatten(params)
+                flat_params, _ = ravel_pytree(params)
                 return 0.5 / variance * np.sum((flat_params - proximal_point)**2)
         else:
             regularizer = None
@@ -80,7 +79,7 @@ class Distribution(object):
                           callback=callback)
 
         optimizer_state = dict(
-            proximal_point=flatten(self.unconstrained_params)[0],
+            proximal_point=ravel_pytree(self.unconstrained_params)[0],
             scores=scores)
         return optimizer_state
 
@@ -95,9 +94,9 @@ class Distribution(object):
             for data_dict in dataset:
                 _lp = self.log_prob(**data_dict)
                 if "weights" in data_dict:
-                    lp += np.sum(data_dict["weights"] * _lp)
+                    lp += (data_dict["weights"] * _lp).sum()
                 else:
-                    lp += np.sum(_lp)
+                    lp += _lp.sum()
 
             obj = -lp / num_datapoints(dataset)
             if regularizer is not None:
@@ -112,15 +111,14 @@ class Distribution(object):
                 callback(params)
 
         # minimize the objective via BFGS
-        params, result = bfgs(objective,
-                              self.unconstrained_params,
-                              callback=_callback_wrapper,
-                              full_output=True)
+        result = minimize(objective,
+                          self.unconstrained_params,
+                          callback=_callback_wrapper)
         if not result.success:
             warn("fit: minimize failed with result: {}".format(result))
 
         # Set the unconstrained parameters
-        self.unconstrained_params = params
+        self.unconstrained_params = result["x"]
         return np.array(scores)
 
 
@@ -152,25 +150,6 @@ class ExponentialFamilyDistribution(Distribution):
         """
         raise NotImplementedError
 
-    @format_dataset
-    def preprocess(self, dataset):
-        for data_dict in dataset:
-            # Check if stats dictionary is present
-            if "_stats_dict" not in data_dict:
-                data_dict["_stats_dict"] = dict()
-            stats_dict = data_dict["_stats_dict"]
-
-            # Precompute the sufficient statistics for this class
-            if self.__class__ not in stats_dict:
-                stats_dict[self.__class__] = self.sufficient_statistics(**data_dict)
-
-    def _cached_sufficient_statistics(self, data_dict):
-        if "_stats_dict" in data_dict:
-            key = self.__class__
-            if key in data_dict["_stats_dict"]:
-                return data_dict["_stats_dict"][key]
-        return self.sufficient_statistics(**data_dict)
-
     def fit_expfam_with_stats(self, sufficient_statistics, num_datapoints):
         """Compute the maximum a posteriori (MAP) estimate of the distribution
         parameters, given the sufficient statistics of the data and the number
@@ -195,10 +174,9 @@ class ExponentialFamilyDistribution(Distribution):
         suff_stats = None
         for data_dict in dataset:
             weights = data_dict["weights"] if "weights" in data_dict else None
-
-            # Check for cached statistics
             these_stats = weighted_sum_stats(
-                self._cached_sufficient_statistics(data_dict), weights)
+                self.sufficient_statistics(**data_dict),
+                weights)
             suff_stats = sum_tuples(suff_stats, these_stats)
 
         return self.fit_expfam_with_stats(suff_stats, num_datapoints(dataset))
@@ -219,7 +197,7 @@ class ExponentialFamilyDistribution(Distribution):
         for data_dict in dataset:
             weights = data_dict["weights"] if "weights" in data_dict else None
             these_stats = weighted_sum_stats(
-                self._cached_sufficient_statistics(data_dict), weights)
+                self.sufficient_statistics(**data_dict), weights)
             suff_stats = sum_tuples(suff_stats, these_stats)
 
         # Scale the sufficient statistics by the given scale factor.
@@ -350,15 +328,14 @@ class CompoundDistribution(Distribution):
 
         # Minimize the objective via BFGS
         # NOTE: We use a weak tolerance so this doesn't take too long
-        params, result = bfgs(objective,
-                                self.unconstrained_nonconj_params,
-                                tol=1e-2,
-                                full_output=True)
+        result = minimize(objective,
+                          self.unconstrained_nonconj_params,
+                          tol=1e-2)
         if not result.success:
             warn("fit: minimize failed with result: {}".format(result))
 
         # Set the unconstrained parameters
-        self.unconstrained_nonconj_params = params
+        self.unconstrained_nonconj_params = result['x']
         return result.fun
 
     @format_dataset

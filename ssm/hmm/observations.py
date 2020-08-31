@@ -1,8 +1,8 @@
 import copy
 import warnings
 
-import autograd.numpy as np
-import autograd.numpy.random as npr
+import jax.numpy as np
+import numpy.random as npr
 import ssm.distributions as dists
 from ssm.util import format_dataset
 
@@ -130,10 +130,6 @@ class Observations(object):
                 data_subsets.append(subset)
 
             observation_dist.fit(data_subsets)
-
-        # Finally, precompute sufficient statistics
-        for observation_dist in self.observations:
-            observation_dist.preprocess(dataset)
 
     def permute(self, perm):
         self.observations = [self.observations[i] for i in perm]

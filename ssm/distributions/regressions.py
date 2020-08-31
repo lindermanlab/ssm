@@ -1,7 +1,8 @@
-import autograd.numpy as np
-import autograd.numpy.random as npr
-import autograd.scipy.special as spsp
-import autograd.scipy.stats as spst
+import jax.numpy as np
+import jax.random
+import jax.scipy.special as spsp
+import jax.scipy.stats as spst
+from jax.ops import index_update, index_add
 from functools import partial
 
 from numba import jit
@@ -103,11 +104,10 @@ class LinearRegression(ExponentialFamilyDistribution):
             prediction += self.bias
         return prediction
 
-    def sample(self, sample_shape=(), covariates=None):
+    def sample(self, rng, sample_shape=(), covariates=None):
         assert covariates is not None, "Regression needs covariates!"
         prediction = self.predict(None, covariates)
-        data = prediction + npr.multivariate_normal(
-            np.zeros(out_dim), self.covariance_matrix, size=(len(prediction),))
+        data = jax.random.multivariate_normal(rng, prediction, self.covariance_matrix)
         return data
 
     def log_prior(self):
@@ -170,7 +170,8 @@ class _AutoRegressionMixin(object):
         prediction = np.zeros_like(data)
         for i, weights in enumerate(self.autoregression_weights):
             lag = i + 1
-            prediction[lag:] += data[:-lag] @ weights.T
+            prediction = index_add(prediction, slice(lag, None),
+                                   data[:-lag] @ weights.T)
         if covariates is not None:
             prediction += covariates @ self.covariate_weights.T
         if self.fit_bias:
@@ -179,7 +180,7 @@ class _AutoRegressionMixin(object):
 
     def predict_next(self, preceding_data, covariates=None, **kwargs):
         num_lags, out_dim, in_dim = self.num_lags, self.out_dim, self.in_dim
-
+        preceding_data = preceding_data.reshape((-1, out_dim))
         # Predict the next observation give the most recent `num_lags`
         # of preceding data
         prediction = np.zeros(out_dim)
@@ -202,7 +203,7 @@ class _AutoRegressionMixin(object):
             log_prob(data, covariates, **kwargs)
 
         # Zero out initial data since we don't have all the covariates
-        lps[:self.num_lags] = 0
+        lps = index_update(lps, slice(0, self.num_lags), 0)
         return lps
 
     def sufficient_statistics(self, data, covariates=None, **kwargs):
@@ -211,9 +212,8 @@ class _AutoRegressionMixin(object):
             sufficient_statistics(data, covariates, **kwargs)
 
         # Zero out initial stats since we don't have all the covariates
-        for ss in stats:
-            ss[:self.num_lags] = 0
-        return stats
+        return [index_update(ss, slice(0, self.num_lags), 0)
+                 for ss in stats]
 
 
 class LinearAutoRegression(_AutoRegressionMixin, LinearRegression):
@@ -241,11 +241,10 @@ class LinearAutoRegression(_AutoRegressionMixin, LinearRegression):
                    bias=bias, fit_bias=fit_bias, num_lags=num_lags,
                    **kwargs)
 
-    def sample(self, sample_shape=(), preceding_data=None, covariates=None):
+    def sample(self, rng, sample_shape=(), preceding_data=None, covariates=None):
         num_lags, out_dim, in_dim = self.num_lags, self.out_dim, self.in_dim
         prediction = self.predict_next(preceding_data, covariates=covariates)
-        return prediction + npr.multivariate_normal(
-            np.zeros(out_dim), self.covariance_matrix, size=sample_shape)
+        return jax.random.multivariate_normal(rng, prediction, self.covariance_matrix)
 
 
 class MultivariateStudentsTLinearRegression(LinearRegression,
@@ -288,12 +287,13 @@ class MultivariateStudentsTLinearRegression(LinearRegression,
     def unconstrained_nonconj_params(self, value):
         self._log_dof = value
 
-    def sample(self, sample_shape=(), covariates=None):
+    def sample(self, rng, sample_shape=(), covariates=None):
         assert covariates is not None, "Regression needs covariates!"
         prediction = self.predict(None, covariates)
-        scale = npr.gamma(self.dof / 2.0, 2.0 / self.dof)
-        data = prediction + npr.multivariate_normal(
-            np.zeros(out_dim), self.covariance_matrix / scale, size=(len(prediction),))
+        key1, key2 = jax.random.split(rng, 2)
+        scale = jax.random.gamma(key1, self.dof / 2.0, 2.0 / self.dof)
+        data = jax.random.multivariate_normal(
+            key2, prediction, self.covariance_matrix / scale)
         return data
 
     def log_prob(self, data, covariates):
@@ -387,13 +387,13 @@ class MultivariateStudentsTAutoRegression(_AutoRegressionMixin,
                    num_lags=num_lags,
                    **kwargs)
 
-    def sample(self, sample_shape=(), preceding_data=None, covariates=None):
+    def sample(self, rng, sample_shape=(), preceding_data=None, covariates=None):
         num_lags, out_dim, in_dim = self.num_lags, self.out_dim, self.in_dim
         prediction = self.predict_next(preceding_data, covariates=covariates)
-        scale = npr.gamma(self.dof / 2, 2 / self.dof)
-        return prediction + npr.multivariate_normal(
-            np.zeros(out_dim), self.covariance_matrix / scale,
-            size=sample_shape)
+        key1, key2 = jax.random.split(rng, 2)
+        scale = jax.random.gamma(key1, self.dof / 2, 2 / self.dof)
+        return jax.random.multivariate_normal(key2,
+            prediction, self.covariance_matrix / scale)
 
     def conditional_expectations(self, data, covariates=None, **kwargs):
         return super(MultivariateStudentsTAutoRegression, self).\

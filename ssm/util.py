@@ -1,13 +1,14 @@
 from warnings import warn
 from tqdm.auto import trange
 import inspect
-from functools import wraps
+from functools import wraps, partial
 from enum import IntEnum
 
-import autograd.numpy as np
-import autograd.numpy.random as npr
-from autograd.scipy.special import logsumexp
-from autograd import grad
+import jax.numpy as np
+from jax import vmap, jit
+from jax.ops import index_update
+import jax.random
+import numpy.random as npr
 
 from scipy.optimize import linear_sum_assignment, minimize
 from scipy.special import gammaln, digamma, polygamma
@@ -39,6 +40,9 @@ def format_dataset(f):
             dataset = [dataset]
         elif isinstance(dataset, np.ndarray):
             dataset = [dict(data=dataset)]
+        else:
+            raise Exception("Expected `dataset` to be a numpy array, a dictionary, or a "
+                            "list of dictionaries.  See help(ssm.HMM) for more details.")
 
         # Update the bound arguments
         bound_args.arguments['dataset'] = dataset
@@ -58,12 +62,15 @@ def sum_tuples(a, b):
     else:
         return tuple(ai + bi for ai, bi in zip(a, b))
 
-
+@jit
 def weighted_sum_stats(stats, weights=None):
     if weights is None:
         return tuple(np.sum(s, axis=0) for s in stats)
     else:
-        return tuple(np.einsum('n,n...->...', weights, s) for s in stats)
+        weighted_stats = vmap(lambda w, ss: [w * s for s in ss])(weights, stats)
+        return [s.sum(axis=0) for s in weighted_stats]
+        # return vmap(partial(np.sum, axis=0))(weighted_stats)
+        # return tuple(np.einsum('n,n...->...', weights, s) for s in stats)
 
 
 @format_dataset
@@ -93,17 +100,18 @@ def generalized_outer(xs, ys):
         for row in block_array], axis=1)
 
 def compute_state_overlap(z1, z2, K1=None, K2=None):
-    assert z1.dtype == int and z2.dtype == int
+    # TODO: Check for dtype
+    # assert z1.dtype == int and z2.dtype == int
     assert z1.shape == z2.shape
     assert z1.min() >= 0 and z2.min() >= 0
 
     K1 = z1.max() + 1 if K1 is None else K1
     K2 = z2.max() + 1 if K2 is None else K2
 
-    overlap = np.zeros((K1, K2))
-    for k1 in range(K1):
-        for k2 in range(K2):
-            overlap[k1, k2] = np.sum((z1 == k1) & (z2 == k2))
+    overlap = np.array([
+        [np.sum((z1 == k1) & (z2 == k2))
+         for k2 in range(K2)]
+        for k1 in range(K1)])
     return overlap
 
 
@@ -145,23 +153,24 @@ def rle(stateseq):
         length of time in corresponding state
     """
     pos, = np.where(np.diff(stateseq) != 0)
-    pos = np.concatenate(([0],pos+1,[len(stateseq)]))
+    pos = np.concatenate((np.array([0]), pos+1, np.array([len(stateseq)])))
     return stateseq[pos[:-1]], np.diff(pos)
 
 
-def random_rotation(n, theta=None):
+def random_rotation(rng, n, theta=None):
+    key1, key2 = jax.random.split(rng, 2)
     if theta is None:
         # Sample a random, slow rotation
-        theta = 0.5 * np.pi * np.random.rand()
+        theta = 0.5 * np.pi * jax.random.uniform(key1)
 
     if n == 1:
-        return np.random.rand() * np.eye(1)
+        return jax.random.uniform(key2) * np.eye(1)
 
     rot = np.array([[np.cos(theta), -np.sin(theta)],
                     [np.sin(theta), np.cos(theta)]])
     out = np.eye(n)
-    out[:2, :2] = rot
-    q = np.linalg.qr(np.random.randn(n, n))[0]
+    out = index_update(out, (slice(0, 2), slice(0, 2)), rot)
+    q = np.linalg.qr(jax.random.normal(key2, shape=(n, n)))[0]
     return q.dot(out).dot(q.T)
 
 

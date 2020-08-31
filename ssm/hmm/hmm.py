@@ -2,8 +2,10 @@ from functools import partial
 from tqdm.auto import trange
 from textwrap import dedent
 
-import autograd.numpy as np
-import autograd.numpy.random as npr
+import jax.numpy as np
+import jax.random
+from jax import jit, lax
+import numpy.random as npr
 
 from ssm.util import ssm_pbar, format_dataset, num_datapoints, Verbosity
 
@@ -184,7 +186,7 @@ class HMM(object):
         lp += np.sum([p.marginal_likelihood() for p in posteriors])
         return lp / num_datapoints(dataset), posteriors
 
-    def sample(self, num_timesteps, prefix=None, covariates=None, **kwargs):
+    def sample(self, rng, num_timesteps, prefix=None, covariates=None, **kwargs):
         """
         Sample synthetic data from the model. Optionally, condition on a given
         prefix (preceding discrete states and data).
@@ -207,6 +209,7 @@ class HMM(object):
 
         data: a numpy array of sampled data
         """
+        num_states = self.num_states
 
         # Check the covariates
         if covariates is not None:
@@ -214,35 +217,62 @@ class HMM(object):
         else:
             covariates = np.zeros((num_timesteps, 0))
 
-        # Use prefix if it's given
-        if prefix is not None:
-            states, data = list(prefix[0]), list(prefix[1])
-            assert len(data) == len(states)
-        else:
-            states, data = [], []
-        prefix_len = len(states)
+        if prefix is None:
+            # Sample the first state and data from the initial distribution
+            key1, key2, rng = jax.random.split(rng, 3)
+            initial_state = jax.random.choice(key1, num_states,
+                                              p=self.initial_state.initial_prob())
+            initial_data = self.observation_distributions[initial_state]\
+                .sample(key2, preceding_data=None, covariates=covariates[0])
+            prefix = (initial_state, initial_data)
 
-        # Fill in the rest of the data
-        for t in range(num_timesteps):
-            covariate = covariates[t] if covariates else None
+        # TODO: write fast code for general transitions
+        from ssm.hmm.transitions import StationaryTransitions
+        assert isinstance(self.transitions, StationaryTransitions)
+        transition_matrix = self.transition_matrix
 
-            # Sample the next latent state
-            if len(states) == 0:
-                p = self.initial_state.initial_prob()
-            else:
-                p = self.transitions.get_transition_matrix(
-                    data=data, covariates=covariate, **kwargs)[states[-1]]
-            next_state = npr.choice(self.num_states, p=p)
-            states.append(next_state)
+        # Sample the data and states
+        keys = jax.random.split(rng, num_timesteps-1)
+        states_and_data = [prefix]
+        for t in trange(1, num_timesteps):
+            key1, key2 = jax.random.split(keys[t])
+            prev_state, prev_data = states_and_data[-1]
+
+            # Sample next latente state
+            next_state = jax.random.choice(
+                key1, num_states, p=transition_matrix[prev_state])
 
             # Sample the next data point
             data_dist = self.observation_distributions[next_state]
-            next_data = data_dist.sample(preceding_data=data,
-                                         covariates=covariate,
-                                         **kwargs)
-            data.append(next_data)
+            next_data = data_dist.sample(
+                key2, preceding_data=prev_data, covariates=covariates[t], **kwargs)
 
-        return np.array(states[prefix_len:]), np.row_stack(data[prefix_len:])
+            states_and_data.append((next_state, next_data))
+
+        states, data = list(zip(*states_and_data))
+        states = np.stack(states)
+        data = np.row_stack(data)
+        return states, data
+
+        # TODO: Make this work with scan
+        # def sample_next(history, prms):
+        #     key, covariate = prms
+        #     prev_state, prev_data = history
+        #     key1, key2 = jax.random.split(key, 2)
+        #     next_state = jax.random.choice(key1, num_states,
+        #                                    p=transition_matrix[prev_state])
+        #     next_data = self.observation_distributions[next_state]\
+        #         .sample(key2, preceding_data=prev_data, covariates=covariate)
+        #     return (next_state, next_data), None
+
+        # _, (states, data) = lax.scan(sample_next,
+        #                              prefix,
+        #                              (keys, covariates[1:]))
+
+        # # Append the prefix before returning
+        # states = np.concatenate([np.array(prefix[0]), states])
+        # data = np.concatenate([np.array(prefix[1]), data])
+        # return states, data
 
     @format_dataset
     def infer_posterior(self, dataset):
@@ -265,6 +295,7 @@ class HMM(object):
             lp = self.log_prior()
             for p in posteriors:
                 lp += p.marginal_likelihood()
+            assert np.isfinite(lp)
             return lp / num_datapoints(dataset)
 
         def e_step(posteriors):
@@ -293,7 +324,7 @@ class HMM(object):
                 pbar.update(1)
 
             # Check for convergence
-            if abs(log_probs[-1] - log_probs[-2]) < tol:
+            if abs(log_probs[-1] - log_probs[-2]) < tol and itr > 10:
                 break
 
         # Clean up the output before returning
@@ -313,7 +344,7 @@ class HMM(object):
                               -step_size_forgetting_rate)
 
         # Make sure the first step size is 1!
-        step_sizes = np.concatenate(([0], step_sizes))
+        step_sizes = np.concatenate((np.array([0]), step_sizes))
 
         # Choose random data for each iteration
         total_num_datapoints = num_datapoints(dataset)

@@ -1,8 +1,8 @@
-import autograd.numpy as np
-import autograd.numpy.random as npr
+import jax.numpy as np
+import numpy.random as npr
 
-from ssm.optimizers import lbfgs
 import ssm.distributions.distributions as dists
+from ssm.optimizers import minimize
 from ssm.util import format_dataset
 
 def make_initial_state(num_states, initial_state, **initial_state_kwargs):
@@ -47,8 +47,7 @@ class InitialState(object):
         return elp
 
     def m_step(self, dataset, posteriors,
-               optimizer="lbfgs", num_iters=1000,
-               **kwargs):
+               num_iters=1000, **kwargs):
         """
         If M-step cannot be done in closed form for the transitions,
         default to BFGS.
@@ -61,9 +60,11 @@ class InitialState(object):
 
         # Call the optimizer. Persist state (e.g. SGD momentum) across calls to m_step.
         optimizer_state = self.optimizer_state if hasattr(self, "optimizer_state") else None
-        self.params, self.optimizer_state = \
-            lbfgs(_objective, self.params, num_iters=num_iters,
-                  state=optimizer_state, full_output=True, **kwargs)
+        result = minimize(_objective, self.unconstrained_params, **kwargs)
+        if not result.success:
+            warn("fit: minimize failed with result: {}".format(result))
+
+        self.unconstrained_params = result['x']
 
 
 class UniformInitialState(InitialState):

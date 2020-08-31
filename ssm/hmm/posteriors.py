@@ -1,4 +1,4 @@
-import autograd.numpy as np
+import jax.numpy as np
 from ssm.hmm.messages import hmm_expected_states, hmm_filter, hmm_sample, viterbi
 
 
@@ -23,7 +23,7 @@ class HMMPosterior(object):
         """
         # f = jit(grad(hmm_log_normalizer, has_aux=True))
         # (_, Ezzp1, Ez), log_normalizer = f(*self._natural_params)
-        Ez, Ezzp1, log_normalizer = hmm_expected_states(*self._natural_params)
+        log_normalizer, (Ez0, Ezzp1, Ez) = hmm_expected_states(*self._natural_params)
         assert np.all(np.isfinite(Ez))
         self._posterior = dict(Ez=Ez,
                                Ezzp1=Ezzp1,
@@ -36,13 +36,7 @@ class HMMPosterior(object):
         log_initial_distn = model.initial_state.log_initial_prob(**data_dict)
         log_transition_matrices = model.transitions.log_transition_matrices(**data_dict)
         log_likelihoods = model.observations.log_likelihoods(**data_dict)
-
-        # TODO: We return the initial distribution and transition matrices
-        #       rather than their logs for consistency with the current
-        #       message passing interface.  We should probably change that!
-        return np.exp(log_initial_distn), \
-               np.exp(log_transition_matrices), \
-               log_likelihoods
+        return log_initial_distn, log_transition_matrices, log_likelihoods
 
     def marginal_likelihood(self):
         """Compute the marginal likelihood of the data under the model.
