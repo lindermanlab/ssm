@@ -702,3 +702,36 @@ def normal_invwishart_natural_to_standard(a, B, c, d):
     kappa0 = d
     Psi0 = B - kappa0 * np.outer(mu0, mu0)
     return nu0, Psi0, mu0, kappa0
+
+
+def gamma_standard_to_natural(alpha, beta):
+    """
+    The gamma prior Ga(\lambda; \alpha, \beta) has sufficient statistics
+    
+        \log \lambda 
+        \lambda
+        
+    and natural parameters
+
+        a = \alpha - 1
+        b = -\beta
+        
+    This function converts (a, b) to (\alpha, \beta)
+    """
+    return alpha - 1, -beta
+
+def gamma_natural_to_standard(a, b):
+    """
+    The gamma prior Ga(\lambda; \alpha, \beta) has sufficient statistics
+    
+        \log \lambda 
+        \lambda
+        
+    and natural parameters
+
+        a = \alpha - 1
+        b = -\beta
+        
+    This function converts (a, b) to (\alpha, \beta)
+    """
+    return a + 1, -b

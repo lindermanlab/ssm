@@ -7,6 +7,7 @@ from autograd.scipy.special import logsumexp
 from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
+from ssm.optimizers import convex_combination
 from ssm.util import ensure_args_are_lists
 
 
@@ -44,6 +45,9 @@ class InitialStateDistribution(object):
     def log_prior(self):
         return 0
 
+    def compute_sample_size(self, datas, inputs, masks, tags):
+        return len(datas)
+
     def expected_sufficient_stats(self, expectations, datas, inputs, masks, tags):
         """
         Sufficient statistics are
@@ -65,6 +69,37 @@ class InitialStateDistribution(object):
         else:
             Ez0 = sufficient_stats
         self.log_pi0 = np.log(Ez0 / Ez0.sum())
+
+    def stochastic_m_step(self, 
+                          optimizer_state, 
+                          total_sample_size,
+                          expectations, 
+                          datas,
+                          inputs,
+                          masks, 
+                          tags,
+                          step_size=0.5):
+
+        # Get the expected sufficient statistics for this minibatch
+        stats = self.expected_sufficient_stats(expectations,
+                                               datas,
+                                               inputs,
+                                               masks,
+                                               tags)
+
+        # Scale the stats by the fraction of the sample size
+        this_sample_size = self.compute_sample_size(datas, inputs, masks, tags)
+        stats *= total_sample_size /  this_sample_size
+
+        # Combine them with the running average sufficient stats
+        if optimizer_state is not None:
+            stats = convex_combination(optimizer_state, stats, step_size)
+
+        # Call the regular m-step with these sufficient statistics
+        self.m_step(None, None, None, None, None, sufficient_stats=stats)
+
+        # Return the update state (i.e. the new stats)
+        return stats
 
 
 class FixedInitialStateDistribution(InitialStateDistribution):

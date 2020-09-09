@@ -421,6 +421,134 @@ class HMM(object):
 
         return lls
 
+    # def _fit_stochastic_em_conjugate(self, datas, inputs, masks, tags,
+    #                                  verbose=2,
+    #                                  num_epochs=100,
+    #                                  tolerance=0,
+    #                                  learning_rate=geometric_learning_rate,
+    #                                  **kwargs):
+    #     """
+    #     Fit the parameters with stochastic EM, assuming that the observations
+    #     and transitions are exponential family distributions with closed-form
+    #     sufficient statistics.
+
+    #     Initialize:
+    #         - Initialize the running average sufficient statistics.  E.g. set
+    #           them to the stats from the prior if you have one, or to zero o.w.
+
+    #     E-step:
+    #         - grab a minibatch of data (e.g. one of your data arrays)
+    #         - compute E[z_t] and E[z_t, z_{t+1}] for that minibatch
+
+    #     M-step:
+    #         - compute expected sufficient statistics of the transition and
+    #           observation models from this minibatch. Note: these are summed
+    #           over datapoints in the minibatch.
+
+    #         - take a convex combination of ESS from this minibatch and your
+    #           running average.
+    #         - then set parameters to maximize the likelihood using these
+    #           averaged sufficent statistics.
+
+    #     References:
+
+    #         - Cappé, Olivier, and Eric Moulines. "On‐line expectation–maximization
+    #           algorithm for latent data models." Journal of the Royal Statistical
+    #           Society: Series B (Statistical Methodology) 71.3 (2009): 593-613.
+
+    #         - Hoffman, Matthew D., et al. "Stochastic variational inference."
+    #           The Journal of Machine Learning Research 14.1 (2013): 1303-1347.
+
+    #     TODO:
+    #         - Specify learning rates
+    #         - Control how log likelihoods are reported
+
+    #     """
+    #     # Store the log likelihoods (per minibatch)
+    #     epoch_lps = []
+    #     inner_lps = []
+
+    #     # Initialize the progress bars
+    #     num_datas = len(datas)
+    #     T_total = sum([data.shape[0] for data in datas])
+    #     epoch_pbar = ssm_pbar(num_epochs, verbose, "Initializing...", [])
+    #     inner_pbar = ssm_pbar(num_datas, verbose, "Initializing...", [])
+
+    #     # Initialize the sufficient statistics by calling without data
+    #     args = [], [], [], [], []
+    #     init_state_suff_stats = self.init_state_distn.expected_sufficient_stats(*args)
+    #     transition_suff_stats = self.transitions.expected_sufficient_stats(*args)
+    #     observation_suff_stats = self.observations.expected_sufficient_stats(*args)
+
+    #     # TODO: Initialize learning rate schedule
+
+    #     for epoch in epoch_pbar:
+    #         perm = npr.permutation(num_datas)
+    #         inner_pbar.reset()
+
+    #         for i in inner_pbar:
+    #             # Grab a minibatch of data
+    #             j = perm[i]
+    #             data, input, mask, tag = datas[j], inputs[j], masks[j], tags[j]
+
+    #             # E step: compute expected latent states with current parameters
+    #             #         _for this particular data array_.
+    #             expectations = self.expected_states(data, input, mask, tag)
+
+    #             # Compute noisy estimate of the total log prob using this minibatch
+    #             inner_lps.append(self.log_prior() + expectations[2] * T_total / data.shape[0])
+    #             inner_pbar.set_description("LP: {:.1f}".format(inner_lps[-1]))
+
+    #             # M step: Get expected sufficient statistics for this data
+    #             #         and combine them with the running average.
+    #             # Note:   The ESS are summed over datapoints in the minibatch.
+    #             #         Minibatches of different length will lead to parameter
+    #             #         updates that vary in magnitude depending on the size of
+    #             #         the minibatch.
+    #             args = [expectations], [data], [input], [mask], [tag]
+
+    #             # convex combo is computed as
+    #             # alpha * curr_suff_stats + (1 - alpha) * avg_suff_stats
+    #             alpha = learning_rate(epoch * num_datas + i, forgetting_rate=0.75)
+
+    #             init_state_suff_stats = convex_combination(
+    #                 self.init_state_distn.expected_sufficient_stats(*args),
+    #                 init_state_suff_stats,
+    #                 alpha)
+
+    #             transition_suff_stats = convex_combination(
+    #                 self.transitions.expected_sufficient_stats(*args),
+    #                 transition_suff_stats,
+    #                 alpha)
+
+    #             observation_suff_stats = convex_combination(
+    #                 self.observations.expected_sufficient_stats(*args),
+    #                 observation_suff_stats,
+    #                 alpha)
+
+    #             # M step: update the parameters with those stats.
+    #             args = None, None, None, None, [tag]
+    #             self.init_state_distn.m_step(*args, sufficient_stats=init_state_suff_stats)
+    #             self.transitions.m_step(*args, sufficient_stats=transition_suff_stats)
+    #             self.observations.m_step(*args, sufficient_stats=observation_suff_stats)
+
+    #             # # Check for convergence
+    #             # if itr > 0 and abs(lls[-1] - lls[-2]) < tolerance:
+    #             #     if verbose == 2:
+    #             #         pbar.set_description("Converged to LP: {:.1f}".format(lls[-1]))
+    #             #     break
+
+    #         # Update the shared weights
+    #         self.observations._m_step_global()
+    #         self.observations._update_hierarchical_prior()
+
+    #         # Compute the log probability of the full dataset
+    #         if verbose == 2:
+    #             epoch_lps.append(self.log_probability(datas, inputs, masks, tags))
+    #         #     epoch_pbar.set_description("LP: {:.1f}".format(epoch_lps[-1]))
+
+    #     return epoch_lps, inner_lps
+        
     def _fit_stochastic_em_conjugate(self, datas, inputs, masks, tags,
                                      verbose=2,
                                      num_epochs=100,
@@ -475,13 +603,12 @@ class HMM(object):
         inner_pbar = ssm_pbar(num_datas, verbose, "Initializing...", [])
 
         # Initialize the sufficient statistics by calling without data
-        args = [], [], [], [], []
-        init_state_suff_stats = self.init_state_distn.expected_sufficient_stats(*args)
-        transition_suff_stats = self.transitions.expected_sufficient_stats(*args)
-        observation_suff_stats = self.observations.expected_sufficient_stats(*args)
-
-        # TODO: Initialize learning rate schedule
-
+        distributions = [self.init_state_distn, self.transitions, self.observations]
+        m_step_states = [None, None, None]
+        total_sample_sizes = [distn.compute_sample_size(datas, inputs, masks, tags) 
+                              for distn in distributions]
+            
+        # Iterate over minibatches
         for epoch in epoch_pbar:
             perm = npr.permutation(num_datas)
             inner_pbar.reset()
@@ -501,54 +628,29 @@ class HMM(object):
 
                 # M step: Get expected sufficient statistics for this data
                 #         and combine them with the running average.
-                # Note:   The ESS are summed over datapoints in the minibatch.
-                #         Minibatches of different length will lead to parameter
-                #         updates that vary in magnitude depending on the size of
-                #         the minibatch.
-                args = [expectations], [data], [input], [mask], [tag]
 
                 # convex combo is computed as
-                # alpha * curr_suff_stats + (1 - alpha) * avg_suff_stats
-                alpha = learning_rate(epoch * num_datas + i, forgetting_rate=0.3)
-
-                init_state_suff_stats = convex_combination(
-                    self.init_state_distn.expected_sufficient_stats(*args),
-                    init_state_suff_stats,
-                    alpha)
-
-                transition_suff_stats = convex_combination(
-                    self.transitions.expected_sufficient_stats(*args),
-                    transition_suff_stats,
-                    alpha)
-
-                observation_suff_stats = convex_combination(
-                    self.observations.expected_sufficient_stats(*args),
-                    observation_suff_stats,
-                    alpha)
+                # (1 - step_size) * run_avg_stats + step_size * stats_from_this_minibatch
+                step_size = learning_rate(epoch * num_datas + i)
 
                 # M step: update the parameters with those stats.
-                args = None, None, None, None, [tag]
-                self.init_state_distn.m_step(*args, sufficient_stats=init_state_suff_stats)
-                self.transitions.m_step(*args, sufficient_stats=transition_suff_stats)
-                self.observations.m_step(*args, sufficient_stats=observation_suff_stats)
-
-                # # Check for convergence
-                # if itr > 0 and abs(lls[-1] - lls[-2]) < tolerance:
-                #     if verbose == 2:
-                #         pbar.set_description("Converged to LP: {:.1f}".format(lls[-1]))
-                #     break
-
-            # Update the shared weights
-            self.observations._m_step_global()
-            self.observations._update_hierarchical_prior()
-
+                for i, distn in enumerate(distributions):
+                    m_step_states[i] = distn.stochastic_m_step(m_step_states[i], 
+                                                               total_sample_sizes[i],
+                                                               [expectations], 
+                                                               [data], 
+                                                               [input], 
+                                                               [mask],
+                                                               [tag],
+                                                               step_size=step_size)
+                
             # Compute the log probability of the full dataset
             if verbose == 2:
                 epoch_lps.append(self.log_probability(datas, inputs, masks, tags))
-            #     epoch_pbar.set_description("LP: {:.1f}".format(epoch_lps[-1]))
+                epoch_pbar.set_description("LP: {:.1f}".format(epoch_lps[-1]))
 
         return epoch_lps, inner_lps
-
+    
     def _fit_em(self, datas, inputs, masks, tags,
                 verbose=2,
                 num_iters=100,

@@ -555,7 +555,7 @@ class SLDS(object):
                                       tags,
                                       emission_optimizer,
                                       emission_optimizer_maxiter,
-                                      alpha):
+                                      step_size):
 
         # Compute necessary expectations either analytically or via samples
         continuous_samples = variational_posterior.sample_continuous_states()
@@ -569,7 +569,7 @@ class SLDS(object):
             curr_prms = copy.deepcopy(distn.params)
             if curr_prms == tuple(): continue
             distn.m_step(discrete_expectations, continuous_samples, inputs, xmasks, tags)
-            distn.params = convex_combination(curr_prms, distn.params, alpha)
+            distn.params = convex_combination(curr_prms, distn.params, step_size)
 
         kwargs = dict(expectations=discrete_expectations,
                       datas=continuous_samples,
@@ -591,7 +591,7 @@ class SLDS(object):
             # Otherwise, do an approximate m-step by sampling.
             curr_prms = copy.deepcopy(self.dynamics.params)
             self.dynamics.m_step(**kwargs)
-            self.dynamics.params = convex_combination(curr_prms, self.dynamics.params, alpha)
+            self.dynamics.params = convex_combination(curr_prms, self.dynamics.params, step_size)
 
         # Update emissions params. This is always approximate (at least for now).
         curr_prms = copy.deepcopy(self.emissions.params)
@@ -599,7 +599,7 @@ class SLDS(object):
                               datas, inputs, masks, tags,
                               optimizer=emission_optimizer,
                               maxiter=emission_optimizer_maxiter)
-        self.emissions.params = convex_combination(curr_prms, self.emissions.params, alpha)
+        self.emissions.params = convex_combination(curr_prms, self.emissions.params, step_size)
 
     def _laplace_em_elbo(self,
                          variational_posterior,
@@ -648,7 +648,7 @@ class SLDS(object):
                         continuous_maxiter=100,
                         emission_optimizer="lbfgs",
                         emission_optimizer_maxiter=100,
-                        alpha=0.5,
+                        step_size=0.5,
                         learning=True):
         """
         Fit an approximate posterior p(z, x | y) \approx q(z) q(x).
@@ -676,7 +676,7 @@ class SLDS(object):
             if learning:
                 self._fit_laplace_em_params_update(
                     variational_posterior, datas, inputs, masks, tags,
-                    emission_optimizer, emission_optimizer_maxiter, alpha)
+                    emission_optimizer, emission_optimizer_maxiter, step_size)
 
             elbos.append(self._laplace_em_elbo(
                 variational_posterior, datas, inputs, masks, tags))
