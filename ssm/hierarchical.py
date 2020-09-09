@@ -6,31 +6,31 @@ from ssm.observations import Observations, AutoRegressiveObservations
 
 class HierarchicalAutoRegressiveObservations(Observations):
     """
-        Hierarchical ARobservation model with Gaussian noise.
+    Hierarchical ARobservation model with Gaussian noise.
 
-            (x_t | z_t = k, u_t, tag=i)
-                ~ N(A_{i,k} x_{t-1} + b_{i,k} + V_{i,k} u_t, S_{i,k})
+        (x_t | z_t = k, u_t, tag=i)
+            ~ N(A_{i,k} x_{t-1} + b_{i,k} + V_{i,k} u_t, S_{i,k})
 
-        where S_k is a positive definite covariance matrix and tag
-        specifies which "group" this observation comes from.
+    where S_k is a positive definite covariance matrix and tag
+    specifies which "group" this observation comes from.
 
-        The parameters are fit via maximum likelihood estimation with
-        the hierarchical prior,
+    The parameters are fit via maximum likelihood estimation with
+    the hierarchical prior,
 
-        A_{i,k} ~ N(A_k, sigma^2 I)
+    A_{i,k} ~ N(A_k, sigma^2 I)
 
-        where A_k is the group-average dynamics matrix for state k, and
-        sigma^2 specifies how much the per-group parameters vary around
-        the group-average.
+    where A_k is the group-average dynamics matrix for state k, and
+    sigma^2 specifies how much the per-group parameters vary around
+    the group-average.
 
-        The same model applies to the b's and V's and S's, but the S's
-        are a bit different because they are covariance matrices.
-        Instead, update S_{ik} under a inverse Wishart prior,
+    The same model applies to the b's and V's and S's, but the S's
+    are a bit different because they are covariance matrices.
+    Instead, update S_{ik} under a inverse Wishart prior,
 
-         S_{i,k} ~ IW(S_k, nu)
+     S_{i,k} ~ IW(S_k, nu)
 
-        where nu specifies the degrees of freedom.
-        """
+    where nu specifies the degrees of freedom.
+    """
     def __init__(self, K, D, M=0, lags=1,
                  cond_variance_A=0.001,
                  cond_variance_V=0.001,

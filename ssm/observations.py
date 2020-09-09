@@ -1059,8 +1059,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
         # Check inputs
-        assert all([(np.isscalar(x) and x > 0) for x
-                    in [variance_A, variance_V, variance_b]])
+        assert all([(np.isscalar(x) and x > 0) for x in [variance_A, variance_V, variance_b]])
         assert mean_A.shape == (K, D, D * lags)
         assert mean_V.shape == (K, D, M)
         assert mean_b.shape == (K, D)
@@ -1098,14 +1097,11 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         self.Psi0 = mean_Sigma * extra_dof_Sigma
 
     def log_prior(self):
-        lp = np.sum(norm.logpdf(self.As, self.mean_A,
-                                np.sqrt(self.variance_A)))
+        lp = np.sum(norm.logpdf(self.As, self.mean_A, np.sqrt(self.variance_A)))
 
-        lp += np.sum(norm.logpdf(self.Vs, self.mean_V,
-                                 np.sqrt(self.variance_V)))
+        lp += np.sum(norm.logpdf(self.Vs, self.mean_V, np.sqrt(self.variance_V)))
 
-        lp += np.sum(norm.logpdf(self.bs, self.mean_b,
-                                 np.sqrt(self.variance_b)))
+        lp += np.sum(norm.logpdf(self.bs, self.mean_b, np.sqrt(self.variance_b)))
 
         for k in range(self.K):
             lp += invwishart.logpdf(
