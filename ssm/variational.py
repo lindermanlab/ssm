@@ -254,7 +254,7 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
     @ensure_variational_args_are_lists
     def __init__(self, model, datas,
                  inputs=None, masks=None, tags=None,
-                 initial_variance=1):
+                 initial_variance=0.0001):
 
         super(SLDSStructuredMeanFieldVariationalPosterior, self).\
             __init__(model, datas, masks, tags)
@@ -426,7 +426,7 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         for prms, (log_Z, Ex, smoothed_sigmas, ExxnT) in \
                 zip(self.continuous_state_params, continuous_expectations):
 
-            # Kalman smoother outputs the smoothed covariance matrices. Add 
+            # Kalman smoother outputs the smoothed covariance matrices. Add
             # back the mean to get E[x_t x_{t+1}^T]
             mumuT = np.swapaxes(Ex[:, None], 2,1) @ Ex[:, None]
             ExxT = smoothed_sigmas + mumuT

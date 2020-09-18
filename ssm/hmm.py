@@ -138,13 +138,13 @@ class HMM(object):
         self.observations.params = value[2]
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None):
+    def initialize(self, datas, inputs=None, masks=None, tags=None, **kwargs):
         """
         Initialize parameters given data.
         """
         self.init_state_distn.initialize(datas, inputs=inputs, masks=masks, tags=tags)
         self.transitions.initialize(datas, inputs=inputs, masks=masks, tags=tags)
-        self.observations.initialize(datas, inputs=inputs, masks=masks, tags=tags)
+        self.observations.initialize(datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
 
     def permute(self, perm):
         """
@@ -202,7 +202,7 @@ class HMM(object):
         dummy_data = self.observations.sample_x(0, np.empty(0,) + D)
         dtype = dummy_data.dtype
 
-        # Initialize the data array
+        # fit( the data array
         if prefix is None:
             # No prefix is given.  Sample the initial state as the prefix.
             pad = 1
@@ -427,7 +427,8 @@ class HMM(object):
     def _fit_em(self, datas, inputs, masks, tags, verbose = 2, num_iters=100, tolerance=0,
                 init_state_mstep_kwargs={},
                 transitions_mstep_kwargs={},
-                observations_mstep_kwargs={}):
+                observations_mstep_kwargs={},
+                **kwargs):
         """
         Fit the parameters with expectation maximization.
 
@@ -435,9 +436,9 @@ class HMM(object):
         M-step: analytical maximization of E_{p(z | x)} [log p(x, z; theta)].
         """
         lls  = [self.log_probability(datas, inputs, masks, tags)]
-        
+
         pbar = ssm_pbar(num_iters, verbose, "LP: {:.1f}", [lls[-1]])
-       
+
         for itr in pbar:
             # E step: compute expected latent states with current parameters
             expectations = [self.expected_states(data, input, mask, tag)
@@ -451,7 +452,7 @@ class HMM(object):
 
             # Store progress
             lls.append(self.log_prior() + sum([ll for (_, _, ll) in expectations]))
-            
+
             if verbose == 2:
               pbar.set_description("LP: {:.1f}".format(lls[-1]))
 
@@ -466,7 +467,7 @@ class HMM(object):
     @ensure_args_are_lists
     def fit(self, datas, inputs=None, masks=None, tags=None, verbose = 2,
             method="em", initialize=True, **kwargs):
-      
+
         _fitting_methods = \
             dict(sgd=partial(self._fit_sgd, "sgd"),
                  adam=partial(self._fit_sgd, "adam"),
@@ -480,7 +481,7 @@ class HMM(object):
                             format(method, _fitting_methods.keys()))
 
         if initialize:
-            self.initialize(datas, inputs=inputs, masks=masks, tags=tags)
+            self.initialize(datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
 
         if isinstance(self.transitions,
                       trans.ConstrainedStationaryTransitions):
@@ -793,6 +794,6 @@ class HSMM(HMM):
                             format(method, _fitting_methods.keys()))
 
         if initialize:
-            self.initialize(datas, inputs=inputs, masks=masks, tags=tags)
+            self.initialize(datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
 
         return _fitting_methods[method](datas, inputs=inputs, masks=masks, tags=tags, verbose = verbose, **kwargs)

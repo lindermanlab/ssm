@@ -158,7 +158,7 @@ class SLDS(object):
         self.emissions.params = value[3]
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, verbose = 2, num_iters=25):
+    def initialize(self, datas, inputs=None, masks=None, tags=None, verbose = 2, num_iters=25, **kwargs):
         # First initialize the observation model
         self.emissions.initialize(datas, inputs, masks, tags)
 
@@ -175,7 +175,7 @@ class SLDS(object):
                         transitions=copy.deepcopy(self.transitions),
                         observations=copy.deepcopy(self.dynamics))
         arhmm.fit(xs, inputs=inputs, masks=xmasks, tags=tags, verbose = verbose,
-                  method="em", num_iters=num_iters)
+                  method="em", num_iters=num_iters, **kwargs)
 
         self.init_state_distn = copy.deepcopy(arhmm.init_state_distn)
         self.transitions = copy.deepcopy(arhmm.transitions)
@@ -580,7 +580,7 @@ class SLDS(object):
         exact_m_step_dynamics = [
            obs.AutoRegressiveObservations,
            obs.AutoRegressiveObservationsNoInput,
-           obs.AutoRegressiveDiagonalNoiseObservations, 
+           obs.AutoRegressiveDiagonalNoiseObservations,
         ]
         if type(self.dynamics) in exact_m_step_dynamics and self.dynamics.lags == 1:
             # In this case, we can do an exact M-step on the dynamics by passing
@@ -658,7 +658,7 @@ class SLDS(object):
         Assume q(z) is a chain-structured discrete graphical model.
         """
         elbos = [self._laplace_em_elbo(variational_posterior, datas, inputs, masks, tags)]
-       
+
         pbar = ssm_pbar(num_iters, verbose, "ELBO: {:.1f}", [elbos[-1]])
 
         for itr in pbar:

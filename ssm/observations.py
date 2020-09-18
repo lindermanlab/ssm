@@ -15,6 +15,8 @@ from ssm.cstats import robust_ar_statistics
 from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
 import ssm.stats as stats
 
+from extensions.mp_srslds.initializations import observations_init_func
+
 class Observations(object):
     # K = number of discrete states
     # D = number of observed dimensions
@@ -858,26 +860,41 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         super(AutoRegressiveObservations, self).permute(perm)
         self._sqrt_Sigmas = self._sqrt_Sigmas[perm]
 
+    # @ensure_args_are_lists
+    # def initialize(self, datas, inputs=None, masks=None, tags=None, localize=True):
+    #     # Sample time bins for each discrete state.
+    #     # Use the data to cluster the time bins if specified.
+    #     K, D, M, lags = self.K, self.D, self.M, self.lags
+    #     Ts = [data.shape[0] for data in datas]
+    #     if localize:
+    #         from sklearn.cluster import KMeans
+    #         km = KMeans(self.K)
+    #         km.fit(np.vstack(datas))
+    #         zs = np.split(km.labels_, np.cumsum(Ts)[:-1])
+    #     else:
+    #         zs = [npr.choice(self.K, size=T) for T in Ts]
+    #
+    #     # Make a one-hot encoding of z and treat it as HMM expectations
+    #     Ezs = [one_hot(z, K) for z in zs]
+    #     expectations = [(Ez, None, None) for Ez in Ezs]
+    #
+    #     # # Set the variances all at once to use the setter
+    #     self.m_step(expectations, datas, inputs, masks, tags)
+    #
+
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, localize=True):
-        # Sample time bins for each discrete state.
-        # Use the data to cluster the time bins if specified.
-        K, D, M, lags = self.K, self.D, self.M, self.lags
-        Ts = [data.shape[0] for data in datas]
-        if localize:
-            from sklearn.cluster import KMeans
-            km = KMeans(self.K)
-            km.fit(np.vstack(datas))
-            zs = np.split(km.labels_, np.cumsum(Ts)[:-1])
-        else:
-            zs = [npr.choice(self.K, size=T) for T in Ts]
+    def initialize(self, datas, inputs=None, masks=None, tags=None, **kwargs):
+
+        #Get initial discrete states
+        zs=observations_init_func(self,datas,**kwargs)
 
         # Make a one-hot encoding of z and treat it as HMM expectations
-        Ezs = [one_hot(z, K) for z in zs]
+        Ezs = [one_hot(z, self.K) for z in zs]
         expectations = [(Ez, None, None) for Ez in Ezs]
 
         # # Set the variances all at once to use the setter
         self.m_step(expectations, datas, inputs, masks, tags)
+
 
     def log_likelihoods(self, data, input, mask, tag=None):
         assert np.all(mask), "Cannot compute likelihood of autoregressive obsevations with missing data."
@@ -1044,7 +1061,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 Vs[k] = Vs[i] + 0.01 * npr.randn(*Vs[i].shape)
                 bs[k] = bs[i] + 0.01 * npr.randn(*bs[i].shape)
                 Sigmas[k] = Sigmas[i]
-                
+
         # Update parameters via their setter
         self.As = As
         self.Vs = Vs
