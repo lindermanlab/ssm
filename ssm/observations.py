@@ -1044,7 +1044,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 Vs[k] = Vs[i] + 0.01 * npr.randn(*Vs[i].shape)
                 bs[k] = bs[i] + 0.01 * npr.randn(*bs[i].shape)
                 Sigmas[k] = Sigmas[i]
-                
+
         # Update parameters via their setter
         self.As = As
         self.Vs = Vs

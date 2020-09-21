@@ -10,7 +10,7 @@ from ssm.util import ensure_args_are_lists, \
 from ssm.preprocessing import interpolate_data, pca_with_imputation
 from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
 from ssm.stats import independent_studentst_logpdf, bernoulli_logpdf
-
+from ssm.regression import fit_linear_regression
 
 # Observation models for SLDS
 class Emissions(object):
@@ -148,9 +148,10 @@ class _LinearEmissions(Emissions):
         y = Cx + d + noise; C orthogonal.
         xhat = (C^T C)^{-1} C^T (y-d)
         """
-        assert self.single_subspace, "Can only invert with a single emission model"
-
-        C, F, d = self.Cs[0], self.Fs[0], self.ds[0]
+        # Invert with the average emission parameters
+        C = np.mean(self.Cs, axis=0)
+        F = np.mean(self.Fs, axis=0)
+        d = np.mean(self.ds, axis=0)
         C_pseudoinv = np.linalg.solve(C.T.dot(C), C.T).T
 
         # Account for the bias
@@ -186,11 +187,21 @@ class _LinearEmissions(Emissions):
         # Compute residual after accounting for input
         resids = [data - np.dot(input, self.Fs[0].T) for data, input in zip(datas, inputs)]
 
-        # Run PCA to get a linear embedding of the data
-        pca, xs, ll = pca_with_imputation(self.D, resids, masks, num_iters=num_iters)
+        # Run PCA to get a linear embedding of the data with the maximum effective dimension
+        pca, xs, ll = pca_with_imputation(min(self.D * Keff, self.N),
+                                          resids, masks, num_iters=num_iters)
 
-        self.Cs = np.tile(pca.components_.T[None, :, :], (Keff, 1, 1))
-        self.ds = np.tile(pca.mean_[None, :], (Keff, 1))
+        # Assign each state a random projection of these dimensions
+        Cs, ds = [], []
+        for k in range(Keff):
+            weights = npr.randn(self.D, self.D * Keff)
+            weights = np.linalg.svd(weights, full_matrices=False)[2]
+            Cs.append((weights @ pca.components_).T)
+            ds.append(pca.mean_)
+
+        # Find the components with the largest power
+        self.Cs = np.array(Cs)
+        self.ds = np.array(ds)
 
         return pca
 
@@ -370,17 +381,17 @@ class _GaussianEmissionsMixin(object):
 
     def smooth(self, expected_states, variational_mean, data, input=None, mask=None, tag=None):
         mus = self.forward(variational_mean, input, tag)
-        return mus[:, 0, :] if self.single_subspace else np.sum(mus * expected_states[:,:,None], axis=1)
+        yhat = mus[:, 0, :] if self.single_subspace else np.sum(mus * expected_states[:,:,None], axis=1)
+        return yhat
 
 
 class GaussianEmissions(_GaussianEmissionsMixin, _LinearEmissions):
 
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
-        # datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
-        # pca = self._initialize_with_pca(datas, inputs=inputs, masks=masks, tags=tags)
-        # self.inv_etas[:,...] = np.log(pca.noise_variance_)
-        pass
+        datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
+        pca = self._initialize_with_pca(datas, inputs=inputs, masks=masks, tags=tags)
+        self.inv_etas[:,...] = np.log(pca.noise_variance_)
 
     def neg_hessian_log_emissions_prob(self, data, input, mask, tag, x, Ez):
         # Return (T, D, D) array of blocks for the diagonal of the Hessian
@@ -398,26 +409,36 @@ class GaussianEmissions(_GaussianEmissionsMixin, _LinearEmissions):
                datas, inputs, masks, tags,
                optimizer="bfgs", maxiter=100, **kwargs):
 
+        Xs = [np.column_stack([x, u]) for x, u in
+              zip(continuous_expectations, inputs)]
+        ys = datas
+        ws = [Ez for (Ez, _, _) in discrete_expectations]
+
         if self.single_subspace and all([np.all(mask) for mask in masks]):
             # Return exact m-step updates for C, F, d, and inv_etas
-            # stack across all datas
-            x = np.vstack(continuous_expectations)
-            u = np.vstack(inputs)
-            y = np.vstack(datas)
-            T, D = np.shape(x)
-            xb = np.hstack((np.ones((T,1)),x,u)) # design matrix
-            params = np.linalg.lstsq(xb.T@xb, xb.T@y, rcond=None)[0].T
-            self.ds = params[:,0].reshape((1,self.N))
-            self.Cs = params[:,1:D+1].reshape((1,self.N,self.D))
-            if self.M > 0:
-                self.Fs = params[:,D+1:].reshape((1,self.N,self.M))
-            mu = np.dot(xb, params.T)
-            Sigma = (y-mu).T@(y-mu) / T
-            self.inv_etas = np.log(np.diag(Sigma)).reshape((1,self.N))
+            CF, d, Sigma = fit_linear_regression(
+                Xs, ys,
+                prior_ExxT=1e-4 * np.eye(self.D + self.M + 1),
+                prior_ExyT=np.zeros((self.D + self.M + 1, self.N)))
+            self.Cs = CF[None, :, :self.D]
+            self.Fs = CF[None, :, self.D:]
+            self.ds = d[None, :]
+            self.inv_etas = np.log(np.diag(Sigma))[None, :]
         else:
-            Emissions.m_step(self, discrete_expectations, continuous_expectations,
-                             datas, inputs, masks, tags,
-                             optimizer=optimizer, maxiter=maxiter, **kwargs)
+            Cs, Fs, ds, inv_etas = [], [], [], []
+            for k in range(self.K):
+                CF, d, Sigma = fit_linear_regression(
+                    Xs, ys, weights=[w[:, k] for w in ws],
+                    prior_ExxT=1e-4 * np.eye(self.D + self.M + 1),
+                    prior_ExyT=np.zeros((self.D + self.M + 1, self.N)))
+                Cs.append(CF[:, :self.D])
+                Fs.append(CF[:, self.D:])
+                ds.append(d)
+                inv_etas.append(np.log(np.diag(Sigma)))
+            self.Cs = np.array(Cs)
+            self.Fs = np.array(Fs)
+            self.ds = np.array(ds)
+            self.inv_etas = np.array(inv_etas)
 
 
 class GaussianOrthogonalEmissions(_GaussianEmissionsMixin, _OrthogonalLinearEmissions):

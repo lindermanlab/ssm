@@ -75,7 +75,7 @@ def fit_linear_regression(Xs, ys,
     Returns
     -------
     W, b, Sigmas: when fit_intercept=True.
-    W, b: when fit_intercept=False.
+    W, Sigmas: when fit_intercept=False.
     """
     Xs = Xs if isinstance(Xs, (list, tuple)) else [Xs]
     ys = ys if isinstance(ys, (list, tuple)) else [ys]
@@ -132,7 +132,7 @@ def fit_linear_regression(Xs, ys,
 
     # Compute expected error for covariance matrix estimate
     # E[(y - Ax)(y - Ax)^T]
-    expected_err = EyyT - 2 * W_full @ ExyT + W_full @ ExxT @ W_full.T
+    expected_err = EyyT - W_full @ ExyT - ExyT.T @ W_full.T + W_full @ ExxT @ W_full.T
     nu = nu0 + weight_sum
 
     # Get MAP estimate of posterior covariance
@@ -477,7 +477,7 @@ def generalized_newton_studentst_dof(E_tau, E_logtau, nu0=2, a_nu=3, b_nu=3/2,
 
     R(nu) = (a_nu - 1) * np.log(nu) - b_nu * nu
     R'(nu) = (a_nu - 1) / nu - b_nu
-    R''(nu) = (1 - a_nu) / nu**2 
+    R''(nu) = (1 - a_nu) / nu**2
     """
     assert a_nu > 1, "Gamma prior nu ~ Ga(a_nu, b_nu) must be log concave; i.e. a_nu must be > 1."
     delbo = lambda nu: 1/2 * (1 + np.log(nu/2)) - 1/2 * digamma(nu/2) \

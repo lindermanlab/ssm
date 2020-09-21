@@ -249,7 +249,7 @@ class SLDS(object):
     @ensure_slds_args_not_none
     def expected_states(self, variational_mean, data, input=None, mask=None, tag=None):
         x_mask = np.ones_like(variational_mean, dtype=bool)
-        pi0 = self.init_state_distn.log_initial_state_distn
+        pi0 = self.init_state_distn.initial_state_distn
         Ps = self.transitions.transition_matrices(variational_mean, input, x_mask, tag)
         log_likes = self.dynamics.log_likelihoods(variational_mean, input, x_mask, tag)
         log_likes += self.emissions.log_likelihoods(data, input, mask, tag, variational_mean)
@@ -356,7 +356,7 @@ class SLDS(object):
         else:
             variational_posterior.params = params
 
-        return elbos
+        return np.array(elbos)
 
     def _fit_laplace_em_discrete_state_update(
         self, variational_posterior, datas,
@@ -580,7 +580,7 @@ class SLDS(object):
         exact_m_step_dynamics = [
            obs.AutoRegressiveObservations,
            obs.AutoRegressiveObservationsNoInput,
-           obs.AutoRegressiveDiagonalNoiseObservations, 
+           obs.AutoRegressiveDiagonalNoiseObservations,
         ]
         if type(self.dynamics) in exact_m_step_dynamics and self.dynamics.lags == 1:
             # In this case, we can do an exact M-step on the dynamics by passing
@@ -658,7 +658,7 @@ class SLDS(object):
         Assume q(z) is a chain-structured discrete graphical model.
         """
         elbos = [self._laplace_em_elbo(variational_posterior, datas, inputs, masks, tags)]
-       
+
         pbar = ssm_pbar(num_iters, verbose, "ELBO: {:.1f}", [elbos[-1]])
 
         for itr in pbar:
@@ -683,7 +683,7 @@ class SLDS(object):
             if verbose == 2:
               pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
 
-        return elbos
+        return np.array(elbos)
 
     def _make_variational_posterior(self, variational_posterior, datas, inputs, masks, tags, method, **variational_posterior_kwargs):
         # Initialize the variational posterior

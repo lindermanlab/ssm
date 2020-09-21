@@ -341,13 +341,13 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         h_dyn_2 = np.zeros((T - 1, D))
 
         # Set the posterior mean based on the emission model, if possible.
-        if self.model.emissions.single_subspace and self.model.emissions.N >= D:
+        try:
             h_obs = (1.0 / self.initial_variance) * self.model.emissions. \
                 invert(data, input=input, mask=mask, tag=tag)
-        else:
-            warn("We can only initialize the continuous states if the emissions lie in a "
-                 "single subspace and are of higher dimension than the latent states."
-                 "Defaulting to a random initialization instead.")
+        except:
+            warn("We can only initialize the continuous states if the emissions support "
+                 "\"inverting\" the observations by mapping them to an estimate of the "
+                 "latent states. Defaulting to a random initialization instead.")
             h_obs = (1.0 / self.initial_variance) * np.random.randn(data.shape[0], self.D)
 
         # Initialize the posterior variance to self.initial_variance * I
@@ -426,7 +426,7 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         for prms, (log_Z, Ex, smoothed_sigmas, ExxnT) in \
                 zip(self.continuous_state_params, continuous_expectations):
 
-            # Kalman smoother outputs the smoothed covariance matrices. Add 
+            # Kalman smoother outputs the smoothed covariance matrices. Add
             # back the mean to get E[x_t x_{t+1}^T]
             mumuT = np.swapaxes(Ex[:, None], 2,1) @ Ex[:, None]
             ExxT = smoothed_sigmas + mumuT
