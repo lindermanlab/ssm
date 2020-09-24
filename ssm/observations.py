@@ -15,7 +15,7 @@ from ssm.cstats import robust_ar_statistics
 from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
 import ssm.stats as stats
 
-# from extensions.mp_srslds.initializations import observations_init_func
+from extensions.mp_srslds.initializations import observations_init_func
 
 class Observations(object):
     # K = number of discrete states
