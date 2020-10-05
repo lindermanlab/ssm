@@ -708,11 +708,16 @@ class PoissonEmissions(_PoissonEmissionsMixin, _LinearEmissions):
             return -1 * hess
 
         elif self.link_name == "softplus":
+            # For stability, we avoid evaluating terms that look like exp(x)**2.
+            # Instead, we rearrange things so that all terms with exp(x)**2 are of the form
+            # (exp(x) / exp(x)**2) which evaluates to sigmoid(x)sigmoid(-x) and avoids overflow.
             lambdas = self.mean(self.forward(x, input, tag))[:, 0, :] / self.bin_size
-            expterms = np.exp(-np.dot(x,self.Cs[0].T)-np.dot(input,self.Fs[0].T)-self.ds[0])
-            diags = (data / lambdas * (expterms - 1.0 / lambdas) - expterms * self.bin_size) / (1.0+expterms)**2
+            linear_terms = -np.dot(x,self.Cs[0].T)-np.dot(input,self.Fs[0].T)-self.ds[0]
+            expterms = np.exp(linear_terms)
+            outer = logistic(linear_terms) * logistic(-linear_terms)
+            diags = outer * (data / lambdas - data / (lambdas**2 * expterms) - self.bin_size)
             hess = np.einsum('tn, ni, nj ->tij', diags, self.Cs[0], self.Cs[0])
-            return -1 * hess
+            return -hess
 
         else:
             raise Exception("No Hessian calculation for link: {}".format(self.link_name))
@@ -743,11 +748,15 @@ class PoissonOrthogonalEmissions(_PoissonEmissionsMixin, _OrthogonalLinearEmissi
             return -1 * hess
 
         elif self.link_name == "softplus":
+            # For stability, we avoid evaluating terms that look like exp(x)**2.
+            # See comment in PoissoinEmissions.
             lambdas = self.mean(self.forward(x, input, tag))[:, 0, :] / self.bin_size
-            expterms = np.exp(-np.dot(x,self.Cs[0].T)-np.dot(input,self.Fs[0].T)-self.ds[0])
-            diags = (data / lambdas * (expterms - 1.0 / lambdas) - expterms * self.bin_size) / (1.0+expterms)**2
+            linear_terms = -np.dot(x,self.Cs[0].T)-np.dot(input,self.Fs[0].T)-self.ds[0]
+            expterms = np.exp(linear_terms)
+            outer = logistic(linear_terms) * logistic(-linear_terms)
+            diags = outer * (data / lambdas - data / (lambdas**2 * expterms) - self.bin_size)
             hess = np.einsum('tn, ni, nj ->tij', diags, self.Cs[0], self.Cs[0])
-            return -1 * hess
+            return -hess
 
         else:
             raise Exception("No Hessian calculation for link: {}".format(self.link_name))
