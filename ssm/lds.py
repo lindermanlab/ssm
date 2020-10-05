@@ -158,7 +158,7 @@ class SLDS(object):
         self.emissions.params = value[3]
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, verbose = 2, num_iters=25, **kwargs):
+    def initialize(self, datas, inputs=None, masks=None, tags=None, verbose = 0, num_iters=50, **kwargs):
         # First initialize the observation model
         self.emissions.initialize(datas, inputs, masks, tags)
 
@@ -167,19 +167,40 @@ class SLDS(object):
               for data, input, mask, tag in zip(datas, inputs, masks, tags)]
         xmasks = [np.ones_like(x, dtype=bool) for x in xs]
 
-        # Now run a few iterations of EM on a ARHMM with the variational mean
-        if verbose > 0:
-          print("Initializing with an ARHMM using {} steps of EM.".format(num_iters))
-        arhmm = hmm.HMM(self.K, self.D, M=self.M,
-                        init_state_distn=copy.deepcopy(self.init_state_distn),
-                        transitions=copy.deepcopy(self.transitions),
-                        observations=copy.deepcopy(self.dynamics))
-        arhmm.fit(xs, inputs=inputs, masks=xmasks, tags=tags, verbose = verbose,
-                  method="em", num_iters=num_iters, **kwargs)
+        if 'num_init_restarts' in kwargs:
+            num_init_restarts = kwargs['num_init_restarts']
+        else:
+            num_init_restarts = 1
 
-        self.init_state_distn = copy.deepcopy(arhmm.init_state_distn)
-        self.transitions = copy.deepcopy(arhmm.transitions)
-        self.dynamics = copy.deepcopy(arhmm.observations)
+
+        pbar  = ssm_pbar(num_init_restarts, 2, "ARHMM Initialization restarts", [''])
+
+        best_lp=-np.inf
+        for i in pbar:#range(num_init_restarts):
+        # Now run a few iterations of EM on a ARHMM with the variational mean
+            # npr.seed()
+
+            if verbose > 0:
+              print("Initializing with an ARHMM using {} steps of EM.".format(num_iters))
+            arhmm = hmm.HMM(self.K, self.D, M=self.M,
+                            init_state_distn=copy.deepcopy(self.init_state_distn),
+                            transitions=copy.deepcopy(self.transitions),
+                            observations=copy.deepcopy(self.dynamics))
+            arhmm.fit(xs, inputs=inputs, masks=xmasks, tags=tags, verbose = verbose,
+                      method="em", num_iters=num_iters, **kwargs)
+
+            current_lp = arhmm.log_probability(xs)
+            if current_lp > best_lp:
+                best_lp =  copy.deepcopy(current_lp)
+                best_arhmm = copy.deepcopy(arhmm)
+
+            # print(current_lp)
+            # print(best_arhmm.log_probability(xs))
+            # print(best_lp)
+
+        self.init_state_distn = copy.deepcopy(best_arhmm.init_state_distn)
+        self.transitions = copy.deepcopy(best_arhmm.transitions)
+        self.dynamics = copy.deepcopy(best_arhmm.observations)
 
     def permute(self, perm):
         """
@@ -643,7 +664,7 @@ class SLDS(object):
                         verbose = 2,
                         num_iters=100,
                         num_samples=1,
-                        continuous_optimizer="lbfgs",
+                        continuous_optimizer="newton",
                         continuous_tolerance=1e-4,
                         continuous_maxiter=100,
                         emission_optimizer="lbfgs",

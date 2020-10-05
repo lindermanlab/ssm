@@ -28,9 +28,9 @@ def observations_init_func(self,datas,**kwargs):
     if 'init' in kwargs:
         init = kwargs['init']
     else:
-        init = 'kmeans' #Default
+        init = 'rand' #Default
 
-    print('initialization method is:', init)
+    # print('initialization method is:', init)
 
 
     # Sample time bins for each discrete state.
@@ -48,8 +48,8 @@ def observations_init_func(self,datas,**kwargs):
             t_gap = kwargs['t_gap']
         else:
             t_gap = int(np.ceil(t_win/3)) #default
-        print('t_win:', t_win)
-        print('t_gap:', t_gap)
+        # print('t_win:', t_win)
+        # print('t_gap:', t_gap)
 
     #KMeans clustering
     if init=='kmeans':

@@ -254,7 +254,7 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
     @ensure_variational_args_are_lists
     def __init__(self, model, datas,
                  inputs=None, masks=None, tags=None,
-                 initial_variance=0.0001):
+                 initial_variance=0.01):
 
         super(SLDSStructuredMeanFieldVariationalPosterior, self).\
             __init__(model, datas, masks, tags)
