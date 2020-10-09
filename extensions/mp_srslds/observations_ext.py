@@ -33,19 +33,19 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
     The parameters are fit via maximum likelihood estimation.
     """
     def __init__(self, K, D, M=0, lags=1,
-                 prior_precicion_A=1,
-                 prior_precicion_b=1e-8,
-                 prior_precicion_V=1e-8,
+                 prior_precision_A=100,
+                 prior_precision_b=1e-8,
+                 prior_precision_V=1e-8,
                  block_size=(1,1),
-                 sparsity=0.1,
-                 start_iter=25):
+                 sparsity=0.5,
+                 start_iter=0):
         assert lags == 1, "Sparse AR model is only implemented for lags==1"
 
         super(SparseAutoRegressiveObservations, self).\
             __init__(K, D, M, lags=lags,
-                     l2_penalty_A=prior_precicion_A,
-                     l2_penalty_b=prior_precicion_b,
-                     l2_penalty_V=prior_precicion_V)
+                     l2_penalty_A=prior_precision_A,
+                     l2_penalty_b=prior_precision_b,
+                     l2_penalty_V=prior_precision_V)
 
         # Initialize the dynamics and the noise covariances
         self._As = .80 * np.array([
@@ -69,9 +69,9 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
         self.sigmasq_inits = np.ones((K, ))
         self.sigmasqs = np.ones((K, D))
 
-        self.l2_penalty_A = prior_precicion_A
-        self.l2_penalty_b = prior_precicion_b
-        self.l2_penalty_V = prior_precicion_V
+        self.l2_penalty_A = prior_precision_A
+        self.l2_penalty_b = prior_precision_b
+        self.l2_penalty_V = prior_precision_V
 
         self.iter_count = -1
         self.start_iter = start_iter
@@ -197,7 +197,8 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
                 W[i] = np.linalg.solve(J, h).T
 
         # Solve for the optimal variance
-        sqerr = EyyT - 2 * W @ ExyT + W @ ExxT @ W.T
+        EWxyT =  W @ ExyT
+        sqerr = EyyT - EWxyT.T - EWxyT + W @ ExxT @ W.T
         sigmasq = np.diag(sqerr) / En ### MSIG
         # sigmasq = np.sum(np.diag(sqerr)) / (En * D)
 
