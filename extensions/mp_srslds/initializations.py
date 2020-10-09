@@ -23,7 +23,7 @@ def sse(yact,ypred):
     return np.sum((yact-ypred)**2)
 
 
-def observations_init_func(self,datas,**kwargs):
+def observations_init_func_extra(self,datas,**kwargs):
 
     if 'init' in kwargs:
         init = kwargs['init']

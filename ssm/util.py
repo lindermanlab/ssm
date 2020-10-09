@@ -169,18 +169,18 @@ def ensure_slds_args_not_none(f):
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return f(self, variational_mean, data, input=input, mask=mask, tag=tag, **kwargs)
     return wrapper
-  
+
 def ssm_pbar(num_iters, verbose, description, prob):
     '''Return either progress bar or regular list for iterating. Inputs are:
-  
+
       num_iters (int)
       verbose (int)     - if == 2, return trange object, else returns list
       description (str) - description for progress bar
       prob (float)      - values to initialize description fields at
-  
+
     '''
     if verbose == 2:
-        pbar = trange(num_iters)	          
+        pbar = trange(num_iters)
         pbar.set_description(description.format(*prob))
     else:
         pbar = range(num_iters)
@@ -276,3 +276,32 @@ def trace_product(A, B):
     # We'll take the trace along the last two dimensions.
     BT = np.swapaxes(B, -1, -2)
     return np.sum(A*BT, axis=(-1, -2))
+
+
+def observations_init_func(self,datas,**kwargs):
+
+    if 'init' in kwargs:
+        init = kwargs['init']
+    else:
+        init = 'rand' #Default
+
+    # Sample time bins for each discrete state.
+    # Use the data to cluster the time bins if specified.
+    K, D, M, lags = self.K, self.D, self.M, self.lags
+    Ts = [data.shape[0] for data in datas]
+
+    #KMeans clustering
+    if init=='kmeans':
+        km = KMeans(self.K)
+        km.fit(np.vstack(datas))
+        zs = np.split(km.labels_, np.cumsum(Ts)[:-1])
+
+    #Random assignment
+    elif init=='rand' or init =='random': #Random
+        zs = [npr.choice(self.K, size=T) for T in Ts]
+
+    else:
+        print('Not an accepted initialization type')
+
+
+    return zs

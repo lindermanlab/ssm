@@ -167,19 +167,19 @@ class SLDS(object):
               for data, input, mask, tag in zip(datas, inputs, masks, tags)]
         xmasks = [np.ones_like(x, dtype=bool) for x in xs]
 
+        #Number of times to run the arhmm initialization (we'll use the one with the highest log probability as the initialization)
         if 'num_init_restarts' in kwargs:
             num_init_restarts = kwargs['num_init_restarts']
         else:
             num_init_restarts = 1
 
-
         pbar  = ssm_pbar(num_init_restarts, 2, "ARHMM Initialization restarts", [''])
 
+        #Loop through initialization restarts
         best_lp=-np.inf
         for i in pbar:#range(num_init_restarts):
-        # Now run a few iterations of EM on a ARHMM with the variational mean
-            # npr.seed()
 
+        # Now run a few iterations of EM on a ARHMM with the variational mean
             if verbose > 0:
               print("Initializing with an ARHMM using {} steps of EM.".format(num_iters))
             arhmm = hmm.HMM(self.K, self.D, M=self.M,
@@ -189,14 +189,11 @@ class SLDS(object):
             arhmm.fit(xs, inputs=inputs, masks=xmasks, tags=tags, verbose = verbose,
                       method="em", num_iters=num_iters, **kwargs)
 
+            #Keep track of the arhmm that led to the highest log probability
             current_lp = arhmm.log_probability(xs)
             if current_lp > best_lp:
                 best_lp =  copy.deepcopy(current_lp)
                 best_arhmm = copy.deepcopy(arhmm)
-
-            # print(current_lp)
-            # print(best_arhmm.log_probability(xs))
-            # print(best_lp)
 
         self.init_state_distn = copy.deepcopy(best_arhmm.init_state_distn)
         self.transitions = copy.deepcopy(best_arhmm.transitions)
@@ -247,7 +244,7 @@ class SLDS(object):
             zhist, xhist, yhist = prefix
             pad = len(zhist)
             assert zhist.dtype == int and zhist.min() >= 0 and zhist.max() < K
-            assert xhist.shape == (pad, D)
+            # assert xhist.shape == (pad, D)
             assert yhist.shape == (pad, N)
 
             z = np.concatenate((zhist, np.zeros(T, dtype=int)))
