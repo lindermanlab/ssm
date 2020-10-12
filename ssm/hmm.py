@@ -138,13 +138,13 @@ class HMM(object):
         self.observations.params = value[2]
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, **kwargs):
+    def initialize(self, datas, inputs=None, masks=None, tags=None, init_method="random"):
         """
         Initialize parameters given data.
         """
         self.init_state_distn.initialize(datas, inputs=inputs, masks=masks, tags=tags)
         self.transitions.initialize(datas, inputs=inputs, masks=masks, tags=tags)
-        self.observations.initialize(datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
+        self.observations.initialize(datas, inputs=inputs, masks=masks, tags=tags, init_method=init_method)
 
     def permute(self, perm):
         """
@@ -414,7 +414,7 @@ class HMM(object):
         step = dict(sgd=sgd_step, rmsprop=rmsprop_step, adam=adam_step)[optimizer]
         state = None
         for itr in pbar:
-            self.params, val, g, state = step(value_and_grad(_objective), self.params, itr, state, **kwargs)
+            self.params, val, _, state = step(value_and_grad(_objective), self.params, itr, state, **kwargs)
             epoch = itr // M
             m = itr % M
             lls.append(-val * T)
@@ -465,8 +465,11 @@ class HMM(object):
         return lls
 
     @ensure_args_are_lists
-    def fit(self, datas, inputs=None, masks=None, tags=None, verbose = 2,
-            method="em", initialize=True, **kwargs):
+    def fit(self, datas, inputs=None, masks=None, tags=None,
+            verbose=2, method="em",
+            initialize=True,
+            init_method="random",
+            **kwargs):
 
         _fitting_methods = \
             dict(sgd=partial(self._fit_sgd, "sgd"),
@@ -481,15 +484,24 @@ class HMM(object):
                             format(method, _fitting_methods.keys()))
 
         if initialize:
-            self.initialize(datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
+            self.initialize(datas,
+                            inputs=inputs,
+                            masks=masks,
+                            tags=tags,
+                            init_method=init_method)
 
         if isinstance(self.transitions,
                       trans.ConstrainedStationaryTransitions):
             if method != "em":
-                raise Exception("Only EM is implemented "
-                                "for Constrained transitions.")
+                raise Exception("Only EM is implemented for constrained transitions.")
+
        # print(verbose)
-        return _fitting_methods[method](datas, inputs=inputs, masks=masks, tags=tags, verbose = verbose, **kwargs)
+        return _fitting_methods[method](datas,
+                                        inputs=inputs,
+                                        masks=masks,
+                                        tags=tags,
+                                        verbose=verbose,
+                                        **kwargs)
 
 
 class HSMM(HMM):

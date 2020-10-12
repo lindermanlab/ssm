@@ -116,42 +116,6 @@ class _CompoundLinearEmissions(Emissions):
                                               for p,n in zip(pcas, self.N_vec)])
         return pca
 
-    # @ensure_args_are_lists
-    # def _initialize_with_pca(self, datas, inputs=None, masks=None, tags=None, num_iters=20):
-    #     for data in datas:
-    #         assert data.shape[1] == self.N
-    #
-    #     N_offsets = np.cumsum(self.N_vec)[:-1]
-    #     pcas = []
-    #
-    #     split_datas = list(zip(*[np.split(data, N_offsets, axis=1) for data in datas]))
-    #     split_masks = list(zip(*[np.split(mask, N_offsets, axis=1) for mask in masks]))
-    #     assert len(split_masks) == len(split_datas) == self.P
-    #
-    #     for em, dps, mps in zip(self.emissions_models, split_datas, split_masks):
-    #         pcas.append(em._initialize_with_pca(dps, inputs, mps, tags))
-    #
-    #     self.pcas=pcas
-    #     # Combine the PCA objects
-    #     from sklearn.decomposition import FactorAnalysis
-    #     pca = FactorAnalysis(self.D)
-    #     Cs_tmp=[]
-    #     for fa in pcas:
-    #         U, _, _ = np.linalg.svd(fa.components_.T, full_matrices=False)
-    #         Cs_tmp.append(U)
-    #     # U, S, VT = np.linalg.svd(C_temp, full_matrices=False)
-    #     # xhat = (x @ VT.T) * S
-    #
-    #     # self.Cs = np.tile(U[None, :, :], (Keff, 1, 1))
-    #
-    #     pca.components_ = block_diag(*[C for C in Cs_tmp])
-    #     pca.mean_ = np.concatenate([p.mean_ for p in pcas])
-    #     # Not super pleased with this, but it should work...
-    #     pca.noise_variance_ = np.concatenate([p.noise_variance_ * np.ones(n)
-    #                                           for p,n in zip(pcas, self.N_vec)])
-    #     return pca
-
-
 
 class _CompoundOrthogonalLinearEmissions(Emissions):
     def __init__(self, N, K, D, M=0, single_subspace=True,
@@ -259,153 +223,6 @@ class _CompoundOrthogonalLinearEmissions(Emissions):
         return pca
 
 
-    # @ensure_args_are_lists
-    # def _initialize_with_pca(self, datas, inputs=None, masks=None, tags=None, num_iters=20):
-    #     for data in datas:
-    #         assert data.shape[1] == self.N
-    #
-    #     N_offsets = np.cumsum(self.N_vec)[:-1]
-    #     pcas = []
-    #
-    #     split_datas = list(zip(*[np.split(data, N_offsets, axis=1) for data in datas]))
-    #     split_masks = list(zip(*[np.split(mask, N_offsets, axis=1) for mask in masks]))
-    #     assert len(split_masks) == len(split_datas) == self.P
-    #
-    #     for em, dps, mps in zip(self.emissions_models, split_datas, split_masks):
-    #         pcas.append(em._initialize_with_pca(dps, inputs, mps, tags))
-    #
-    #     self.pcas=pcas
-    #     # Combine the PCA objects
-    #     from sklearn.decomposition import FactorAnalysis
-    #     pca = FactorAnalysis(self.D)
-    #     Cs_tmp=[]
-    #     for fa in pcas:
-    #         U, _, _ = np.linalg.svd(fa.components_.T, full_matrices=False)
-    #         Cs_tmp.append(U)
-    #     # U, S, VT = np.linalg.svd(C_temp, full_matrices=False)
-    #     # xhat = (x @ VT.T) * S
-    #
-    #     # self.Cs = np.tile(U[None, :, :], (Keff, 1, 1))
-    #
-    #     pca.components_ = block_diag(*[C for C in Cs_tmp])
-    #     pca.mean_ = np.concatenate([p.mean_ for p in pcas])
-    #     # Not super pleased with this, but it should work...
-    #     pca.noise_variance_ = np.concatenate([p.noise_variance_ * np.ones(n)
-    #                                           for p,n in zip(pcas, self.N_vec)])
-    #     return pca
-
-
-
-
-
-#
-# class _CompoundPositiveLinearEmissions(Emissions):
-#     def __init__(self, N, K, D, M=0, single_subspace=True,
-#                  N_vec=None, D_vec=None, **kwargs):
-#         """
-#         N_vec, D_vec are the sizes of the constituent emission models.
-#         Assume N_vec and D_vec are lists/tuples/arrays of length G and
-#
-#         N_vec = [N_1, ..., N_P] indicates that the first group of neurons
-#         is size N_1, the P-th populations is size N_P.  Likewise for D_vec.
-#         We will assume that the data is grouped in the same way.
-#
-#         We require sum(N_vec) == N and sum(D_vec) == D.
-#         """
-#         super(_CompoundPositiveLinearEmissions, self).__init__(N, K, D, M=M, single_subspace=single_subspace)
-#
-#         assert isinstance(N_vec, (np.ndarray, list, tuple))
-#         N_vec = np.array(N_vec, dtype=int)
-#         assert np.sum(N_vec) == N
-#
-#         assert isinstance(D_vec, (np.ndarray, list, tuple)) and len(D_vec) == len(N_vec)
-#         D_vec = np.array(D_vec, dtype=int)
-#         assert np.sum(D_vec) == D
-#
-#         self.N_vec, self.D_vec = N_vec, D_vec
-#
-#         # Save the number of subpopulations
-#         self.P = len(self.N_vec)
-#
-#         # The main purpose of this class is to wrap a bunch of emissions instances
-#         self.emissions_models = [_PositiveLinearEmissions(n, K, d) for n, d in zip(N_vec, D_vec)]
-#
-#     @property
-#     def Cs(self):
-#         if self.single_subspace:
-#             return np.array([block_diag(*[em.Cs[0] for em in self.emissions_models])])
-#         else:
-#             return np.array([block_diag(*[em.Cs[k] for em in self.emissions_models])
-#                              for k in range(self.K)])
-#
-#     @property
-#     def ds(self):
-#         return np.concatenate([em.ds for em in self.emissions_models], axis=1)
-#
-#     @property
-#     def Fs(self):
-#         return np.concatenate([em.Fs for em in self.emissions_models], axis=1)
-#
-#     @property
-#     def params(self):
-#         return tuple(em.params for em in self.emissions_models)
-#
-#     @params.setter
-#     def params(self, value):
-#         assert len(value) == self.P
-#         for em, v in zip(self.emissions_models, value):
-#             em.params = v
-#
-#     def permute(self, perm):
-#         for em in self.emissions_models:
-#             em.permute(perm)
-#
-#     def _invert(self, data, input, mask, tag):
-#         assert data.shape[1] == self.N
-#         N_offsets = np.cumsum(self.N_vec)[:-1]
-#         states = []
-#         for em, dp, mp in zip(self.emissions_models,
-#                             np.split(data, N_offsets, axis=1),
-#                             np.split(mask, N_offsets, axis=1)):
-#             states.append(em._invert(dp, input, mp, tag))
-#         return np.column_stack(states)
-#
-#     def forward(self, x, input, tag):
-#         assert x.shape[1] == self.D
-#         D_offsets = np.cumsum(self.D_vec)[:-1]
-#         datas = []
-#         for em, xp in zip(self.emissions_models, np.split(x, D_offsets, axis=1)):
-#             datas.append(em.forward(xp, input, tag))
-#         return np.concatenate(datas, axis=2)
-#
-#     @ensure_args_are_lists
-#     def _initialize_with_nmf(self, datas, inputs=None, masks=None, tags=None, num_iters=20):
-#         for data in datas:
-#             assert data.shape[1] == self.N
-#
-#         N_offsets = np.cumsum(self.N_vec)[:-1]
-#         pcas = []
-#
-#         split_datas = list(zip(*[np.split(data, N_offsets, axis=1) for data in datas]))
-#         split_masks = list(zip(*[np.split(mask, N_offsets, axis=1) for mask in masks]))
-#         assert len(split_masks) == len(split_datas) == self.P
-#
-#         for em, dps, mps in zip(self.emissions_models, split_datas, split_masks):
-#             pcas.append(em._initialize_with_nmf(dps, inputs, mps, tags))
-#
-#         # Combine the PCA objects
-#         from sklearn.decomposition import PCA
-#         pca = PCA(self.D)
-#         pca.components_ = block_diag(*[p.components_ for p in pcas])
-#         pca.mean_ = np.concatenate([p.mean_ for p in pcas])
-#         # Not super pleased with this, but it should work...
-#         pca.noise_variance_ = np.concatenate([p.noise_variance_ * np.ones(n)
-#                                               for p,n in zip(pcas, self.N_vec)])
-#         return pca
-#
-
-
-
 # Allow general nonlinear emission models with neural networks
 class _CompoundNeuralNetworkEmissions(Emissions):
     def __init__(self, N, K, D, M=0, hidden_layer_sizes=(50,), single_subspace=True, N_vec=None, D_vec=None, **kwargs):
@@ -431,7 +248,6 @@ class _CompoundNeuralNetworkEmissions(Emissions):
         # The main purpose of this class is to wrap a bunch of emissions instances
         self.emissions_models = [_NeuralNetworkEmissions(n, K, d, hidden_layer_sizes=hidden_layer_sizes) for n, d in zip(N_vec, D_vec)]
 
-
     @property
     def params(self):
         return [em.params for em in self.emissions_models]
@@ -453,12 +269,10 @@ class _CompoundNeuralNetworkEmissions(Emissions):
             datas.append(em.forward(xp, input, tag))
         return np.concatenate(datas, axis=2)
 
-
     def _invert(self, data, input, mask, tag):
         """
         Inverse is... who knows!
         """
-        # print(data.shape)
         assert data.shape[1] == self.N
         N_offsets = np.cumsum(self.N_vec)[:-1]
         states = []
@@ -468,17 +282,11 @@ class _CompoundNeuralNetworkEmissions(Emissions):
             states.append(em._invert(dp, input, mp, tag))
         return np.column_stack(states)
 
-
-        # return npr.randn(data.shape[0], self.D)
-
-
     def log_prior(self):
         alpha=1
         ssq_all=[]
         for em in self.emissions_models:
             ssq_w=[np.sum(i**2) for i in em.weights]
-            # ssq_b=[np.sum(i**2) for i in em.biases]
-            # ssq_all.append(-np.sum(alpha*ssq_w+alpha*ssq_b))
             ssq_all.append(-np.sum(alpha*ssq_w))
         return np.sum(ssq_all)
 
@@ -490,30 +298,6 @@ class GaussianCompoundEmissions(_GaussianEmissionsMixin, _CompoundLinearEmission
         datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
         pca = self._initialize_with_pca(datas, inputs=inputs, masks=masks, tags=tags)
         self.inv_etas[:,...] = -4#np.log(pca.noise_variance_)
-
-    # def m_step(self, discrete_expectations, continuous_expectations,
-    #            datas, inputs, masks, tags,
-    #            optimizer="bfgs", maxiter=100, **kwargs):
-    #
-    #     assert self.single_subspace, "Only implemented for a single emission model"
-    #
-    #     # Return exact m-step updates for C, F, d, and inv_etas
-    #     # stack across all datas
-    #     x = np.vstack(continuous_expectations)
-    #     u = np.vstack(inputs)
-    #     y = np.vstack(datas)
-    #     T, D = np.shape(x)
-    #     xb = np.hstack((np.ones((T,1)),x,u)) # design matrix
-    #     params = np.linalg.lstsq(xb.T@xb, xb.T@y, rcond=None)[0].T
-    #     self.ds = params[:,0].reshape((1,self.N))
-    #     self.Cs = params[:,1:D+1].reshape((1,self.N,self.D))
-    #     if self.M > 0:
-    #         self.Fs = params[:,D+1:].reshape((1,self.N,self.M))
-    #     mu = np.dot(xb, params.T)
-    #     Sigma = (y-mu).T@(y-mu) / T
-    #     self.inv_etas = np.log(np.diag(Sigma)).reshape((1,self.N))
-    #
-
 
     def neg_hessian_log_emissions_prob(self, data, input, mask, tag, x, Ez):
         assert self.single_subspace, "Only implemented for a single emission model"
@@ -537,15 +321,6 @@ class GaussianOrthogonalCompoundEmissions(_GaussianEmissionsMixin, _CompoundOrth
         T, D = data.shape
         hess = -1.0 * self.Cs[0].T@np.diag( 1.0 / np.exp(self.inv_etas[0]) )@self.Cs[0]
         return -1 * np.tile(hess[None,:,:], (T, 1, 1))
-
-# class GaussianCompoundPositiveEmissions(_GaussianEmissionsMixin, _CompoundPositiveLinearEmissions):
-#
-#     @ensure_args_are_lists
-#     def initialize(self, datas, inputs=None, masks=None, tags=None):
-#         datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
-#         pca = self._initialize_with_nmf(datas, inputs=inputs, masks=masks, tags=tags)
-#         self.inv_etas[:,...] = np.log(pca.noise_variance_)
-#
 
 class GaussianCompoundNeuralNetworkEmissions(_GaussianEmissionsMixin, _CompoundNeuralNetworkEmissions):
     pass
@@ -583,8 +358,6 @@ class PoissonOrthogonalCompoundEmissions(_PoissonEmissionsMixin, _CompoundOrthog
             return -np.einsum('tn, ni, nj ->tij', diags, self.Cs[0], self.Cs[0])
 
 
-
-
 class PoissonCompoundEmissions(_PoissonEmissionsMixin, _CompoundLinearEmissions):
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
@@ -606,9 +379,6 @@ class PoissonCompoundEmissions(_PoissonEmissionsMixin, _CompoundLinearEmissions)
             lambdas = self.mean(self.forward(x, input, tag))
             return np.einsum('tn, ni, nj ->tij', -lambdas[:, 0, :], self.Cs[0], self.Cs[0])
 
-        # elif self.link_name == "softplus":
-        #     raise NotImplementedError
-
         elif self.link_name == "softplus":
             assert self.single_subspace
             lambdas = np.log1p(np.exp(np.dot(x,self.Cs[0].T)+np.dot(input,self.Fs[0].T)+self.ds[0]))
@@ -617,32 +387,8 @@ class PoissonCompoundEmissions(_PoissonEmissionsMixin, _CompoundLinearEmissions)
             return np.einsum('tn, ni, nj ->tij', diags, self.Cs[0], self.Cs[0])
 
 
-# def hessian_log_emissions_prob(self, data, input, mask, tag, x):
-#         """
-#         d/dx log p(y | x) = d/dx [y * (Cx + Fu + d) - exp(Cx + Fu + d)
-#                           = y * C - lmbda * C
-#                           = (y - lmbda) * C
-#
-#         d/dx  (y - lmbda)^T C = d/dx -exp(Cx + Fu + d)^T C
-#             = -C^T exp(Cx + Fu + d)^T C
-#         """
-#         if self.link_name == "log":
-#             assert self.single_subspace
-#             lambdas = self.mean(self.forward(x, input, tag))
-#             return np.einsum('tn, ni, nj ->tij', -lambdas[:, 0, :], self.Cs[0], self.Cs[0])
-#
-#         elif self.link_name == "softplus":
-#             assert self.single_subspace
-#             lambdas = np.log1p(np.exp(np.dot(x,self.Cs[0].T)+np.dot(input,self.Fs[0].T)+self.ds[0]))
-#             expterms = np.exp(-np.dot(x,self.Cs[0].T)-np.dot(input,self.Fs[0].T)-self.ds[0])
-#             diags = (data / lambdas * (expterms - 1.0 / lambdas) - expterms) / (1.0+expterms)**2
-#             return np.einsum('tn, ni, nj ->tij', diags, self.Cs[0], self.Cs[0])
-
-
 class PoissonCompoundNeuralNetworkEmissions(_PoissonEmissionsMixin, _CompoundNeuralNetworkEmissions):
     pass
-
-
 
 
 class _NormalizedLinearEmissions(Emissions):
@@ -744,6 +490,7 @@ class _NormalizedLinearEmissions(Emissions):
         self.ds = np.tile(pca.mean_[None, :], (Keff, 1))
 
         return pca
+
 
 class _CompoundNormalizedLinearEmissions(Emissions):
     def __init__(self, N, K, D, M=0, single_subspace=True,
@@ -851,15 +598,10 @@ class _CompoundNormalizedLinearEmissions(Emissions):
         return pca
 
 
-
-
 class GaussianNormalizedEmissions(_GaussianEmissionsMixin, _NormalizedLinearEmissions):
 
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
-        # datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
-        # pca = self._initialize_with_pca(datas, inputs=inputs, masks=masks, tags=tags)
-        # self.inv_etas[:,...] = np.log(pca.noise_variance_)
         pass
 
 
@@ -867,10 +609,8 @@ class GaussianNormalizedCompoundEmissions(_GaussianEmissionsMixin, _CompoundNorm
 
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
-        # datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
-        # pca = self._initialize_with_pca(datas, inputs=inputs, masks=masks, tags=tags)
-        # self.inv_etas[:,...] = np.log(pca.noise_variance_)
         pass
+
 
 class BernoulliOrthogonalCompoundEmissions(_BernoulliEmissionsMixin, _CompoundOrthogonalLinearEmissions):
     @ensure_args_are_lists
@@ -886,10 +626,3 @@ class BernoulliCompoundEmissions(_BernoulliEmissionsMixin, _CompoundLinearEmissi
         datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
         yhats = [self.link(np.clip(d, .1, .9)) for d in datas]
         self._initialize_with_pca(yhats, inputs=inputs, masks=masks, tags=tags)
-
-# class BernoulliCompoundPositiveEmissions(_BernoulliEmissionsMixin, _CompoundPositiveLinearEmissions):
-#     @ensure_args_are_lists
-#     def initialize(self, datas, inputs=None, masks=None, tags=None):
-#         datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
-#         yhats = [self.link(np.clip(d, .1, .9)) for d in datas]
-#         self._initialize_with_nmf(yhats, inputs=inputs, masks=masks, tags=tags)

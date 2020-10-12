@@ -15,12 +15,7 @@ from ssm.preprocessing import interpolate_data
 from ssm.cstats import robust_ar_statistics
 from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
 import ssm.stats as stats
-
-
-
 from ssm.observations import Observations, AutoRegressiveObservations
-
-
 
 class SparseAutoRegressiveObservations(AutoRegressiveObservations):
     """

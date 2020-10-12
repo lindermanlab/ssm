@@ -30,9 +30,6 @@ def observations_init_func_extra(self,datas,**kwargs):
     else:
         init = 'rand' #Default
 
-    # print('initialization method is:', init)
-
-
     # Sample time bins for each discrete state.
     # Use the data to cluster the time bins if specified.
     K, D, M, lags = self.K, self.D, self.M, self.lags

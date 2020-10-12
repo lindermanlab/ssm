@@ -158,7 +158,11 @@ class SLDS(object):
         self.emissions.params = value[3]
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, verbose = 0, num_iters=50, **kwargs):
+    def initialize(self, datas, inputs=None, masks=None, tags=None,
+                   verbose=0,
+                   num_init_iters=50,
+                   discrete_state_init_method="random",
+                   num_init_restarts=1):
         # First initialize the observation model
         self.emissions.initialize(datas, inputs, masks, tags)
 
@@ -167,27 +171,27 @@ class SLDS(object):
               for data, input, mask, tag in zip(datas, inputs, masks, tags)]
         xmasks = [np.ones_like(x, dtype=bool) for x in xs]
 
-        #Number of times to run the arhmm initialization (we'll use the one with the highest log probability as the initialization)
-        if 'num_init_restarts' in kwargs:
-            num_init_restarts = kwargs['num_init_restarts']
-        else:
-            num_init_restarts = 1
-
+        # Number of times to run the arhmm initialization (we'll use the one with the highest log probability as the initialization)
         pbar  = ssm_pbar(num_init_restarts, 2, "ARHMM Initialization restarts", [''])
 
         #Loop through initialization restarts
-        best_lp=-np.inf
-        for i in pbar:#range(num_init_restarts):
+        best_lp = -np.inf
+        for i in pbar: #range(num_init_restarts):
 
-        # Now run a few iterations of EM on a ARHMM with the variational mean
+            # Now run a few iterations of EM on a ARHMM with the variational mean
             if verbose > 0:
-              print("Initializing with an ARHMM using {} steps of EM.".format(num_iters))
+                print("Initializing with an ARHMM using {} steps of EM.".format(num_init_iters))
+
             arhmm = hmm.HMM(self.K, self.D, M=self.M,
                             init_state_distn=copy.deepcopy(self.init_state_distn),
                             transitions=copy.deepcopy(self.transitions),
                             observations=copy.deepcopy(self.dynamics))
-            arhmm.fit(xs, inputs=inputs, masks=xmasks, tags=tags, verbose = verbose,
-                      method="em", num_iters=num_iters, **kwargs)
+
+            arhmm.fit(xs, inputs=inputs, masks=xmasks, tags=tags,
+                      verbose=verbose,
+                      method="em",
+                      num_iters=num_init_iters,
+                      init_method=discrete_state_init_method)
 
             #Keep track of the arhmm that led to the highest log probability
             current_lp = arhmm.log_probability(xs)
@@ -739,10 +743,13 @@ class SLDS(object):
         return posterior
 
     @ensure_args_are_lists
-    def fit(self, datas, inputs=None, masks=None, tags=None, verbose = 2,
+    def fit(self, datas, inputs=None, masks=None, tags=None, verbose=2,
             method="laplace_em", variational_posterior="structured_meanfield",
             variational_posterior_kwargs=None,
-            initialize=True, num_init_iters=25,
+            initialize=True,
+            discrete_state_init_method="random",
+            num_init_iters=25,
+            num_init_restarts=1,
             **kwargs):
 
         """
@@ -770,12 +777,19 @@ class SLDS(object):
 
         # Initialize the model parameters
         if initialize:
-            self.initialize(datas, inputs, masks, tags, verbose = verbose, num_iters=num_init_iters)
+            self.initialize(datas, inputs, masks, tags,
+                            verbose=verbose,
+                            discrete_state_init_method=discrete_state_init_method,
+                            num_init_iters=num_init_iters,
+                            num_init_restarts=num_init_restarts)
 
         # Initialize the variational posterior
         variational_posterior_kwargs = variational_posterior_kwargs or {}
-        posterior = self._make_variational_posterior(variational_posterior, datas, inputs, masks, tags, method, **variational_posterior_kwargs)
-        elbos = _fitting_methods[method](posterior, datas, inputs, masks, tags, verbose, learning=True, **kwargs)
+        posterior = self._make_variational_posterior(
+            variational_posterior, datas, inputs, masks, tags, method, **variational_posterior_kwargs)
+        elbos = _fitting_methods[method](
+            posterior, datas, inputs, masks, tags, verbose,
+            learning=True, **kwargs)
         return elbos, posterior
 
     @ensure_args_are_lists

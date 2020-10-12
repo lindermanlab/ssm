@@ -276,32 +276,3 @@ def trace_product(A, B):
     # We'll take the trace along the last two dimensions.
     BT = np.swapaxes(B, -1, -2)
     return np.sum(A*BT, axis=(-1, -2))
-
-
-def observations_init_func(self,datas,**kwargs):
-
-    if 'init' in kwargs:
-        init = kwargs['init']
-    else:
-        init = 'rand' #Default
-
-    # Sample time bins for each discrete state.
-    # Use the data to cluster the time bins if specified.
-    K, D, M, lags = self.K, self.D, self.M, self.lags
-    Ts = [data.shape[0] for data in datas]
-
-    #KMeans clustering
-    if init=='kmeans':
-        km = KMeans(self.K)
-        km.fit(np.vstack(datas))
-        zs = np.split(km.labels_, np.cumsum(Ts)[:-1])
-
-    #Random assignment
-    elif init=='rand' or init =='random': #Random
-        zs = [npr.choice(self.K, size=T) for T in Ts]
-
-    else:
-        print('Not an accepted initialization type')
-
-
-    return zs
