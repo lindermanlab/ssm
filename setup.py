@@ -31,7 +31,7 @@ setup(name='ssm',
       author_email='scott.linderman@stanford.edu',
       url='https://github.com/slinderman/ssm',
       install_requires=['future', 'numpy', 'scipy', 'matplotlib', 'numba', 'scikit-learn', 'tqdm', 'autograd', 'seaborn'],
-      packages=['ssm'],
+      packages=['ssm','ssm.extensions','ssm.extensions.mp_srslds'],
       ext_modules=extensions,
       include_dirs=[np.get_include(),],
       )
