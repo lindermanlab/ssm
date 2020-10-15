@@ -6,7 +6,7 @@ from autograd.scipy.linalg import block_diag
 from sklearn.decomposition import PCA
 
 from ssm.emissions import Emissions, _GaussianEmissionsMixin, _PoissonEmissionsMixin, \
-    _LinearEmissions, _OrthogonalLinearEmissions, _NeuralNetworkEmissions, _BernoulliEmissionsMixin#, _PositiveLinearEmissions
+    _LinearEmissions, _OrthogonalLinearEmissions, _NeuralNetworkEmissions, _BernoulliEmissionsMixin
 from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
     ensure_slds_args_not_none, logistic, logit, softplus, inv_softplus
 from ssm.preprocessing import interpolate_data, pca_with_imputation
@@ -347,8 +347,6 @@ class PoissonOrthogonalCompoundEmissions(_PoissonEmissionsMixin, _CompoundOrthog
             lambdas = self.mean(self.forward(x, input, tag))
             return -np.einsum('tn, ni, nj ->tij', -lambdas[:, 0, :], self.Cs[0], self.Cs[0])
 
-        # elif self.link_name == "softplus":
-        #     raise NotImplementedError
 
         elif self.link_name == "softplus":
             assert self.single_subspace
@@ -365,7 +363,7 @@ class PoissonCompoundEmissions(_PoissonEmissionsMixin, _CompoundLinearEmissions)
         yhats = [self.link(np.clip(d, .1, np.inf)) for d in datas]
         self._initialize_with_pca(yhats, inputs=inputs, masks=masks, tags=tags)
 
-    def hessian_log_emissions_prob(self, data, input, mask, tag, x):
+    def neg_hessian_log_emissions_prob(self, data, input, mask, tag, x):
         """
         d/dx log p(y | x) = d/dx [y * (Cx + Fu + d) - exp(Cx + Fu + d)
                           = y * C - lmbda * C
@@ -377,14 +375,14 @@ class PoissonCompoundEmissions(_PoissonEmissionsMixin, _CompoundLinearEmissions)
         if self.link_name == "log":
             assert self.single_subspace
             lambdas = self.mean(self.forward(x, input, tag))
-            return np.einsum('tn, ni, nj ->tij', -lambdas[:, 0, :], self.Cs[0], self.Cs[0])
+            return -np.einsum('tn, ni, nj ->tij', -lambdas[:, 0, :], self.Cs[0], self.Cs[0])
 
         elif self.link_name == "softplus":
             assert self.single_subspace
             lambdas = np.log1p(np.exp(np.dot(x,self.Cs[0].T)+np.dot(input,self.Fs[0].T)+self.ds[0]))
             expterms = np.exp(-np.dot(x,self.Cs[0].T)-np.dot(input,self.Fs[0].T)-self.ds[0])
             diags = (data / lambdas * (expterms - 1.0 / lambdas) - expterms) / (1.0+expterms)**2
-            return np.einsum('tn, ni, nj ->tij', diags, self.Cs[0], self.Cs[0])
+            return -np.einsum('tn, ni, nj ->tij', diags, self.Cs[0], self.Cs[0])
 
 
 class PoissonCompoundNeuralNetworkEmissions(_PoissonEmissionsMixin, _CompoundNeuralNetworkEmissions):
