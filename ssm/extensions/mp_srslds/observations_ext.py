@@ -79,16 +79,6 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
     def As(self, value):
         self._As = value
 
-    # @property
-    # def sigmasq(self):
-    #     return np.exp(self._log_sigmasq)
-    #
-    # @sigmasq.setter
-    # def sigmasq(self, value):
-    #     assert value.shape == (self.K, self.D)
-    #     assert np.all(value > 0)
-    #     self._log_sigmasq = np.log(value)
-
     @property
     def Sigmas_init(self):
         return np.array([sigmasq * np.eye(self.D) for sigmasq in self.sigmasq_inits])
@@ -113,15 +103,6 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
         self.sigmasq_inits = self.sigmasq_inits[perm]
         self.sigmasqs = self.sigmasqs[perm]
 
-    # def log_prior(self):
-    #     lp = stats.bernoulli_logpdf(self.As_mask.ravel(), logit(self.sparsity))
-    #
-    #     # Evaluate the prior on A
-    #     mask = np.kron(self.As_mask, np.ones(self.block_size))
-    #     mus = np.linalg.solve(self.J0, self.h0)
-    #
-    #     lp += stats.diagonal_gaussian_logpdf(Avals.ravel(), 0, 1 / self.l2_penalty_A)
-    #     return lp
 
     def log_likelihoods(self, data, input, mask, tag):
         assert np.all(mask), "Cannot compute likelihood of autoregressive obsevations with missing data."
@@ -322,11 +303,6 @@ class SparseAutoRegressiveObservations(AutoRegressiveObservations):
                 self.sigmasqs[k] = np.diag(sqerr) / Ens[k]
                 # self.sigmasqs[k] = (np.diag(sqerr) + Psi0) / (Ens[k] + nu0 + D + 1)
 
-                # self.sigmasqs[k] = np.sum(np.diag(sqerr)) / (Ens[k]*D)
-
-                # nu = nu0 + Ens[k]
-                # Sigmas[k] = (sqerr + Psi0) / (nu + D + 1)
-
 
         # If any states are unused, set their parameters to a perturbation of a used state
         unused = np.where(Ens < 1)[0]
@@ -377,19 +353,8 @@ class IdentityAutoRegressiveObservations(Observations):
 
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
-        # sigmas=np.var(datas[1:]-datas[:-1])
         self.log_sigmas = -2 + npr.randn(self.K, self.D)#np.log(sigmas + 1e-16)
 
-    # def _compute_sigmas(self, data, input, mask, tag):
-    #     T, D = data.shape
-    #     inv_sigmas = self.inv_sigmas
-    #
-    #     sigma_init = np.exp(self.inv_sigma_init) * np.ones((self.lags, self.K, self.D))
-    #     sigma_ar = np.repeat(np.exp(inv_sigmas)[None, :, :], T-self.lags, axis=0)
-    #     sigmas = np.concatenate((sigma_init, sigma_ar))
-    #     assert sigmas.shape == (T, self.K, D)
-    #     return sigmas
-    #
     def log_likelihoods(self, data, input, mask, tag):
         sigmas = np.exp(self.log_sigmas) + 1e-16
         sigma_init=np.exp(self.log_sigma_init)+1e-16
@@ -419,7 +384,6 @@ class IdentityAutoRegressiveObservations(Observations):
         x = np.concatenate(datas)
         weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
-            # self.mus[k] = np.average(x, axis=0, weights=weights[:,k])
             sqerr = (x[1:] - x[:-1])**2
             d2=np.average(sqerr, weights=weights[1:,k], axis=0)
 
