@@ -1115,6 +1115,7 @@ class AutoRegressiveRotationalObservations(AutoRegressiveObservations):
         self._As = np.array([
                 np.column_stack([random_rotation(D), np.zeros((D, (lags-1) * D))])
             for _ in range(K)])
+        self.Sigmas = np.tile(np.eye(D)[None, ...], (K, 1, 1))
 
     def m_step(self, expectations, datas, inputs, masks, tags,
                 continuous_expectations=None,
@@ -1136,25 +1137,34 @@ class AutoRegressiveRotationalObservations(AutoRegressiveObservations):
 
         # Solve the linear regressions
         As = np.zeros((K, D, D * lags))
-        Vs = np.zeros((K, D, M))
-        bs = np.zeros((K, D))
-        Sigmas = np.zeros((K, D, D))
-        for k in range(K):
-            Wk = np.linalg.solve(ExuxuTs[k] + self.J0[k], ExuyTs[k] + self.h0[k]).T
-            As[k] = Wk[:, :D * lags]
-            Vs[k] = Wk[:, D * lags:-1]
-            bs[k] = Wk[:, -1]
+        # Vs = np.zeros((K, D, M))
+        # bs = np.zeros((K, D))
+        # Sigmas = np.zeros((K, D, D))
+        # for k in range(K):
+        #     Wk = np.linalg.solve(ExuxuTs[k] + self.J0[k], ExuyTs[k] + self.h0[k]).T
+        #     As[k] = Wk[:, :D * lags]
+        #     Vs[k] = Wk[:, D * lags:-1]
+        #     bs[k] = Wk[:, -1]
 
-            # Project to the set of orthogonal matrices.
-            # SVD will broadcast along the first dimension.
-            U, _, VT = np.linalg.svd(As[k])
-            As[k] = U @ VT
+        #     # Project to the set of orthogonal matrices.
+        #     # SVD will broadcast along the first dimension.
+        #     U, _, VT = np.linalg.svd(As[k])
+        #     As[k] = U @ VT
             
-            # Solve for the MAP estimate of the covariance
-            EWxyT =  Wk @ ExuyTs[k]
-            sqerr = EyyTs[k] - EWxyT.T - EWxyT + Wk @ ExuxuTs[k] @ Wk.T
-            nu = self.nu0 + Ens[k]
-            Sigmas[k] = (sqerr + self.Psi0) / (nu + D + 1)
+        #     # Solve for the MAP estimate of the covariance
+        #     EWxyT =  Wk @ ExuyTs[k]
+        #     sqerr = EyyTs[k] - EWxyT.T - EWxyT + Wk @ ExuxuTs[k] @ Wk.T
+        #     nu = self.nu0 + Ens[k]
+        #     Sigmas[k] = (sqerr + self.Psi0) / (nu + D + 1)
+
+        # To do an exact M-step, the relaxations we need are:
+        # 1) bias is zero,
+        # 2) noise covariance is identity.
+        # 3) input is zero
+        import pdb; pdb.set_trace()
+        for k in range(K):
+            U,S,V = np.linalg.svd(ExuyTs)
+            As[k] = V @ U.T
 
         # If any states are unused, set their parameters to a perturbation of a used state
         unused = np.where(Ens < 1)[0]
@@ -1163,15 +1173,15 @@ class AutoRegressiveRotationalObservations(AutoRegressiveObservations):
             for k in unused:
                 i = npr.choice(used)
                 As[k] = As[i] + 0.01 * npr.randn(*As[i].shape)
-                Vs[k] = Vs[i] + 0.01 * npr.randn(*Vs[i].shape)
-                bs[k] = bs[i] + 0.01 * npr.randn(*bs[i].shape)
-                Sigmas[k] = Sigmas[i]
+                # Vs[k] = Vs[i] + 0.01 * npr.randn(*Vs[i].shape)
+                # bs[k] = bs[i] + 0.01 * npr.randn(*bs[i].shape)
+                # Sigmas[k] = Sigmas[i]
                 
         # Update parameters via their setter
         self.As = As
-        self.Vs = Vs
-        self.bs = bs
-        self.Sigmas = Sigmas
+        # self.Vs = Vs
+        # self.bs = bs
+        # self.Sigmas = Sigmas
 class AutoRegressiveObservationsNoInput(AutoRegressiveObservations):
     """
     AutoRegressive observation model without the inputs.
