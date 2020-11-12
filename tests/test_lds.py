@@ -408,7 +408,7 @@ def test_lds_log_probability_perf(T=1000, D=10, N_iter=10):
     print("Time per iter: {:.4f}".format((stop - start) / N_iter))
 
 def test_lds_sample_and_fit(T=100, N=15, K=3, D=10, num_cases=25):
-    
+
     TRANSITIONS_NAMES = [
         "stationary",
         "sticky",
@@ -447,20 +447,20 @@ def test_lds_sample_and_fit(T=100, N=15, K=3, D=10, num_cases=25):
         # "autoregressive_nn",
         ]
     METHODS = ["bbvi"]
-    
+
     # method_name --> allowable posteriors
     POSTERIORS = {
         "bbvi": ["mf", "lds"],
         # "laplace_em": ["structured_meanfield"]
     }
-    
+
     test_cases = list(
-        it.product(DYNAMICS_NAMES, 
-                   EMISSIONS_NAMES, 
+        it.product(DYNAMICS_NAMES,
+                   EMISSIONS_NAMES,
                    TRANSITIONS_NAMES,
                    METHODS)
     )
-    
+
     # Choose a random subset of combinations
     test_case_indices = npr.choice(len(test_cases), size=num_cases)
 
@@ -494,10 +494,10 @@ def test_lds_sample_and_fit(T=100, N=15, K=3, D=10, num_cases=25):
                                 dynamics=dynamics,
                                 emissions=emissions)
             fit_slds.fit(y,
-                            method=method,
-                            variational_posterior=posterior,
-                            num_init_iters=2,
-                            num_iters=2)
+                         method=method,
+                         variational_posterior=posterior,
+                         num_init_iters=2,
+                         num_iters=2)
 
 
 def lbfgs_newton_perf_comparison(T=100, N=15, K=3, D=10, ntrials=5, n_iters=20):
@@ -544,33 +544,33 @@ def test_laplace_em(T=100, N=15, K=3, D=10, num_cases=25):
     # Check that laplace-em works for each transition and emission model
     # so long as the dynamics are linear-gaussian.
     DYNAMICS_NAMES = ["gaussian"]
-    EMISSIONS_NAMES = ["gaussian", 
-                       "gaussian_orthog", 
-                       "poisson", 
-                       "poisson_orthog", 
-                       "bernoulli", 
+    EMISSIONS_NAMES = ["gaussian",
+                       "gaussian_orthog",
+                       "poisson",
+                       "poisson_orthog",
+                       "bernoulli",
                        "bernoulli_orthog"]
-    TRANSITIONS_NAMES = ["stationary", 
-                         "sticky", 
-                         "inputdriven", 
-                         "recurrent", 
+    TRANSITIONS_NAMES = ["stationary",
+                         "sticky",
+                         "inputdriven",
+                         "recurrent",
                          "recurrent_only"]
     INPUT_DIMS = [0, 1]
-    
+
     test_cases = list(
-        it.product(DYNAMICS_NAMES, 
-                   EMISSIONS_NAMES, 
+        it.product(DYNAMICS_NAMES,
+                   EMISSIONS_NAMES,
                    TRANSITIONS_NAMES,
                    INPUT_DIMS)
     )
-    
+
     # Choose a random subset of combinations
     test_case_indices = npr.choice(len(test_cases), size=num_cases)
 
     # Test SLDS and RSLDS
     print("Testing SLDS and RSLDS...")
     for idx in test_case_indices:
-        dynamics, emissions, transitions, input_dim = test_cases[idx]    
+        dynamics, emissions, transitions, input_dim = test_cases[idx]
         true_slds = ssm.SLDS(N, K, D, M=input_dim,
                                 transitions=transitions,
                                 dynamics="gaussian",
@@ -618,7 +618,7 @@ def test_laplace_em_hessian(N=5, K=3, D=2, T=20):
             z, x, y = slds.sample(T)
             new_slds = ssm.SLDS(N, K, D, transitions="standard",
                             dynamics="gaussian",
-                            emissions=emissions) 
+                            emissions=emissions)
 
             inputs = [np.zeros((T, 0))]
             masks = [np.ones_like(y)]
