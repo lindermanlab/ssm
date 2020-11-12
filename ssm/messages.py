@@ -669,6 +669,260 @@ def kalman_smoother(mu0, S0, As, Bs, Qs, Cs, Ds, Rs, us, ys):
     """
     return _kalman_smoother(mu0, S0, As, Bs, Qs, Cs, Ds, Rs, us, ys)
 
+
+##
+# Kalman filter/sampler/smoother with diagonal observation noise
+##
+@numba.jit(nopython=True, cache=True)
+def _condition_on_diagonal(m, S, C, D, R_diag, u, y, mcond, Scond):
+    # Same as above but where R is assumed to be a diagonal covariance matrix
+    # The unnormalized potential is
+    #
+    #   p(x) \propto N(x | m, S) * N(y | Cx + Du, R)
+    #        = N(m', S')  where
+    #
+    #     S' = [S^{-1} + C^T R^{-1} C]^{-1}
+    #     m' = S' [S^{-1} m + C^T R^{-1} (y - Du)]
+    #
+    Scond[:] = np.linalg.inv(np.linalg.inv(S) + (C.T / R_diag) @ C)
+    # Scond[:] = S - np.linalg.solve(R + C @ S @ C.T, C @ S).T @ C @ S
+    mcond[:] = Scond @ (np.linalg.solve(S, m) + (C.T / R_diag) @ (y - D @ u))
+
+
+@numba.jit(nopython=True, cache=True)
+def gaussian_logpdf_lrpd(y, m, C, S, r):
+    # compute N(y | m, diag(r) + C S C^T)
+    #
+    # We need to compute J = (diag(r) + C S C^T)^{-1} and its determinant.
+    # By the matrix inversion lemma, this is,
+    #
+    #    J = I/r - (C/r) (S^{-1} + (C/r)^T C)^{-1} (C/r)^T
+    #      = I/r - (C/r) L^{-T} L^{-1} (C/r)^T
+    #      = I/r - K K^T
+    #    L = chol(S^{-1} + (C/r)^T C)
+    #    K = (C/r) L^{-T}
+    #    KT = L^{-1} (C/r)^T
+    #
+    # The determinant is
+    #    det(J) = det(I/r) det(I + (K * r)^T K)
+    #           = 1/prod(r) det(I + (K * r)^T K)
+    n = C.shape[0]
+    d = C.shape[1]
+    CTr = C.T / r
+    L = np.linalg.cholesky(np.linalg.inv(S) + CTr @ C)
+    KT = np.linalg.solve(L, CTr)
+    tmp = np.linalg.cholesky(np.eye(d) - (KT * r) @ KT.T)
+    x = KT @ (y - m)
+    return -0.5 * n * np.log(2 * np.pi) \
+           -0.5 * np.sum(np.log(r)) + np.sum(np.log(np.diag(tmp))) \
+           -0.5 * np.sum((y - m)**2 / r) +0.5 * np.sum(x**2)
+
+
+@numba.jit(nopython=True, cache=True)
+def _kalman_filter_diagonal(mu0, S0, As, Bs, Qs, Cs, Ds, R_diags, us, ys):
+    T, N = ys.shape
+    D = mu0.shape[0]
+
+    # Check for stationary dynamics parameters
+    hetero = As.shape[0] > 1
+
+    predicted_mus = np.zeros((T, D))        # preds E[x_t | y_{1:t-1}]
+    predicted_Sigmas = np.zeros((T, D, D))  # preds Cov[x_t | y_{1:t-1}]
+    filtered_mus = np.zeros((T, D))         # means E[x_t | y_{1:t}]
+    filtered_Sigmas = np.zeros((T, D, D))   # means Cov[x_t | y_{1:t}]
+
+    # Initialize
+    predicted_mus[0] = mu0
+    predicted_Sigmas[0] = S0
+    K = np.zeros((D, N))
+    ll = 0
+
+    # Run the Kalman filter
+    for t in range(T):
+        At = As[t * hetero]
+        Bt = Bs[t * hetero]
+        Qt = Qs[t * hetero]
+        Ct = Cs[t * hetero]
+        Dt = Ds[t * hetero]
+        Rt = R_diags[t * hetero]
+
+        # Update the log likelihood
+        ll += gaussian_logpdf_lrpd(ys[t],
+            Ct @ predicted_mus[t] + Dt @ us[t],
+            Ct, predicted_Sigmas[t], Rt
+            )
+
+        # Condition on this frame's observations
+        _condition_on_diagonal(predicted_mus[t], predicted_Sigmas[t],
+            Ct, Dt, Rt, us[t], ys[t],
+            filtered_mus[t], filtered_Sigmas[t])
+
+        if t == T-1:
+            break
+
+        # Predict the next frame's latent state
+        _predict(filtered_mus[t], filtered_Sigmas[t],
+            At, Bt, Qt, us[t],
+            predicted_mus[t+1], predicted_Sigmas[t+1])
+
+    return ll, filtered_mus, filtered_Sigmas
+
+
+@numba.jit(nopython=True, cache=True)
+def _kalman_sample_diagonal(mu0, S0, As, Bs, Qs, Cs, Ds, R_diags, us, ys):
+    T, N = ys.shape
+    D = mu0.shape[0]
+
+    # Check for stationary dynamics parameters
+    hetero = As.shape[0] > 1
+
+    # Run the Kalman Filter
+    ll, filtered_mus, filtered_Sigmas = \
+        _kalman_filter_diagonal(mu0, S0, As, Bs, Qs, Cs, Ds, R_diags, us, ys)
+
+    # Initialize outputs, noise, and temporary variables
+    xs = np.zeros((T, D))
+    noise = np.random.randn(T, D)
+    mu_cond = np.zeros(D)
+    Sigma_cond = np.zeros((D, D))
+
+    # Sample backward in time
+    xs[-1] = _sample_gaussian(filtered_mus[-1], filtered_Sigmas[-1], noise[-1])
+    for t in range(T-2, -1, -1):
+        At = As[t * hetero]
+        Bt = Bs[t * hetero]
+        Qt = Qs[t * hetero]
+
+        _condition_on(filtered_mus[t], filtered_Sigmas[t],
+            At, Bt, Qt, us[t], xs[t+1],
+            mu_cond, Sigma_cond)
+
+        xs[t] = _sample_gaussian(mu_cond, Sigma_cond, noise[t])
+
+    return ll, xs
+
+@numba.jit(nopython=True, cache=True)
+def _kalman_smoother_diagonal(mu0, S0, As, Bs, Qs, Cs, Ds, R_diags, us, ys):
+    T, N = ys.shape
+    D = mu0.shape[0]
+
+    # Check for stationary dynamics parameters
+    hetero = As.shape[0] > 1
+
+    # Run the Kalman Filter
+    ll, filtered_mus, filtered_Sigmas = \
+        _kalman_filter_diagonal(mu0, S0, As, Bs, Qs, Cs, Ds, R_diags, us, ys)
+
+    # Initialize outputs, noise, and temporary variables
+    smoothed_mus = np.zeros((T, D))
+    smoothed_Sigmas = np.zeros((T, D, D))
+    # smoothed_CrossSigmas = np.zeros((T-1, D, D))
+    ExxnT = np.zeros((T-1, D, D))
+    Gt = np.zeros((D, D))
+
+    # The last time step is known from the Kalman filter
+    smoothed_mus[-1] = filtered_mus[-1]
+    smoothed_Sigmas[-1] = filtered_Sigmas[-1]
+
+    # Run the smoother backward in time
+    for t in range(T-2, -1, -1):
+        At = As[t * hetero]
+        Bt = Bs[t * hetero]
+        Qt = Qs[t * hetero]
+
+        # This is like the Kalman gain but in reverse
+        # See Eq 8.11 of Saarka's "Bayesian Filtering and Smoothing"
+        Gt = np.linalg.solve(Qt + At @ filtered_Sigmas[t] @ At.T,
+                             At @ filtered_Sigmas[t]).T
+
+        smoothed_mus[t] = filtered_mus[t] + Gt @ (smoothed_mus[t+1] - At @ filtered_mus[t] - Bt @ us[t])
+        smoothed_Sigmas[t] = filtered_Sigmas[t] + \
+                             Gt @ (smoothed_Sigmas[t+1] - At @ filtered_Sigmas[t] @ At.T - Qt) @ Gt.T
+        # smoothed_CrossSigmas[t] = Gt @ smoothed_Sigmas[t+1]
+        ExxnT[t] = Gt @ smoothed_Sigmas[t+1] + np.outer(smoothed_mus[t], smoothed_mus[t+1])
+
+    return ll, smoothed_mus, smoothed_Sigmas, ExxnT
+
+
+def kalman_wrapper_diagonal(f):
+    def wrapper(mu0, S0, As, Bs, Qs, Cs, Ds, R_diags, us, ys):
+        """
+        Notation:
+        T:  number of time steps
+        D:  continuous latent state dimension
+        U:  input dimension
+        N:  observed data dimension
+        mu0: (D,)                   initial state mean
+        S0:  (D, D)                 initial state covariance
+        As:  (D, D) or (T-1, D, D)  dynamics matrices
+        Bs:  (D, U) or (T-1, D, U)  input to latent state matrices
+        Qs:  (D, D) or (T-1, D, D)  dynamics covariance matrices
+        Cs:  (N, D) or (T, N, D)    emission matrices
+        Ds:  (N, U) or (T, N, U)    input to emissions matrices
+        R_diags:  (N,) or (T, N,)   diagonal of emission covariance matrices
+        us:  (T, U)                 inputs
+        ys:  (T, N)                 observations
+        """
+        # Get shapes
+        D = mu0.shape[0]
+        T, N = ys.shape
+        U = us.shape[1]
+
+        assert mu0.shape == (D,)
+        assert S0.shape == (D, D)
+        assert As.shape == (D, D) or As.shape == (T-1, D, D)
+        assert Bs.shape == (D, U) or Bs.shape == (T-1, D, U)
+        assert Qs.shape == (D, D) or Qs.shape == (T-1, D, D)
+        assert Cs.shape == (N, D) or Cs.shape == (T, N, D)
+        assert Ds.shape == (N, U) or Ds.shape == (T, N, U)
+        assert R_diags.shape == (N,) or R_diags.shape == (T, N)
+        assert us.shape == (T, U)
+
+        # Add extra time dimension if necessary
+        As = As if As.ndim == 3 else np.reshape(As, (1,) + As.shape)
+        Bs = Bs if Bs.ndim == 3 else np.reshape(Bs, (1,) + Bs.shape)
+        Qs = Qs if Qs.ndim == 3 else np.reshape(Qs, (1,) + Qs.shape)
+        Cs = Cs if Cs.ndim == 3 else np.reshape(Cs, (1,) + Cs.shape)
+        Ds = Ds if Ds.ndim == 3 else np.reshape(Ds, (1,) + Ds.shape)
+        R_diags = R_diags if R_diags.ndim == 2 else np.reshape(R_diags, (1,) + R_diags.shape)
+        return f(mu0, S0, As, Bs, Qs, Cs, Ds, R_diags, us, ys)
+
+    return wrapper
+
+
+@kalman_wrapper_diagonal
+def kalman_filter_diagonal(mu0, S0, As, Bs, Qs, Cs, Ds, R_diags, us, ys):
+    """
+    Standard Kalman filter for time-varying linear dynamical system with inputs.
+
+    This version assumes the emission covariance is diagonal.
+    """
+    return _kalman_filter_diagonal(mu0, S0, As, Bs, Qs, Cs, Ds, R_diags, us, ys)
+
+
+@kalman_wrapper_diagonal
+def kalman_sample_diagonal(mu0, S0, As, Bs, Qs, Cs, Ds, R_diags, us, ys):
+    """
+    Sample from a linear Gaussian model.  Run the KF to get the filtered
+    probability distributions, then sample backward in time.
+
+    This version assumes the emission covariance is diagonal.
+    """
+    return _kalman_sample_diagonal(mu0, S0, As, Bs, Qs, Cs, Ds, R_diags, us, ys)
+
+
+@kalman_wrapper_diagonal
+def kalman_smoother_diagonal(mu0, S0, As, Bs, Qs, Cs, Ds, R_diags, us, ys):
+    """
+    Compute the conditional mean and variance of the latent
+    states given observed data ys and inputs us.  Run the KF to get
+    the filtered probability distributions, then run the Rauch-Tung-Striebel
+    smoother backward in time.
+
+    This version assumes the emission covariance is diagonal.
+    """
+    return _kalman_smoother_diagonal(mu0, S0, As, Bs, Qs, Cs, Ds, R_diags, us, ys)
+
 ##
 # Information form filtering and smoothing
 ##
