@@ -2,63 +2,14 @@ import copy
 import warnings
 
 import jax.numpy as np
-import numpy.random as npr
-import ssm.distributions as dists
-from ssm.util import format_dataset
+import jax.random as jr
+from jax.tree_util import register_pytree_node, register_pytree_node_class
 
-# Observations can be one of the following:
-# - a string indicating the observation type for all states
-# - a list of strings with types for each state
-# - a list of Distribution objects, already initialized for each state
-OBSERVATION_CLASSES = dict(
-    auto_regression=dists.LinearAutoRegression,
-    bernoulli=dists.Bernoulli,
-    beta=dists.Beta,
-    binomial=dists.Binomial,
-    categorical=dists.Categorical,
-    dirichlet=dists.Dirichlet,
-    gamma=dists.Gamma,
-    gaussian=dists.MultivariateNormal,
-    linear_regression=dists.LinearRegression,
-    multivariate_normal=dists.MultivariateNormal,
-    multivariate_t=dists.MultivariateStudentsT,
-    multivariate_t_regression=dists.MultivariateStudentsTLinearRegression,
-    multivariate_t_auto_regression=dists.MultivariateStudentsTAutoRegression,
-    mvn=dists.MultivariateNormal,
-    normal=dists.Normal,
-    robust_regression=dists.MultivariateStudentsTLinearRegression,
-    robust_auto_regression=dists.MultivariateStudentsTAutoRegression,
-    poisson=dists.Poisson,
-    students_t=dists.StudentsT,
-)
+import jxf.distributions as dists
 
-def make_observations(num_states, observations, **observation_kwargs):
-    def _check(obs_name):
-        assert obs_name in OBSERVATION_CLASSES, \
-            "`observations` must be one of: {}".format(OBSERVATION_CLASSES.keys())
+from ssm.util import format_dataset, num_datapoints
 
-    def _convert(obs):
-        if isinstance(obs, str):
-            _check(obs)
-            return OBSERVATION_CLASSES[obs.lower()]
-        elif isinstance(obs, dists.Distribution):
-            return obs
-        else:
-            raise Exception("`observations` must be either strings or "
-                            "Distribution instances")
-
-    if isinstance(observations, str):
-        observations = [_convert(observations)] * num_states
-    elif isinstance(observations, (tuple, list)):
-        assert len(observations) == num_states
-        observations = list(map(_convert, observations))
-    else:
-        raise Exception("Expected `observations` to be a string, a list of "
-                        "strings, or a list of Distribution objects")
-
-    return Observations(observations, **observation_kwargs)
-
-
+@register_pytree_node_class
 class Observations(object):
     """
     A thin wrapper for a list of distributions, one associated with
@@ -66,58 +17,63 @@ class Observations(object):
     that in some cases--e.g. hierarchical models--we want to share
     parameters between the observation distributions.  Wrapping them
     in a single object allows us to do that easily.
+
+    :param: observations can be one of the following:
+        - a string indicating the observation type for all states
+        - a list of strings with types for each state
+        - a list of jxf.ExponentialFamilyDistribution objects,
+          already initialized for each state
+
     """
-    def __init__(self, observations, **observation_kwargs):
-        assert isinstance(observations, list)
-        self.num_states = len(observations)
-        self.observations = observations
+    def __init__(self,
+                 num_states,
+                 observations,
+                 prior=None,
+                 **observation_kwargs):
+
+        self.num_states = num_states
+        assert len(observations) == num_states
+        self.conditional_dists = observations
+        self.prior = prior
         self.observations_kwargs = observation_kwargs
 
-        # Initialize class variables for stochastic_m_step
-        self._stochastic_m_step_state = [None] * self.num_states
+    def tree_flatten(self):
+        return ((self.conditional_dists,
+                 self.prior,
+                 self.observations_kwargs), self.num_states)
 
-    @property
-    def is_built(self):
-        return all([isinstance(o, dists.Distribution) for o in self.observations])
-
-    @format_dataset
-    def build_from_example(self, dataset):
-        if not self.is_built:
-            kwargs = dataset[0].copy()
-            kwargs.update(self.observations_kwargs)
-            self.observations = [
-                obs_class.from_example(**kwargs)
-                for obs_class in self.observations
-            ]
+    @classmethod
+    def tree_unflatten(cls, num_states, children):
+        conditional_dists, prior, observation_kwargs = children
+        return cls(num_states,
+                   conditional_dists,
+                   prior=prior,
+                   **observation_kwargs)
 
     @format_dataset
-    def initialize(self, dataset, method="kmeans"):
-        # use the first datapoint to get the shape
-        if not self.is_built:
-            self.build_from_example(dataset)
-
+    def initialize(self, rng, dataset, method="kmeans"):
         # initialize assignments and perform one M-step
         num_states = self.num_states
         if method.lower() == "random":
             # randomly assign datapoints to clusters
-            assignments = [npr.choice(num_states,
-                                    size=data_dict["data"].shape[0])
-                        for data_dict in dataset]
+            keys = jr.split(rng, len(dataset))
+            assignments = [jr.choice(key, num_states, shape=data_dict["data"].shape[0])
+                           for key, data_dict in zip(keys, dataset)]
         elif method.lower() == "kmeans":
             # cluster the data with kmeans
             from sklearn.cluster import KMeans
             km = KMeans(num_states)
-            ind = npr.choice(len(dataset))
+            ind = jr.choice(rng, len(dataset))
             km.fit(dataset[ind]["data"])
-            assignments = [
-                km.predict(data_dict["data"])
-                for data_dict in dataset]
+            assignments = [km.predict(data_dict["data"])
+                           for data_dict in dataset]
         else:
             raise Exception("Observations.initialize: "
                 "Invalid initialize method: {}".format(method))
 
         # Construct subsets of the data and fit the distributions
-        for idx, observation_dist in enumerate(self.observations):
+        def _initialize(idx_and_conditional_dist):
+            idx, conditional_dist = idx_and_conditional_dist
             data_subsets = []
             for data_dict, assignment in zip(dataset, assignments):
                 n = data_dict["data"].shape[0]
@@ -128,51 +84,75 @@ class Observations(object):
                     else:
                         subset[k] = v
                 data_subsets.append(subset)
+            return conditional_dist.fit(data_subsets)
 
-            observation_dist.fit(data_subsets)
+        self.conditional_dists = \
+            list(map(_initialize, enumerate(self.conditional_dists)))
 
     def permute(self, perm):
-        self.observations = [self.observations[i] for i in perm]
+        self.conditional_dists = [self.conditional_dists[i] for i in perm]
 
     def log_prior(self):
-        return np.sum([observation_dist.log_prior()
-                       for observation_dist in self.observations])
+        if self.prior is not None:
+            raise NotImplementedError
+        else:
+            return 0.0
 
     def log_likelihoods(self, data, **kwargs):
-        assert self.is_built
-        return np.column_stack([obs.log_prob(data, **kwargs)
-                                for obs in self.observations])
+        return np.column_stack([obs.log_prob(data, **kwargs) for obs in self.conditional_dists])
 
     @format_dataset
     def m_step(self, dataset, posteriors, **kwargs):
-        assert self.is_built
-        for idx, observation_dist in enumerate(self.observations):
-            weighted_dataset = []
-            for data_dict, posterior in zip(dataset, posteriors):
-                weighted_data = data_dict.copy()
-                weighted_data["weights"] = posterior.expected_states()[:, idx]
-                weighted_dataset.append(weighted_data)
-            observation_dist.fit(weighted_dataset)
+        def _m_step(idx_and_conditional_dist):
+            idx, conditional_dist = idx_and_conditional_dist
+            weights = [p.expected_states()[:, idx] for p in posteriors]
+            return conditional_dist.fit(dataset, weights, prior=self.prior, **self.observations_kwargs)
 
-    @format_dataset
-    def stochastic_m_step(self, dataset, posteriors, step_size,
-                          scale_factor=1.0, **kwargs):
-        assert self.is_built
+        self.conditional_dists = \
+            list(map(_m_step, enumerate(self.conditional_dists)))
 
-        # Update each distribution
-        new_optimizer_states = []
-        for idx, (observation_dist, optimizer_state) in \
-            enumerate(zip(self.observations, self._stochastic_m_step_state)):
-            weighted_dataset = []
-            for data_dict, posterior in zip(dataset, posteriors):
-                weighted_data = data_dict.copy()
-                weighted_data["weights"] = posterior.expected_states()[:, idx]
-                weighted_dataset.append(weighted_data)
+    def proximal_optimizer(self, total_num_datapoints, step_size=0.75):
+        """Return an optimizer triplet, like jax.experimental.optimizers,
+        to perform proximal gradient ascent on the likelihood with a penalty
+        on the KL divergence between distributions from one iteration to the
+        next. This boils down to taking a convex combination of sufficient
+        statistics from this data and those that have been accumulated from
+        past data.
 
-            new_optimizer_states.append(
-                observation_dist.fit_proximal(
-                    weighted_dataset, step_size,
-                    optimizer_state=optimizer_state,
-                    scale_factor=scale_factor))
+        Parameters:
+            total_num_datapoints:
+                number of data points in the entire dataset.
 
-        self._stochastic_m_step_state = new_optimizer_states
+            step_size:
+                fixed value in [0, 1] or a function mapping
+                iteration (int) to step size in [0, 1]
+
+        Returns:
+
+            initial_state    :: initial optimizer state
+            update           :: minibatch, itr, state -> state
+            get_distribution :: state -> Distribution object
+        """
+        # get proximal optimizer funcs for each conditional distribution
+        initial_state, update_fns, get_distribution_fns = \
+            list(zip([dist.proximal_optimizer(prior=self.prior,
+                                              step_size=step_size,
+                                              **self.observations_kwargs)
+                      for dist in self.conditional_dists]))
+
+        def update(minibatch, posteriors, itr, state):
+            scale_factor = total_num_datapoints / num_datapoints(minibatch)
+            new_states = []
+            for idx, (update_fn, this_state) in enumerate(zip(update_fns, state)):
+                weights = [p.expected_states()[:, idx] for p in posteriors]
+                new_states.append(update_fn(minibatch,
+                                            itr,
+                                            this_state,
+                                            weights=weights,
+                                            scale_factor=scale_factor))
+
+            # Update the conditional distributions
+            self.conditional_dists = \
+                [f(this_state) for f, this_state in zip(get_distribution_fns, state)]
+
+        return initial_state, update

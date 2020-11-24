@@ -30,6 +30,7 @@ def format_dataset(f):
     def wrapper(*args, **kwargs):
         # Get the `dataset` argument
         bound_args = sig.bind(*args, **kwargs)
+        bound_args.apply_defaults()
         dataset = bound_args.arguments['dataset']
 
         # Make sure dataset is a list of dictionaries
@@ -46,6 +47,25 @@ def format_dataset(f):
 
         # Update the bound arguments
         bound_args.arguments['dataset'] = dataset
+
+        # Make sure `weights` is a list of ones like the dataset, if present
+        if 'weights' in bound_args.arguments:
+            weights = bound_args.arguments['weights']
+
+            if isinstance(weights, (list, tuple)):
+                assert all([len(w) == len(data_dict["data"])
+                            for w, data_dict in zip(weights, dataset)])
+            elif weights is None:
+                weights = [np.ones(len(data_dict['data']))
+                           for data_dict in dataset]
+            else:
+                # Assume weights is 'array like'
+                assert len(dataset) == 1
+                assert len(weights) == len(dataset[0]['data'])
+                weights = [weights]
+
+            # Update the bound args
+            bound_args.arguments['weights'] = weights
 
         # Call the function
         return f(*bound_args.args, **bound_args.kwargs)
@@ -75,10 +95,7 @@ def weighted_sum_stats(stats, weights=None):
 
 @format_dataset
 def num_datapoints(dataset):
-    if all(["weights" in data_dict for data_dict in dataset]):
-        return sum([data_dict["weights"].sum() for data_dict in dataset])
-    else:
-        return sum([data_dict["data"].shape[0] for data_dict in dataset])
+    return sum([data_dict["data"].shape[0] for data_dict in dataset])
 
 
 def generalized_outer(xs, ys):
@@ -92,7 +109,7 @@ def generalized_outer(xs, ys):
     ys = ys if isinstance(ys, (tuple, list)) else [ys]
 
     block_array = [
-        [np.einsum('ni,nj->nij', x ,y) for y in ys]
+        [np.einsum('...i,...j->...ij', x ,y) for y in ys]
         for x in xs]
 
     return np.concatenate([

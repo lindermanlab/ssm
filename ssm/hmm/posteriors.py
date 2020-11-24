@@ -24,7 +24,6 @@ class HMMPosterior(object):
         # f = jit(grad(hmm_log_normalizer, has_aux=True))
         # (_, Ezzp1, Ez), log_normalizer = f(*self._natural_params)
         log_normalizer, (Ez0, Ezzp1, Ez) = hmm_expected_states(*self._natural_params)
-        assert np.all(np.isfinite(Ez))
         self._posterior = dict(Ez=Ez,
                                Ezzp1=Ezzp1,
                                log_normalizer=log_normalizer)
@@ -87,5 +86,5 @@ class HMMPosterior(object):
         states = self._posterior["Ez"]
         # TODO: The conditional mean might need the data_dict as well
         means = np.array([
-            o.mean for o in self.model.observation_distributions])
+            o.mean() for o in self.model.observation_distributions])
         return np.dot(states, means)
