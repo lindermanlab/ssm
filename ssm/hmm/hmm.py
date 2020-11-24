@@ -406,7 +406,6 @@ class HMM(object):
         _, (states, data) = lax.scan(sample_next, initial_state, keys)
         return states, data
 
-
     @format_dataset
     def infer_posterior(self, dataset):
         """Compute the posterior distribution for a given dataset using
@@ -486,6 +485,7 @@ class HMM(object):
         observations_state, update_observations = \
             self.observations.proximal_optimizer(total_num_datapoints, step_size)
 
+        raise NotImplementedError
         # Choose random data for each iteration
         # data_indices = npr.choice(len(dataset), size=num_iters)
 
@@ -605,3 +605,79 @@ class HMM(object):
         # Run the fitting algorithm
         results = _fitting_methods[method](rng, dataset, **kwargs)
         return (rng, results) if make_rng else results
+
+
+class AutoregressiveHMM(HMM):
+    """A hidden Markov model in which the observations at time :math:`t` depend
+    on past observations at times :math:`t - \ell` for :math:`\ell=1,\ldots,L`,
+    where :math:`L` is the number of lags.
+
+    In addition to the arguments for the regular HMM, you must specify the number
+    of past timesteps that the ARHMM depends on.
+
+    We need to write a slightly different `sample` function for this model.
+    """
+    def __init__(self,
+                 num_states,
+                 num_lags,
+                 initial_state="uniform",
+                 initial_state_kwargs={},
+                 transitions="standard",
+                 transitions_prior=None,
+                 transition_kwargs={},
+                 observations="gaussian",
+                 observations_prior=None,
+                 observation_kwargs={}):
+        self.num_lags = num_lags
+        super(AutoregressiveHMM, self).__init__(
+            num_states,
+            initial_state=initial_state,
+            initial_state_kwargs=initial_state_kwargs,
+            transitions=transitions,
+            transition_kwargs=transition_kwargs,
+            observations=observations,
+            observation_kwargs=observation_kwargs)
+
+    def sample(self, rng, num_timesteps, prefix=None, covariates=None, **kwargs):
+        """
+        Sample synthetic data from the model. Optionally, condition on a given
+        prefix (preceding discrete states and data).
+
+        Args
+            rng: jax.random.PRNGKey
+            num_timesteps: integer number of time steps to sample
+
+        Returns:
+            states: a numpy array with the sampled discrete states
+            data: a numpy array of sampled data
+        """
+        # Sample initial state
+        rng_init, rng = jr.split(rng, 2)
+        initial_state = jr.choice(rng_init, self.num_states)
+
+        # Precompute sample functions for each observation and transition distribution
+        def _sample_trans(d): return lambda seed: d.sample(seed=seed)
+        trans_sample_funcs = [_sample_trans(d) for d in self.transitions.conditional_dists]
+
+        def _sample_obs(d): return lambda args: d.sample(*args)
+        obs_sample_funcs = [_sample_obs(d) for d in self.observations.conditional_dists]
+
+        # Sample one step at a time with lax.scan
+        keys = jr.split(rng, num_timesteps)
+        def sample_next(carry, key):
+            # unpack the history
+            curr_state, past_data = carry
+            # initialize rng keys
+            key1, key2 = jr.split(key, 2)
+            # Sample observation
+            curr_obs = lax.switch(curr_state, obs_sample_funcs, (key1, past_data))
+            # Sample next state
+            next_state = lax.switch(curr_state, trans_sample_funcs, key2)
+            # update the carry
+            new_carry = (next_state, np.row_stack([past_data[1:], curr_obs]))
+            return new_carry, (curr_state, curr_obs)
+
+
+        initial_carry = (initial_state, np.zeros((self.num_lags, self.observation_distributions[0].dim)))
+        _, (states, data) = lax.scan(sample_next, initial_carry, keys)
+        return states, data
