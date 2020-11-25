@@ -9,6 +9,7 @@ from jax import jit, lax
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 
 import jxf.distributions as dists
+import jxf.regressions as regr
 
 from ssm.hmm.initial_state import InitialState, UniformInitialState
 from ssm.hmm.transitions import Transitions, StationaryTransitions
@@ -27,7 +28,6 @@ _TRANSITION_CLASSES = dict(
 )
 
 _OBSERVATION_CLASSES = dict(
-    auto_regression=dists.LinearAutoRegression,
     bernoulli=dists.Bernoulli,
     beta=dists.Beta,
     binomial=dists.Binomial,
@@ -35,7 +35,6 @@ _OBSERVATION_CLASSES = dict(
     dirichlet=dists.Dirichlet,
     gamma=dists.Gamma,
     gaussian=dists.MultivariateNormalFullCovariance,
-    linear_regression=dists.LinearRegression,
     multivariate_normal=dists.MultivariateNormalFullCovariance,
     # multivariate_t=dists.MultivariateStudentsT,
     # multivariate_t_regression=dists.MultivariateStudentsTLinearRegression,
@@ -123,11 +122,11 @@ class HMM(object):
                  observations_prior=None,
                  observation_kwargs={}):
         self.num_states = num_states
-        self.initial_state = self.__build_initial_state(
+        self.initial_state = self._build_initial_state(
             num_states, initial_state, **initial_state_kwargs)
-        self.transitions = self.__build_transitions(
+        self.transitions = self._build_transitions(
             num_states, transitions, transitions_prior, **transition_kwargs)
-        self.observations = self.__build_observations(
+        self.observations = self._build_observations(
             num_states, observations, observations_prior, **observation_kwargs)
 
     def tree_flatten(self):
@@ -143,7 +142,7 @@ class HMM(object):
                    transitions=transitions,
                    observations=observations)
 
-    def __build_initial_state(self, num_states,
+    def _build_initial_state(self, num_states,
                               initial_state,
                               **initial_state_kwargs):
         """Helper function to construct initial state distribution
@@ -160,7 +159,7 @@ class HMM(object):
             assert isinstance(initial_state, InitialState)
             return initial_state
 
-    def __build_transitions(self, num_states,
+    def _build_transitions(self, num_states,
                             transitions,
                             transitions_prior,
                             **transitions_kwargs):
@@ -183,7 +182,7 @@ class HMM(object):
             assert isinstance(transitions, Transitions)
             return transitions
 
-    def __build_observations(self, num_states,
+    def _build_observations(self, num_states,
                              observations,
                              observations_prior,
                              **observations_kwargs):
@@ -445,7 +444,7 @@ class HMM(object):
         for itr in pbar:
             model, lp = step(model)
             log_probs.append(lp)
-
+            assert np.isfinite(lp)
             # Update progress bar
             if verbosity >= Verbosity.LOUD:
                 pbar.set_description("LP: {:.3f}".format(lp))
@@ -558,7 +557,7 @@ class HMM(object):
             method="em",
             rng=None,
             initialize=True,
-            verbose=Verbosity.LOUD,
+            verbosity=Verbosity.LOUD,
             **kwargs):
         """
         Fit the parameters of the HMM using the specified method.
@@ -577,7 +576,7 @@ class HMM(object):
 
         rng: jax.PRNGKey for random initialization and/or fitting
 
-        verbose: specify how verbose the print-outs should be.  See
+        verbosity: specify how verbose the print-outs should be.  See
         `ssm.util.Verbosity`.
 
         **kwargs: keyword arguments are passed to the given fitting method.
@@ -598,17 +597,22 @@ class HMM(object):
         if initialize:
             # TODO: allow for kwargs to initialize
             rng_init, rng = jr.split(rng, 2)
-            if verbose >= Verbosity.LOUD : print("Initializing...")
+            if verbosity >= Verbosity.LOUD : print("Initializing...")
             self.initialize(rng_init, dataset)
-            if verbose >= Verbosity.LOUD: print("Done.")
+            if verbosity >= Verbosity.LOUD: print("Done.")
 
         # Run the fitting algorithm
         results = _fitting_methods[method](rng, dataset, **kwargs)
         return (rng, results) if make_rng else results
 
 
+_ARHMM_OBSERVATION_CLASSES = dict(
+    gaussian=regr.LinearRegression,
+)
+
+@register_pytree_node_class
 class AutoregressiveHMM(HMM):
-    """A hidden Markov model in which the observations at time :math:`t` depend
+    r"""A hidden Markov model in which the observations at time :math:`t` depends
     on past observations at times :math:`t - \ell` for :math:`\ell=1,\ldots,L`,
     where :math:`L` is the number of lags.
 
@@ -637,6 +641,59 @@ class AutoregressiveHMM(HMM):
             transition_kwargs=transition_kwargs,
             observations=observations,
             observation_kwargs=observation_kwargs)
+
+    def tree_flatten(self):
+        aux_data = (self.num_states, self.num_lags)
+        children = (self.initial_state, self.transitions, self.observations)
+        return children, aux_data
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        num_states, num_lags = aux_data
+        initial_state, transitions, observations = children
+        return cls(num_states, num_lags,
+                   initial_state=initial_state,
+                   transitions=transitions,
+                   observations=observations)
+
+    def _build_observations(self, num_states,
+                             observations,
+                             observations_prior,
+                             **observations_kwargs):
+
+        # convert observations into list of Distribution classes (or instances)
+        def _check(obs_name):
+            assert obs_name in _ARHMM_OBSERVATION_CLASSES, \
+                "`observations` must be one of: {}".format(_ARHMM_OBSERVATION_CLASSES.keys())
+
+        def _convert(obs):
+            if isinstance(obs, str):
+                _check(obs)
+                return _ARHMM_OBSERVATION_CLASSES[obs.lower()]
+            elif isinstance(obs, regr.LinearRegression):
+                # It's a JXF distribution
+                return obs
+            else:
+                raise Exception("`observations` must be either strings or "
+                                "Distribution instances")
+
+        if isinstance(observations, str):
+            observations = [_convert(observations)] * num_states
+            return Observations(num_states,
+                                observations,
+                                observations_prior,
+                                **observations_kwargs)
+
+        elif isinstance(observations, (tuple, list)):
+            assert len(observations) == num_states
+            observations = list(map(_convert, observations))
+            return Observations(num_states,
+                                observations,
+                                observations_prior,
+                                **observations_kwargs)
+        else:
+            assert isinstance(observations, Observations)
+            return observations
 
     def sample(self, rng, num_timesteps, prefix=None, covariates=None, **kwargs):
         """
@@ -670,7 +727,10 @@ class AutoregressiveHMM(HMM):
             # initialize rng keys
             key1, key2 = jr.split(key, 2)
             # Sample observation
-            curr_obs = lax.switch(curr_state, obs_sample_funcs, (key1, past_data))
+            covariates = regr.make_next_autoregression_covariate(past_data,
+                                                                 self.num_lags,
+                                                                 fit_intercept=True)
+            curr_obs = lax.switch(curr_state, obs_sample_funcs, (covariates, key1))
             # Sample next state
             next_state = lax.switch(curr_state, trans_sample_funcs, key2)
             # update the carry
@@ -678,6 +738,17 @@ class AutoregressiveHMM(HMM):
             return new_carry, (curr_state, curr_obs)
 
 
-        initial_carry = (initial_state, np.zeros((self.num_lags, self.observation_distributions[0].dim)))
-        _, (states, data) = lax.scan(sample_next, initial_carry, keys)
+        carry = (initial_state, np.zeros((self.num_lags, self.observation_distributions[0].data_dimension)))
+        _, (states, data) = lax.scan(sample_next, carry, keys)
         return states, data
+
+    @format_dataset
+    def preprocess(self, dataset):
+        """Preprocess the dataset to construct features for the autoregressive model.
+        """
+        for data in dataset:
+            data["covariates"] = \
+                regr.make_autoregression_covariates(data["data"],
+                                                    self.num_lags,
+                                                    fit_intercept=True)
+        return dataset
