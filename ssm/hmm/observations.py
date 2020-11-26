@@ -72,19 +72,25 @@ class Observations(object):
                 "Invalid initialize method: {}".format(method))
 
         # Construct subsets of the data and fit the distributions
+        @jit
         def _initialize(idx_and_conditional_dist):
             idx, conditional_dist = idx_and_conditional_dist
-            data_subsets = []
-            for data_dict, assignment in zip(dataset, assignments):
-                n = data_dict["data"].shape[0]
-                subset = dict()
-                for k, v in data_dict.items():
-                    if isinstance(v, np.ndarray) and v.ndim >= 1 and v.shape[0] == n:
-                        subset[k] = v[assignment == idx]
-                    else:
-                        subset[k] = v
-                data_subsets.append(subset)
-            return conditional_dist.fit(data_subsets)
+            # print("Initializing distribution ", idx)
+            # data_subsets = []
+            # for data_dict, assignment in zip(dataset, assignments):
+            #     n = data_dict["data"].shape[0]
+            #     subset = dict()
+            #     for k, v in data_dict.items():
+            #         if isinstance(v, np.ndarray) and v.ndim >= 1 and v.shape[0] == n:
+            #             subset[k] = v[assignment == idx]
+            #         else:
+            #             subset[k] = v
+            #     data_subsets.append(subset)
+            # return conditional_dist.fit(data_subsets, weights)
+            weights = []
+            for assignment in assignments:
+                weights.append((assignment == idx).astype(np.float32))
+            return conditional_dist.fit(dataset, weights)
 
         self.conditional_dists = \
             list(map(_initialize, enumerate(self.conditional_dists)))
@@ -102,7 +108,7 @@ class Observations(object):
         return np.column_stack([obs.log_prob(data, **kwargs) for obs in self.conditional_dists])
 
     @format_dataset
-    def m_step(self, dataset, posteriors, **kwargs):
+    def m_step(self, dataset, posteriors):
         def _m_step(idx_and_conditional_dist):
             idx, conditional_dist = idx_and_conditional_dist
             weights = [p.expected_states()[:, idx] for p in posteriors]
@@ -110,6 +116,41 @@ class Observations(object):
 
         self.conditional_dists = \
             list(map(_m_step, enumerate(self.conditional_dists)))
+
+    @format_dataset
+    def initialize_stochastic_em(self, dataset, step_size=0.75):
+        initial_state, update_fns, get_distribution_fns = \
+            list(zip(*[dist.proximal_optimizer(prior=self.prior,
+                                               step_size=step_size,
+                                               **self.observations_kwargs)
+                       for dist in self.conditional_dists]))
+        metadata = num_datapoints(dataset), update_fns, get_distribution_fns
+        return metadata, initial_state
+
+    @format_dataset
+    def stochastic_m_step(self,
+                          itr,
+                          dataset,
+                          posteriors,
+                          metadata,
+                          optimizer_state):
+        """Perform one M step in the stochastic EM algorithm.
+        """
+        total_num_datapoints, update_fns, get_distribution_fns = metadata
+        scale_factor = total_num_datapoints / num_datapoints(dataset)
+        new_opt_state = []
+        for idx, (update_fn, state) in enumerate(zip(update_fns, optimizer_state)):
+            weights = [p.expected_states()[:, idx] for p in posteriors]
+            new_opt_state.append(update_fn(itr,
+                                           dataset,
+                                           state,
+                                           weights=weights,
+                                           scale_factor=scale_factor))
+
+        # Update the conditional distributions
+        self.conditional_dists = [f(state) for f, state in zip(get_distribution_fns, new_opt_state)]
+        return new_opt_state
+
 
     def proximal_optimizer(self, total_num_datapoints, step_size=0.75):
         """Return an optimizer triplet, like jax.experimental.optimizers,
@@ -154,5 +195,7 @@ class Observations(object):
             # Update the conditional distributions
             self.conditional_dists = \
                 [f(this_state) for f, this_state in zip(get_distribution_fns, state)]
+
+            return new_states
 
         return initial_state, update

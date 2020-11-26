@@ -1,7 +1,9 @@
 import jax.numpy as np
+from jax.tree_util import register_pytree_node_class
 from ssm.hmm.messages import hmm_expected_states, hmm_filter, hmm_sample, viterbi
 
 
+@register_pytree_node_class
 class HMMPosterior(object):
     """
     Posterior distribution on the latent states of an HMM.
@@ -16,6 +18,15 @@ class HMMPosterior(object):
 
         # Perform inference to compute posterior expectations
         self.update()
+
+    def tree_flatten(self):
+        return ((self.model, self.data_dict), self._posterior)
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        posterior = cls(*children)
+        posterior._posterior = aux_data
+        return posterior
 
     def update(self):
         """

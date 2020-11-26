@@ -9,7 +9,7 @@ from jax import jit, lax
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 
 import jxf.distributions as dists
-import jxf.regressions as regr
+import jxf.regressions as regrs
 
 from ssm.hmm.initial_state import InitialState, UniformInitialState
 from ssm.hmm.transitions import Transitions, StationaryTransitions
@@ -37,12 +37,8 @@ _OBSERVATION_CLASSES = dict(
     gaussian=dists.MultivariateNormalFullCovariance,
     multivariate_normal=dists.MultivariateNormalFullCovariance,
     # multivariate_t=dists.MultivariateStudentsT,
-    # multivariate_t_regression=dists.MultivariateStudentsTLinearRegression,
-    # multivariate_t_auto_regression=dists.MultivariateStudentsTAutoRegression,
     mvn=dists.MultivariateNormalFullCovariance,
     normal=dists.Normal,
-    # robust_regression=dists.MultivariateStudentsTLinearRegression,
-    # robust_auto_regression=dists.MultivariateStudentsTAutoRegression,
     poisson=dists.Poisson,
     students_t=dists.StudentT,
 )
@@ -435,6 +431,7 @@ class HMM(object):
             model.initial_state.m_step(dataset, posteriors)
             model.transitions.m_step(dataset, posteriors)
             model.observations.m_step(dataset, posteriors)
+
             return model, lp / num_datapoints(dataset)
 
         # Run the EM algorithm to convergence
@@ -444,7 +441,8 @@ class HMM(object):
         for itr in pbar:
             model, lp = step(model)
             log_probs.append(lp)
-            assert np.isfinite(lp)
+            assert np.isfinite(lp) #and (log_probs[-1] >= log_probs[-2] or np.isnan(log_probs[-2]))
+
             # Update progress bar
             if verbosity >= Verbosity.LOUD:
                 pbar.set_description("LP: {:.3f}".format(lp))
@@ -466,7 +464,7 @@ class HMM(object):
         return np.array(log_probs), posteriors
 
     @format_dataset
-    def _fit_stochastic_em(self, dataset,
+    def _fit_stochastic_em(self, rng, dataset,
                            validation_dataset=None,
                            num_iters=100,
                            step_size_delay=1.0,
@@ -476,80 +474,83 @@ class HMM(object):
         # Initialize the step size schedule
         step_size = lambda itr: itr ** (-step_size_forgetting_rate)
 
-        # Initialize the optimizers
-        total_num_datapoints = num_datapoints(dataset)
-        transitions_state, update_transitions = \
-            self.transitions.proximal_optimizer(total_num_datapoints, step_size)
+        # Initialize the stochastic EM states for each component of the model
+        components = [self.transitions, self.observations]
+        metadata, optimizer_state = \
+            list(zip(*[component.initialize_stochastic_em(dataset, step_size)
+                       for component in components]))
 
-        observations_state, update_observations = \
-            self.observations.proximal_optimizer(total_num_datapoints, step_size)
+        @jit
+        def validation_log_prob(model):
+            if validation_dataset is None:
+                return np.nan
 
-        raise NotImplementedError
-        # Choose random data for each iteration
-        # data_indices = npr.choice(len(dataset), size=num_iters)
+            lp = self.log_prior()
+            lp += sum([HMMPosterior(model, data).marginal_likelihood()
+                       for data in validation_dataset])
+            return lp / num_datapoints(validation_dataset)
 
-        # def validation_log_prob():
-        #     if validation_dataset is None:
-        #         return np.nan
+        @jit
+        def step(model, itr, minibatch, optimizer_state):
+            # E Step
+            posteriors = [HMMPosterior(model, data) for data in minibatch]
 
-        #     lp = self.log_prior()
-        #     for batch in validation_dataset:
-        #         posterior = HMMPosterior(self, batch)
-        #         lp += posterior.marginal_likelihood()
-        #     return lp / num_datapoints(validation_dataset)
+            # Compute log probability on this batch
+            lp = model.log_prior()
+            lp += sum([p.marginal_likelihood() for p in posteriors])
 
-        # def batch_log_prob(batch, posterior):
-        #     scale_factor = total_num_datapoints / len(batch["data"])
-        #     lp = self.log_prior() + scale_factor * posterior.marginal_likelihood()
-        #     # lp = scale_factor * posterior.marginal_likelihood()
-        #     return lp / total_num_datapoints
+            # M Step
+            components = [model.transitions, model.observations]
+            new_optimizer_state = []
+            for component, meta, state in zip(components, metadata, optimizer_state):
+                new_optimizer_state.append(
+                    component.stochastic_m_step(itr,
+                                                minibatch,
+                                                posteriors,
+                                                meta,
+                                                state))
 
-        # def e_step(batch):
-        #     return HMMPosterior(self, batch)
+            return model, lp / num_datapoints(minibatch), new_optimizer_state
 
-        # def m_step(batch, posterior, itr):
-        #     # self.initial_state.stochastic_m_step(*args, **kwargs)
-        #     transitions_state = update_transitions(minibatch, posteriors, itr, transitions_state)
-        #     observations_state = update_observations(minibatch, posteriors, itr, observations_state)
+        # Run stochastic EM algorithm
+        model = self
+        batch_log_probs = []
+        validation_log_probs = []
+        pbar = ssm_pbar(num_iters, verbosity, "Batch LP {:.2f}", np.nan)
+        for epoch in pbar:
+            rng, this_rng = jr.split(rng, 2)
+            perm = jr.permutation(this_rng, len(dataset))
+            for batch_idx in range(len(dataset)):
+                itr = epoch * len(dataset) + batch_idx
 
-        # # Run stochastic EM algorithm
-        # batch_log_probs = []
-        # if verbosity >= Verbosity.LOUD: print("Computing initial log probability...")
-        # validation_log_probs = [validation_log_prob()]
-        # if verbosity >= Verbosity.LOUD: print("Done.")
+                # grab minibatch for this iteration and perform one em update
+                minibatch = [dataset[perm[batch_idx]]]
+                model, lp, optimizer_state = step(model, itr, minibatch, optimizer_state)
+                batch_log_probs.append(lp)
+                assert np.isfinite(lp)
 
-        # pbar = ssm_pbar(num_iters, verbosity,
-        #                 "Validation LP: {:.2f} Batch LP {:.2f}",
-        #                 validation_log_probs[0], np.nan)
-        # for epoch in pbar:
-        #     perm = npr.permutation(len(dataset))
-        #     for batch_idx in range(len(dataset)):
-        #         itr = epoch * len(dataset) + batch_idx
+                # Compute complete log prob and update pbar
+                if verbosity >= Verbosity.LOUD:
+                    pbar.set_description("Batch LP: {:.2f}".format(lp))
 
-        #         # grab minibatch for this iteration and perform one em update
-        #         batch = dataset[perm[batch_idx]]
-        #         posterior = e_step(batch)
-        #         m_step(batch, posterior, step_sizes[itr])
-        #         batch_log_probs.append(batch_log_prob(batch, posterior))
+            # Each epoch, compute the likelihood of the validation data
+            validation_log_probs.append(validation_log_prob(model))
+            pbar.update(1)
 
-        #         # Update per-batch progress bar
-        #         if verbosity >= 2:
-        #             pbar.set_description("Validation LP: {:.2f} Batch LP: {:.2f}"\
-        #                 .format(validation_log_probs[-1], batch_log_probs[-1]))
+        # Copy over the final model parameters
+        self.initial_state = model.initial_state
+        self.transitions = model.transitions
+        self.observations = model.observations
 
-        #     # Compute complete log prob and update pbar
-        #     validation_log_probs.append(validation_log_prob())
-        #     if verbosity >= 2:
-        #         pbar.set_description("Validation LP: {:2f} Batch LP: {:.2f}"\
-        #                 .format(validation_log_probs[-1], batch_log_probs[-1]))
-        #         pbar.update(1)
+        # Finally, compute the posteriors and return
+        posteriors = [HMMPosterior(self, data) for data in dataset]
+        if len(posteriors) == 1:
+            posteriors = posteriors[0]
 
-        # # Finally, compute the posteriors and return
-        # posteriors = [HMMPosterior(self, batch) for batch in dataset]
-        # if len(posteriors) == 1:
-        #     posteriors = posteriors[0]
-
-        # return np.array(validation_log_probs), posteriors
+        if validation_dataset is not None:
+            return np.array(batch_log_probs), np.array(validation_log_probs), posteriors
+        else:
+            return np.array(batch_log_probs), posteriors
 
     @format_dataset
     def fit(self,
@@ -587,7 +588,7 @@ class HMM(object):
 
         _fitting_methods = dict(
             em=self._fit_em,
-            # stochastic_em=self._fit_stochastic_em,
+            stochastic_em=self._fit_stochastic_em,
             )
 
         if method not in _fitting_methods:
@@ -607,7 +608,7 @@ class HMM(object):
 
 
 _ARHMM_OBSERVATION_CLASSES = dict(
-    gaussian=regr.LinearRegression,
+    gaussian=regrs.GaussianLinearRegression,
 )
 
 @register_pytree_node_class
@@ -670,7 +671,7 @@ class AutoregressiveHMM(HMM):
             if isinstance(obs, str):
                 _check(obs)
                 return _ARHMM_OBSERVATION_CLASSES[obs.lower()]
-            elif isinstance(obs, regr.LinearRegression):
+            elif isinstance(obs, regrs.GaussianLinearRegression):
                 # It's a JXF distribution
                 return obs
             else:
@@ -727,7 +728,7 @@ class AutoregressiveHMM(HMM):
             # initialize rng keys
             key1, key2 = jr.split(key, 2)
             # Sample observation
-            covariates = regr.make_next_autoregression_covariate(past_data,
+            covariates = regrs.make_next_autoregression_covariate(past_data,
                                                                  self.num_lags,
                                                                  fit_intercept=True)
             curr_obs = lax.switch(curr_state, obs_sample_funcs, (covariates, key1))
@@ -746,9 +747,9 @@ class AutoregressiveHMM(HMM):
     def preprocess(self, dataset):
         """Preprocess the dataset to construct features for the autoregressive model.
         """
-        for data in dataset:
-            data["covariates"] = \
-                regr.make_autoregression_covariates(data["data"],
-                                                    self.num_lags,
-                                                    fit_intercept=True)
-        return dataset
+        return list(map(
+            lambda data_dict: \
+                regrs.preprocess_autoregression_data(**data_dict,
+                                                     num_lags=self.num_lags,
+                                                     fit_intercept=True),
+            dataset))

@@ -111,8 +111,6 @@ class StationaryTransitions(Transitions):
         # return np.sum([d.log_prior() for d in self.conditional_dists])
 
     def log_transition_matrices(self, data, **kwargs):
-        # with np.errstate(divide='ignore'):
-        #     return np.log(self.get_transition_matrix())
         return np.log(self.transition_matrix)
 
     def permute(self, perm):
@@ -140,6 +138,44 @@ class StationaryTransitions(Transitions):
             new_conditional_dists.append(
                 dist.fit_with_stats(suff_stats, num_datapoints, prior=self.prior))
         self.conditional_dists = new_conditional_dists
+
+    @format_dataset
+    def initialize_stochastic_em(self, dataset, step_size=0.75):
+        initial_state, update_fns, get_distribution_fns = \
+            list(zip(*[dist.proximal_optimizer(prior=self.prior,
+                                               step_size=step_size)
+                       for dist in self.conditional_dists]))
+        num_transitions = sum([num_datapoints(data) - 1 for data in dataset])
+        metadata = num_transitions, update_fns, get_distribution_fns
+        return metadata, initial_state
+
+    @format_dataset
+    def stochastic_m_step(self,
+                          itr,
+                          dataset,
+                          posteriors,
+                          metadata,
+                          optimizer_state):
+        """Perform one M step in the stochastic EM algorithm.
+        """
+        total_num_transitions, update_fns, get_distribution_fns = metadata
+        scale_factor = total_num_transitions / (num_datapoints(dataset) - 1)
+        expected_transitions = sum([posterior.expected_transitions() for posterior in posteriors])
+        new_opt_state = []
+        for update_fn, this_state, row in zip(update_fns, optimizer_state, expected_transitions):
+            new_opt_state.append(update_fn(itr,
+                                           [],  # dummy dataset
+                                           this_state,
+                                           suff_stats=(row[:-1],),
+                                           num_datapoints=row.sum(),
+                                           scale_factor=scale_factor))
+
+        # Update the conditional distributions
+        self.conditional_dists = [f(this_state)
+                                  for f, this_state in zip(get_distribution_fns, new_opt_state)]
+
+        return new_opt_state
+
 
     def proximal_optimizer(self, total_num_datapoints, step_size=0.75):
         """Return an optimizer triplet, like jax.experimental.optimizers,
@@ -187,6 +223,8 @@ class StationaryTransitions(Transitions):
             # Update the conditional distributions
             self.conditional_dists = \
                 [f(this_state) for f, this_state in zip(get_distribution_fns, state)]
+
+            return new_states
 
         return initial_state, update
 
