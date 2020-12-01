@@ -43,7 +43,7 @@ class StickyRecurrentTransitions(InputDrivenTransitions):
         """
         Permute the discrete latent states.
         """
-        super(RecurrentSwitchTransitions, self).permute(perm)
+        super(StickyRecurrentTransitions, self).permute(perm)
         self.Rs = self.Rs[perm]
         self.Ss = self.Ss[perm]
 
