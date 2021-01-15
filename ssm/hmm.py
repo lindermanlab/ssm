@@ -88,6 +88,7 @@ class HMM(object):
             exponential=obs.ExponentialObservations,
             bernoulli=obs.BernoulliObservations,
             categorical=obs.CategoricalObservations,
+            input_driven_obs=obs.InputDrivenObservations,
             poisson=obs.PoissonObservations,
             vonmises=obs.VonMisesObservations,
             ar=obs.AutoRegressiveObservations,
@@ -199,10 +200,13 @@ class HMM(object):
             assert input.shape == (T,) + M
 
         # Get the type of the observations
-        dummy_data = self.observations.sample_x(0, np.empty(0,) + D)
-        dtype = dummy_data.dtype
+        if isinstance(self.observations, obs.InputDrivenObservations):
+            dtype = int
+        else:
+            dummy_data = self.observations.sample_x(0, np.empty(0, ) + D)
+            dtype = dummy_data.dtype
 
-        # fit( the data array
+        # fit the data array
         if prefix is None:
             # No prefix is given.  Sample the initial state as the prefix.
             pad = 1
@@ -236,7 +240,8 @@ class HMM(object):
         for t in range(pad, pad+T):
             Pt = self.transitions.transition_matrices(data[t-1:t+1], input[t-1:t+1], mask=mask[t-1:t+1], tag=tag)[0]
             z[t] = npr.choice(self.K, p=Pt[z[t-1]])
-            data[t] = self.observations.sample_x(z[t], data[:t], input=input[t], tag=tag, with_noise=with_noise)
+            data[t] = self.observations.sample_x(z[t], data[:t], input=input[t], tag=tag,
+                                                 with_noise=with_noise)
 
         # Return the whole data if no prefix is given.
         # Otherwise, just return the simulated part.

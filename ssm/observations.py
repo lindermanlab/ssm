@@ -626,6 +626,93 @@ class CategoricalObservations(Observations):
         """
         raise NotImplementedError
 
+class InputDrivenObservations(Observations):
+
+    def __init__(self, K, D, M=0, C=2, prior_mean = 0, prior_sigma=1000):
+        """
+        @param K: number of states
+        @param D: dimensionality of output
+        @param C: number of distinct classes for each dimension of output
+        @param prior_sigma: parameter governing strength of prior. Prior on GLM weights is multivariate
+        normal distribution with mean 'prior_mean' and diagonal covariance matrix (prior_sigma is on diagonal)
+        """
+        super(InputDrivenObservations, self).__init__(K, D, M)
+        self.C = C
+        self.M = M
+        self.D = D
+        self.K = K
+        self.prior_mean = prior_mean
+        self.prior_sigma = prior_sigma
+        # Parameters linking input to distribution over output classes
+        self.Wk = npr.randn(K, C - 1, M)
+
+    @property
+    def params(self):
+        return self.Wk
+
+    @params.setter
+    def params(self, value):
+        self.Wk = value
+
+    def permute(self, perm):
+        self.Wk = self.Wk[perm]
+
+    def log_prior(self):
+        lp = 0
+        for k in range(self.K):
+            for c in range(self.C - 1):
+                weights = self.Wk[k][c]
+                lp += stats.multivariate_normal_logpdf(weights, mus=np.repeat(self.prior_mean, (self.M)),
+                                                 Sigmas=((self.prior_sigma) ** 2) * np.identity(self.M))
+        return lp
+
+    # Calculate time dependent logits - output is matrix of size TxKxC
+    # Input is size TxM
+    def calculate_logits(self, input):
+        """
+        Return array of size TxKxC containing log(pr(yt=C|zt=k))
+        :param input: input array of covariates of size TxM
+        :return: array of size TxKxC containing log(pr(yt=c|zt=k, ut)) for all c in {1, ..., C} and k in {1, ..., K}
+        """
+        # Transpose array dimensions, so that array is now of shape ((C-1)xKx(M+1))
+        Wk_tranpose = np.transpose(self.Wk, (1, 0, 2))
+        # Stack column of zeros to transform array from size ((C-1)xKx(M+1)) to ((C)xKx(M+1)) and then transform shape back to (KxCx(M+1))
+        Wk = np.transpose(np.vstack([Wk_tranpose, np.zeros((1, Wk_tranpose.shape[1], Wk_tranpose.shape[2]))]),
+                          (1, 0, 2))
+        # Input effect; transpose so that output has dims TxKxC
+        time_dependent_logits = np.transpose(np.dot(Wk, input.T), (2, 0, 1)) #Note: this has an unexpected effect when both input (and thus Wk) are empty arrays and returns an array of zeros
+        time_dependent_logits = time_dependent_logits - logsumexp(time_dependent_logits, axis=2, keepdims=True)
+        return time_dependent_logits
+
+    def log_likelihoods(self, data, input, mask, tag):
+        time_dependent_logits = self.calculate_logits(input)
+        assert self.D == 1, "InputDrivenObservations written for D = 1!"
+        mask = np.ones_like(data, dtype=bool) if mask is None else mask
+        return stats.categorical_logpdf(data[:, None, :], time_dependent_logits[:, :, None, :], mask=mask[:, None, :])
+
+    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
+        assert self.D == 1, "SoftmaxObservations written for D = 1!"
+        if input.ndim == 1 and input.shape == (self.M,): # if input is vector of size self.M (one time point), expand dims to be (1, M)
+            input = np.expand_dims(input, axis=0)
+        time_dependent_logits = self.calculate_logits(input)  # size TxKxC
+        ps = np.exp(time_dependent_logits)
+        T = time_dependent_logits.shape[0]
+        if T == 1:
+            sample = np.array([npr.choice(self.C, p=ps[t, z]) for t in range(T)])
+        elif T > 1:
+            sample = np.array([npr.choice(self.C, p=ps[t, z[t]]) for t in range(T)])
+        return sample
+
+    def m_step(self, expectations, datas, inputs, masks, tags, optimizer = "bfgs", **kwargs):
+        Observations.m_step(self, expectations, datas, inputs, masks, tags, optimizer, **kwargs)
+
+    def smooth(self, expectations, data, input, tag):
+        """
+        Compute the mean observation under the posterior distribution
+        of latent discrete states.
+        """
+        raise NotImplementedError
+
 
 class _AutoRegressiveObservationsBase(Observations):
     """
