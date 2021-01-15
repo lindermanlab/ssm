@@ -240,7 +240,6 @@ class HMM(object):
         for t in range(pad, pad+T):
             Pt = self.transitions.transition_matrices(data[t-1:t+1], input[t-1:t+1], mask=mask[t-1:t+1], tag=tag)[0]
             z[t] = npr.choice(self.K, p=Pt[z[t-1]])
-            # TODO - revert this back to how it was
             data[t] = self.observations.sample_x(z[t], data[:t], input=input[t], tag=tag,
                                                  with_noise=with_noise)
 
