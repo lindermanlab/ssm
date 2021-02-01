@@ -691,7 +691,7 @@ class InputDrivenObservations(Observations):
         return stats.categorical_logpdf(data[:, None, :], time_dependent_logits[:, :, None, :], mask=mask[:, None, :])
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
-        assert self.D == 1, "SoftmaxObservations written for D = 1!"
+        assert self.D == 1, "InputDrivenObservations written for D = 1!"
         if input.ndim == 1 and input.shape == (self.M,): # if input is vector of size self.M (one time point), expand dims to be (1, M)
             input = np.expand_dims(input, axis=0)
         time_dependent_logits = self.calculate_logits(input)  # size TxKxC
