@@ -172,7 +172,7 @@ class SLDS(object):
         xmasks = [np.ones_like(x, dtype=bool) for x in xs]
 
         # Number of times to run the arhmm initialization (we'll use the one with the highest log probability as the initialization)
-        pbar  = ssm_pbar(num_init_restarts, 2, "ARHMM Initialization restarts", [''])
+        pbar  = ssm_pbar(num_init_restarts, verbose, "ARHMM Initialization restarts", [''])
 
         #Loop through initialization restarts
         best_lp = -np.inf
