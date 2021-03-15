@@ -41,7 +41,7 @@ class _CompoundLinearEmissions(Emissions):
         self.P = len(self.N_vec)
 
         # The main purpose of this class is to wrap a bunch of emissions instances
-        self.emissions_models = [_LinearEmissions(n, K, d) for n, d in zip(N_vec, D_vec)]
+        self.emissions_models = [_LinearEmissions(n, K, d, M=M) for n, d in zip(N_vec, D_vec)]
 
     @property
     def Cs(self):
@@ -146,7 +146,7 @@ class _CompoundOrthogonalLinearEmissions(Emissions):
         self.P = len(self.N_vec)
 
         # The main purpose of this class is to wrap a bunch of emissions instances
-        self.emissions_models = [_OrthogonalLinearEmissions(n, K, d) for n, d in zip(N_vec, D_vec)]
+        self.emissions_models = [_OrthogonalLinearEmissions(n, K, d, M=M) for n, d in zip(N_vec, D_vec)]
 
     @property
     def Cs(self):
