@@ -3,6 +3,7 @@ import warnings
 
 import jax.numpy as np
 import jax.random as jr
+from jax import jit
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 
 import jxf.distributions as dists
