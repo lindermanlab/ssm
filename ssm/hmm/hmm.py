@@ -291,7 +291,7 @@ class HMM(object):
         dataset: see help(HMM) for details
         """
         posteriors = [HMMPosterior(self, data_dict) for data_dict in dataset]
-        lp = np.sum([p.marginal_likelihood() for p in posteriors])
+        lp = sum([p.marginal_likelihood() for p in posteriors])
         return lp / num_datapoints(dataset), posteriors
 
     @format_dataset
