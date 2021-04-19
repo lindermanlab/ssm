@@ -73,21 +73,8 @@ class Observations(object):
                 "Invalid initialize method: {}".format(method))
 
         # Construct subsets of the data and fit the distributions
-        @jit
         def _initialize(idx_and_conditional_dist):
             idx, conditional_dist = idx_and_conditional_dist
-            # print("Initializing distribution ", idx)
-            # data_subsets = []
-            # for data_dict, assignment in zip(dataset, assignments):
-            #     n = data_dict["data"].shape[0]
-            #     subset = dict()
-            #     for k, v in data_dict.items():
-            #         if isinstance(v, np.ndarray) and v.ndim >= 1 and v.shape[0] == n:
-            #             subset[k] = v[assignment == idx]
-            #         else:
-            #             subset[k] = v
-            #     data_subsets.append(subset)
-            # return conditional_dist.fit(data_subsets, weights)
             weights = []
             for assignment in assignments:
                 weights.append((assignment == idx).astype(np.float32))
