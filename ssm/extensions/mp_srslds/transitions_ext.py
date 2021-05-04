@@ -43,7 +43,7 @@ class StickyRecurrentTransitions(InputDrivenTransitions):
         """
         Permute the discrete latent states.
         """
-        super(RecurrentSwitchTransitions, self).permute(perm)
+        super(StickyRecurrentTransitions, self).permute(perm)
         self.Rs = self.Rs[perm]
         self.Ss = self.Ss[perm]
 
@@ -64,10 +64,8 @@ class StickyRecurrentTransitions(InputDrivenTransitions):
         log_Ps_diag = np.tile(np.dot(data[:-1], self.Ss.T)[:,None,:],(1, self.K, 1))
         mult_diag=np.tile(np.identity(self.K)[None,:,:],(log_Ps_diag.shape[0],1,1))
 
-        log_Ps = log_Ps_diag*mult_diag #Diagonal elements (stickness) from past observations
-        log_Ps = log_Ps + np.identity(self.K)*self.s #Diagonal elements (stickness) bias
+        log_Ps = log_Ps + log_Ps_diag*mult_diag #Diagonal elements (stickness) from past observations
         log_Ps = log_Ps + log_Ps_offdiag*mult_offdiag #Off diagonal elements (state switching) from past observations
-        log_Ps = log_Ps + (1-np.identity(self.K))*self.r #Off diagonal elements (state switching) bias
 
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True) #Normalize
 
