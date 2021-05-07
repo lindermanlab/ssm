@@ -291,7 +291,7 @@ class HMM(object):
         dataset: see help(HMM) for details
         """
         posteriors = [HMMPosterior(self, data_dict) for data_dict in dataset]
-        lp = np.sum([p.marginal_likelihood() for p in posteriors])
+        lp = sum([p.marginal_likelihood() for p in posteriors])
         return lp / num_datapoints(dataset), posteriors
 
     @format_dataset
@@ -480,7 +480,7 @@ class HMM(object):
             list(zip(*[component.initialize_stochastic_em(dataset, step_size)
                        for component in components]))
 
-        @jit
+        # @jit
         def validation_log_prob(model):
             if validation_dataset is None:
                 return np.nan
@@ -490,7 +490,7 @@ class HMM(object):
                        for data in validation_dataset])
             return lp / num_datapoints(validation_dataset)
 
-        @jit
+        # @jit
         def step(model, itr, minibatch, optimizer_state):
             # E Step
             posteriors = [HMMPosterior(model, data) for data in minibatch]
@@ -527,11 +527,14 @@ class HMM(object):
                 minibatch = [dataset[perm[batch_idx]]]
                 model, lp, optimizer_state = step(model, itr, minibatch, optimizer_state)
                 batch_log_probs.append(lp)
-                assert np.isfinite(lp)
+                if not np.isfinite(lp):
+                    print("WARNING: lp not finite!")
+                # assert np.isfinite(lp), f"lp not finite: {lp}"
 
                 # Compute complete log prob and update pbar
                 if verbosity >= Verbosity.LOUD:
-                    pbar.set_description("Batch LP: {:.2f}".format(lp))
+                    pbar.set_description("Batch LP: {:.2f} ({:d}/{:d})"\
+                        .format(lp, batch_idx+1, len(dataset)))
 
             # Each epoch, compute the likelihood of the validation data
             validation_log_probs.append(validation_log_prob(model))
