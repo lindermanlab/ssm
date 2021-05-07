@@ -490,7 +490,7 @@ class HMM(object):
                        for data in validation_dataset])
             return lp / num_datapoints(validation_dataset)
 
-        # @jit
+        @jit
         def step(model, itr, minibatch, optimizer_state):
             # E Step
             posteriors = [HMMPosterior(model, data) for data in minibatch]
