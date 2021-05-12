@@ -446,10 +446,12 @@ class HMM(object):
             # Update progress bar
             if verbosity >= Verbosity.LOUD:
                 pbar.set_description("LP: {:.3f}".format(lp))
-                pbar.update(1)
 
             # Check for convergence
             if abs(log_probs[-1] - log_probs[-2]) < tol and itr > 1:
+                if verbosity >= Verbosity.LOUD:
+                    pbar.set_description("[converged] LP: {:.3f}".format(lp))
+                    pbar.refresh()
                 break
 
         # Copy over the final model parameters
@@ -480,19 +482,39 @@ class HMM(object):
             list(zip(*[component.initialize_stochastic_em(dataset, step_size)
                        for component in components]))
 
-        # @jit
+        @jit
+        def compute_log_prob(model, dataset):
+
+            if dataset is None:
+                return np.nan
+
+            lp = model.log_prior()
+            lp += sum([HMMPosterior(model, data).marginal_likelihood() 
+                        for data in dataset])
+
+            return lp / num_datapoints(dataset)
+
         def validation_log_prob(model):
             if validation_dataset is None:
                 return np.nan
 
-            lp = self.log_prior()
-            lp += sum([HMMPosterior(model, data).marginal_likelihood()
-                       for data in validation_dataset])
-            return lp / num_datapoints(validation_dataset)
+            # break validation dataset into chunks to keep input size small
+            # for XLA compilation
+            
+            # TODO reduce instead of for-loop?
+            val_lp = 0
+            for batch_idx in range(len(validation_dataset)):
+                minibatch = [validation_dataset[batch_idx]]
+                val_lp +=  compute_log_prob(model, minibatch)
+            val_lp /= len(validation_dataset)
+
+            return val_lp
 
         @jit
         def step(model, itr, minibatch, optimizer_state):
+            
             # E Step
+            # TODO: can we wrap this into the above function?
             posteriors = [HMMPosterior(model, data) for data in minibatch]
 
             # Compute log probability on this batch
@@ -527,9 +549,7 @@ class HMM(object):
                 minibatch = [dataset[perm[batch_idx]]]
                 model, lp, optimizer_state = step(model, itr, minibatch, optimizer_state)
                 batch_log_probs.append(lp)
-                if not np.isfinite(lp):
-                    print("WARNING: lp not finite!")
-                # assert np.isfinite(lp), f"lp not finite: {lp}"
+                assert np.isfinite(lp), f"lp not finite: {lp}"  # TODO: this throws sometimes (fp32?)
 
                 # Compute complete log prob and update pbar
                 if verbosity >= Verbosity.LOUD:
@@ -538,7 +558,6 @@ class HMM(object):
 
             # Each epoch, compute the likelihood of the validation data
             validation_log_probs.append(validation_log_prob(model))
-            pbar.update(1)
 
         # Copy over the final model parameters
         self.initial_state = model.initial_state
@@ -603,7 +622,7 @@ class HMM(object):
             rng_init, rng = jr.split(rng, 2)
             if verbosity >= Verbosity.LOUD : print("Initializing...")
             self.initialize(rng_init, dataset)
-            if verbosity >= Verbosity.LOUD: print("Done.")
+            if verbosity >= Verbosity.LOUD: print("Done.", flush=True)
 
         # Run the fitting algorithm
         results = _fitting_methods[method](rng, dataset, **kwargs)
