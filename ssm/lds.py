@@ -670,6 +670,7 @@ class SLDS(object):
                         continuous_maxiter=100,
                         emission_optimizer="lbfgs",
                         emission_optimizer_maxiter=100,
+                        start_with_discrete_update=True,
                         alpha=0.5,
                         learning=True):
         """
@@ -686,8 +687,9 @@ class SLDS(object):
         for itr in pbar:
             # 1. Update the discrete state posterior q(z) if K>1
             if self.K > 1:
-                self._fit_laplace_em_discrete_state_update(
-                    variational_posterior, datas, inputs, masks, tags, num_samples)
+                if itr > 0 or start_with_discrete_update:
+                    self._fit_laplace_em_discrete_state_update(
+                        variational_posterior, datas, inputs, masks, tags, num_samples)
 
             # 2. Update the continuous state posterior q(x)
             self._fit_laplace_em_continuous_state_update(
@@ -795,6 +797,7 @@ class SLDS(object):
     @ensure_args_are_lists
     def approximate_posterior(self, datas, inputs=None, masks=None, tags=None,
                               method="laplace_em", variational_posterior="structured_meanfield",
+                              variational_posterior_kwargs=None,
                               **kwargs):
         """
         Fit an approximate posterior to data, without updating model params.
@@ -817,7 +820,10 @@ class SLDS(object):
                             format(method, _fitting_methods.keys()))
 
         # Initialize the variational posterior
-        posterior = self._make_variational_posterior(variational_posterior, datas, inputs, masks, tags, method)
+        variational_posterior_kwargs = variational_posterior_kwargs or {}
+        posterior = self._make_variational_posterior(
+            variational_posterior, datas, inputs, masks, tags, method, **variational_posterior_kwargs)
+
         elbos = _fitting_methods[method](posterior, datas, inputs, masks, tags, learning=False, **kwargs)
         return elbos, posterior
 
