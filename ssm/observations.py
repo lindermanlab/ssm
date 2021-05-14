@@ -704,7 +704,113 @@ class InputDrivenObservations(Observations):
         return sample
 
     def m_step(self, expectations, datas, inputs, masks, tags, optimizer = "bfgs", **kwargs):
-        Observations.m_step(self, expectations, datas, inputs, masks, tags, optimizer, **kwargs)
+
+        T = sum([data.shape[0] for data in datas]) #total number of datapoints
+
+        def _multisoftplus(X):
+            '''
+            computes f(X) = log(1+sum(exp(X), axis =1)) and its first derivative
+            :param X: array of size Tx(C-1)
+            :return f(X) of size T and df of size (Tx(C-1))
+            '''
+            X_augmented = np.append(X, np.zeros((X.shape[0], 1)), 1) # append a column of zeros to X for rowmax calculation
+            rowmax = np.max(X_augmented, axis = 1, keepdims=1) #get max along column for log-sum-exp trick, rowmax is size T
+            # compute f:
+            f = np.log(np.exp(-rowmax[:,0]) + np.sum(np.exp(X - rowmax), axis = 1)) + rowmax[:,0]
+            # compute df
+            df = np.exp(X - rowmax)/np.expand_dims((np.exp(-rowmax[:,0]) + np.sum(np.exp(X - rowmax), axis = 1)), axis = 1)
+            return f, df
+
+        def _objective(params, k):
+            '''
+            computes term in negative expected complete loglikelihood that depends on weights for state k
+            :param params: vector of size (C-1)xM
+            :return term in negative expected complete LL that depends on weights for state k; scalar value
+            '''
+            W = np.reshape(params, (self.C - 1, self.M))
+            obj = 0
+            for data, input, mask, tag, (expected_states, _, _) \
+                    in zip(datas, inputs, masks, tags, expectations):
+                xproj = input @ W.T  # projection of input onto weight matrix for particular state, size is Tx(C-1)
+                f, _ = _multisoftplus(xproj)
+                assert data.shape[1] == 1, "InputDrivenObservations written for D = 1!"
+                data_one_hot = one_hot(data[:, 0], self.C)  # convert to one-hot representation of size TxC
+                temp_obj = (-np.sum(data_one_hot[:,:-1]*xproj, axis = 1) + f)@expected_states[:,k]
+                obj += temp_obj
+
+            # add contribution of prior:
+            if self.prior_sigma != 0:
+                obj += 1/(2*self.prior_sigma**2)*np.sum(W**2)
+            return obj / T
+
+        def _gradient(params, k):
+            '''
+            Explicit calculation of gradient of _objective w.r.t weight matrix for state k, W_{k}
+            :param params: vector of size (C-1)xM
+            :param k: state whose parameters we are currently optimizing
+            :return gradient of objective with respect to parameters; vector of size (C-1)xM
+            '''
+            W = np.reshape(params, (self.C-1, self.M))
+            grad = np.zeros((self.C-1, self.M))
+            for data, input, mask, tag, (expected_states, _, _) \
+                    in zip(datas, inputs, masks, tags, expectations):
+                xproj = input@W.T #projection of input onto weight matrix for particular state, size is Tx(C-1)
+                _, df = _multisoftplus(xproj)
+                assert data.shape[1] == 1, "InputDrivenObservations written for D = 1!"
+                data_one_hot = one_hot(data[:, 0], self.C) #convert to one-hot representation of size TxC
+                grad  += (df - data_one_hot[:,:-1]).T@(expected_states[:, [k]]*input) #gradient is shape (C-1,M)
+            # Add contribution to gradient from prior:
+            if self.prior_sigma != 0:
+                grad += (1/(self.prior_sigma)**2)*W
+            # Now flatten grad into a vector:
+            grad = grad.flatten()
+            return grad/T
+
+        def _hess(params, k):
+            '''
+            Explicit calculation of hessian of _objective w.r.t weight matrix for state k, W_{k}
+            :param params: vector of size (C-1)xM
+            :param k: state whose parameters we are currently optimizing
+            :return hessian of objective with respect to parameters; matrix of size ((C-1)xM) x ((C-1)xM)
+            '''
+            W = np.reshape(params, (self.C - 1, self.M))
+            hess = np.zeros(((self.C - 1)*self.M, (self.C - 1)*self.M))
+            for data, input, mask, tag, (expected_states, _, _) \
+                    in zip(datas, inputs, masks, tags, expectations):
+                xproj = input @ W.T  # projection of input onto weight matrix for particular state
+                _, df = _multisoftplus(xproj)
+                # center blocks:
+                dftensor = np.expand_dims(df, axis = 2) # dims are now (T,  (C-1), 1)
+                Xdf = np.expand_dims(input, axis = 1) * dftensor # multiply every input covariate term with every class derivative term for a given time step; dims are now (T, (C-1), M)
+                # reshape Xdf to (T, (C-1)*M)
+                Xdf = np.reshape(Xdf, (Xdf.shape[0], -1))
+                # weight Xdf by posterior state probabilities
+                pXdf = expected_states[:, [k]]*Xdf # output is size (T, (C-1)*M)
+                # outer product with input vector, size (M, (C-1)*M)
+                XXdf = input.T @ pXdf
+                # center blocks of hessian:
+                temp_hess = np.zeros(((self.C - 1) * self.M, (self.C - 1) * self.M))
+                for c in range(1, self.C):
+                    inds = range((c - 1)*self.M,c*self.M)
+                    temp_hess[np.ix_(inds, inds)] = XXdf[:, inds]
+                # off diagonal entries:
+                hess += temp_hess - Xdf.T@pXdf
+            # add contribution of prior to hessian
+            if self.prior_sigma != 0:
+                hess += (1 / (self.prior_sigma) ** 2)
+            return hess/T
+
+        from scipy.optimize import minimize
+        # Optimize weights for each state separately:
+        for k in range(self.K):
+            def _objective_k(params):
+                return _objective(params, k)
+            def _gradient_k(params):
+                return _gradient(params, k)
+            def _hess_k(params):
+                return _hess(params, k)
+            sol = minimize(_objective_k, self.params[k].reshape(((self.C-1) * self.M)), hess=_hess_k, jac=_gradient_k, method="trust-ncg")
+            self.params[k] = np.reshape(sol.x, (self.C-1, self.M))
 
     def smooth(self, expectations, data, input, tag):
         """
