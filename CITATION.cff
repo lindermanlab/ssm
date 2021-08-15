@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "You can cite this software as below."
+authors:
+- family-names: "Linderman"
+  given-names: "Scott"
+  orcid: "0000-0002-3878-9073"
+- family-names: "Antin"
+  given-names: "Benjamin"
+- family-names: "Zoltowski"
+  given-names: "David"
+- family-names: "Glaser"
+  given-names: "Joshua"
+title: "SSM: Bayesian Learning and Inference for State Space Models"
+version: 0.0.1
+date-released: 2020-10-15
+url: "https://github.com/lindermanlab/ssm"
