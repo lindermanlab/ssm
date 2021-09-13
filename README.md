@@ -49,7 +49,7 @@ The notebooks folder has more thorough, complete examples of HMMs, SLDS, and rec
 
 # Installation
 ```
-git clone git@github.com:slinderman/ssm.git
+git clone https://github.com/lindermanlab/ssm
 cd ssm
 pip install numpy cython
 pip install -e .
