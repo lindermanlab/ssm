@@ -412,8 +412,8 @@ class SLDSStructuredMeanFieldVariationalPosterior(VariationalPosterior):
         for prms, (Ez, Ezzp1, normalizer) in \
                 zip(self.discrete_state_params, discrete_expectations):
 
-            log_pi0 = np.log(prms["pi0"] + 1e-16) - logsumexp(prms["pi0"])
-            log_Ps = np.log(prms["Ps"] + 1e-16) - logsumexp(prms["Ps"], axis=1, keepdims=True)
+            log_pi0 = np.log(prms["pi0"] + 1e-16) 
+            log_Ps = np.log(prms["Ps"] + 1e-16)
             negentropy -= normalizer  # -log Z
             negentropy += np.sum(Ez[0] * log_pi0)  # initial factor
             negentropy += np.sum(Ez * prms["log_likes"])  # unitary factors
