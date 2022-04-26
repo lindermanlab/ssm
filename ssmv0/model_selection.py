@@ -4,7 +4,7 @@ Cross-validation and related model diagnostics.
 import autograd.numpy as np
 import autograd.numpy.random as npr
 
-from ssm.util import ensure_args_are_lists
+from ssmv0.util import ensure_args_are_lists
 
 
 @ensure_args_are_lists

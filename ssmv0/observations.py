@@ -7,13 +7,13 @@ import autograd.numpy.random as npr
 from autograd.scipy.special import gammaln, digamma, logsumexp
 from autograd.scipy.special import logsumexp
 
-from ssm.util import random_rotation, ensure_args_are_lists, \
+from ssmv0.util import random_rotation, ensure_args_are_lists, \
     logistic, logit, one_hot
-from ssm.regression import fit_linear_regression, generalized_newton_studentst_dof
-from ssm.preprocessing import interpolate_data
-from ssm.cstats import robust_ar_statistics
-from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
-import ssm.stats as stats
+from ssmv0.regression import fit_linear_regression, generalized_newton_studentst_dof
+from ssmv0.preprocessing import interpolate_data
+from ssmv0.cstats import robust_ar_statistics
+from ssmv0.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
+import ssmv0.stats as stats
 
 class Observations(object):
     # K = number of discrete states
@@ -916,6 +916,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                  l2_penalty_A=1e-8,
                  l2_penalty_b=1e-8,
                  l2_penalty_V=1e-8,
+                 temporal_penalty=1e-8,
                  nu0=1e-4, Psi0=1e-4):
         super(AutoRegressiveObservations, self).\
             __init__(K, D, M, lags=lags)
@@ -928,13 +929,18 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         self._sqrt_Sigmas_init = np.tile(np.eye(D)[None, ...], (K, 1, 1))
         self._sqrt_Sigmas = npr.randn(K, D, D)
 
+        A_penalty = np.zeros(D * lags)
+        for l in range(lags):
+            A_penalty[l*D:(l+1)*D] = l2_penalty_A * temporal_penalty**l
+        #print(A_penalty)
+
         # Set natural parameters of Gaussian prior on (A, V, b) weight matrix
-        J0_diag = np.concatenate((l2_penalty_A * np.ones(D * lags),
+        J0_diag = np.concatenate((A_penalty, #l2_penalty_A * np.ones(D * lags),
                                   l2_penalty_V * np.ones(M),
                                   l2_penalty_b * np.ones(1)))
         self.J0 = np.tile(np.diag(J0_diag)[None, :, :], (K, 1, 1))
 
-        h0 = np.concatenate((l2_penalty_A * np.eye(D),
+        h0 = np.concatenate((np.zeros((D,D)),#l2_penalty_A * np.eye(D),
                              np.zeros((D * (lags - 1), D)),
                              np.zeros((M + 1, D))))
         self.h0 = np.tile(h0[None, :, :], (K, 1, 1))
@@ -946,6 +952,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         self.l2_penalty_A = l2_penalty_A
         self.l2_penalty_b = l2_penalty_b
         self.l2_penalty_V = l2_penalty_V
+        self.temporal_penalty = temporal_penalty
 
     @property
     def A(self):

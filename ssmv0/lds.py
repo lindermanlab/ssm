@@ -6,19 +6,19 @@ import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd import value_and_grad, grad
 
-from ssm.optimizers import adam_step, rmsprop_step, sgd_step, lbfgs, \
+from ssmv0.optimizers import adam_step, rmsprop_step, sgd_step, lbfgs, \
     convex_combination, newtons_method_block_tridiag_hessian
-from ssm.primitives import hmm_normalizer
-from ssm.messages import hmm_expected_states, viterbi
-from ssm.util import ensure_args_are_lists, \
+from ssmv0.primitives import hmm_normalizer
+from ssmv0.messages import hmm_expected_states, viterbi
+from ssmv0.util import ensure_args_are_lists, \
     ensure_slds_args_not_none, ensure_variational_args_are_lists, ssm_pbar
 
-import ssm.observations as obs
-import ssm.transitions as trans
-import ssm.init_state_distns as isd
-import ssm.emissions as emssn
-import ssm.hmm as hmm
-import ssm.variational as varinf
+import ssmv0.observations as obs
+import ssmv0.transitions as trans
+import ssmv0.init_state_distns as isd
+import ssmv0.emissions as emssn
+import ssmv0.hmm as hmm
+import ssmv0.variational as varinf
 
 __all__ = ['SLDS', 'LDS']
 
@@ -222,7 +222,8 @@ class SLDS(object):
                self.dynamics.log_prior() + \
                self.emissions.log_prior()
 
-    def sample(self, T, input=None, tag=None, prefix=None, with_noise=True):
+    def sample(self, T, fixed_z=None, n_switches=None, min_state_len=None, 
+               input=None, tag=None, prefix=None, with_noise=True):
         N = self.N
         K = self.K
         D = (self.D,) if isinstance(self.D, int) else self.D

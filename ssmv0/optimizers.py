@@ -14,7 +14,7 @@ from autograd.misc import flatten
 from autograd.wrap_util import wraps
 
 from scipy.optimize import minimize
-from ssm.primitives import solve_symm_block_tridiag
+from ssmv0.primitives import solve_symm_block_tridiag
 
 def convex_combination(curr, target, alpha):
     """

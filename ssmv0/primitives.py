@@ -7,13 +7,13 @@ from autograd.extend import primitive, defvjp
 from autograd.tracer import getval
 from functools import partial
 
-from ssm.cstats import _blocks_to_bands_lower, _blocks_to_bands_upper, \
+from ssmv0.cstats import _blocks_to_bands_lower, _blocks_to_bands_upper, \
                        _bands_to_blocks_lower, _bands_to_blocks_upper, \
                        _transpose_banded, vjp_cholesky_banded_lower, \
                        _vjp_solve_banded_A, _vjp_solveh_banded_A
 
-from ssm.messages import forward_pass, grad_hmm_normalizer
-from ssm.util import LOG_EPS, DIV_EPS
+from ssmv0.messages import forward_pass, grad_hmm_normalizer
+from ssmv0.util import LOG_EPS, DIV_EPS
 
 to_c = lambda arr: np.copy(getval(arr), 'C') if not arr.flags['C_CONTIGUOUS'] else getval(arr)
 

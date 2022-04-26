@@ -6,7 +6,7 @@ from functools import partial
 
 from autograd.tracer import getval
 from autograd.extend import primitive, defvjp
-from ssm.util import LOG_EPS, DIV_EPS
+from ssmv0.util import LOG_EPS, DIV_EPS
 
 to_c = lambda arr: np.copy(getval(arr), 'C') if not arr.flags['C_CONTIGUOUS'] else getval(arr)
 

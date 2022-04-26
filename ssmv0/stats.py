@@ -2,7 +2,7 @@ import autograd.numpy as np
 from autograd.scipy.special import gammaln, logsumexp
 from autograd.scipy.linalg import solve_triangular
 
-from ssm.util import one_hot
+from ssmv0.util import one_hot
 
 
 def flatten_to_dim(X, d):

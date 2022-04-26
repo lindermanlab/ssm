@@ -7,10 +7,10 @@ from autograd.scipy.special import logsumexp
 from autograd.scipy.stats import dirichlet
 from autograd import hessian
 
-from ssm.util import one_hot, logistic, relu, rle, ensure_args_are_lists, LOG_EPS, DIV_EPS
-from ssm.regression import fit_multiclass_logistic_regression, fit_negative_binomial_integer_r
-from ssm.stats import multivariate_normal_logpdf
-from ssm.optimizers import adam, bfgs, lbfgs, rmsprop, sgd
+from ssmv0.util import one_hot, logistic, relu, rle, ensure_args_are_lists, LOG_EPS, DIV_EPS
+from ssmv0.regression import fit_multiclass_logistic_regression, fit_negative_binomial_integer_r
+from ssmv0.stats import multivariate_normal_logpdf
+from ssmv0.optimizers import adam, bfgs, lbfgs, rmsprop, sgd
 
 
 class Transitions(object):

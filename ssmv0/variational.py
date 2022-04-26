@@ -1,10 +1,10 @@
 import autograd.numpy as np
 import autograd.numpy.random as npr
 
-from ssm.primitives import lds_log_probability, lds_sample, lds_mean
-from ssm.messages import hmm_expected_states, hmm_sample, kalman_info_sample, kalman_info_smoother
+from ssmv0.primitives import lds_log_probability, lds_sample, lds_mean
+from ssmv0.messages import hmm_expected_states, hmm_sample, kalman_info_sample, kalman_info_smoother
 
-from ssm.util import ensure_variational_args_are_lists, trace_product
+from ssmv0.util import ensure_variational_args_are_lists, trace_product
 
 from autograd.scipy.special import logsumexp
 from warnings import warn
