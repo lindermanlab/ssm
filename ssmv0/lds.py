@@ -222,8 +222,7 @@ class SLDS(object):
                self.dynamics.log_prior() + \
                self.emissions.log_prior()
 
-    def sample(self, T, fixed_z=None, n_switches=None, min_state_len=None, 
-               input=None, tag=None, prefix=None, with_noise=True):
+    def sample(self, T, fixed_z=None, input=None, tag=None, prefix=None, with_noise=True):
         N = self.N
         K = self.K
         D = (self.D,) if isinstance(self.D, int) else self.D
@@ -260,8 +259,11 @@ class SLDS(object):
 
         # Sample z and x
         for t in range(pad, T+pad):
-            Pt = np.exp(self.transitions.log_transition_matrices(x[t-1:t+1], input[t-1:t+1], mask=xmask[t-1:t+1], tag=tag))[0]
-            z[t] = npr.choice(self.K, p=Pt[z[t-1]])
+            if fixed_z is None:
+                Pt = np.exp(self.transitions.log_transition_matrices(x[t-1:t+1], input[t-1:t+1], mask=xmask[t-1:t+1], tag=tag))[0]
+                z[t] = npr.choice(self.K, p=Pt[z[t-1]])
+            else:
+                z[t] = fixed_z[t-1]
             x[t] = self.dynamics.sample_x(z[t], x[:t], input=input[t], tag=tag, with_noise=with_noise)
 
         # Sample observations given latent states
