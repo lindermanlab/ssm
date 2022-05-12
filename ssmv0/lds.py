@@ -38,6 +38,7 @@ class SLDS(object):
                  emissions="gaussian_orthog",
                  emission_kwargs=None,
                  single_subspace=True,
+                 seed=0,
                  **kwargs):
 
         # Make the initial state distribution
@@ -87,7 +88,7 @@ class SLDS(object):
                     format(dynamics, list(dynamics_classes.keys())))
 
             dynamics_kwargs = dynamics_kwargs or {}
-            dynamics = dynamics_classes[dynamics](K, D, M=M, **dynamics_kwargs)
+            dynamics = dynamics_classes[dynamics](K, D, M=M, seed=seed, **dynamics_kwargs)
         if not isinstance(dynamics, obs.Observations):
             raise TypeError("'dynamics' must be a subclass of"
                             " ssm.observations.Observations")
