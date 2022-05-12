@@ -38,7 +38,7 @@ class HMM(object):
                  transition_kwargs=None,
                  hierarchical_transition_tags=None,
                  observations="gaussian", observation_kwargs=None,
-                 hierarchical_observation_tags=None, **kwargs):
+                 hierarchical_observation_tags=None, seed=0, **kwargs):
 
         # Make the initial state distribution
         if init_state_distn is None:
@@ -116,7 +116,7 @@ class HMM(object):
                                         tags=hierarchical_observation_tags,
                                         **observation_kwargs) \
                 if hierarchical_observation_tags is not None \
-                else observation_classes[observations](K, D, M=M, **observation_kwargs)
+                else observation_classes[observations](K, D, M=M, seed=seed, **observation_kwargs)
         if not isinstance(observations, obs.Observations):
             raise TypeError("'observations' must be a subclass of"
                             " ssm.observations.Observations")

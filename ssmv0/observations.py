@@ -829,9 +829,11 @@ class _AutoRegressiveObservationsBase(Observations):
 
     where L is the number of lags and u_t is the input.
     """
-    def __init__(self, K, D, M=0, lags=1):
+    def __init__(self, K, D, M=0, seed=0, lags=1):
         super(_AutoRegressiveObservationsBase, self).__init__(K, D, M)
 
+        npr.seed(seed)
+        
         # Distribution over initial point
         self.mu_init = np.zeros((K, D))
 
@@ -912,18 +914,22 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
     The parameters are fit via maximum likelihood estimation.
     """
-    def __init__(self, K, D, M=0, lags=1,
+    def __init__(self, K, D, M=0, seed=0, lags=1,
                  l2_penalty_A=1e-8,
                  l2_penalty_b=1e-8,
                  l2_penalty_V=1e-8,
                  temporal_penalty=1e-8,
                  nu0=1e-4, Psi0=1e-4):
         super(AutoRegressiveObservations, self).\
-            __init__(K, D, M, lags=lags)
+            __init__(K, D, M, seed=seed+1, lags=lags)
+        
+        npr.seed(seed=seed)
+        random_dynamics = npr.normal(size=(D,D))
+        random_dynamics /= np.max(np.abs(np.linalg.eigvals(random_dynamics)))
 
         # Initialize the dynamics and the noise covariances
         self._As = .80 * np.array([
-                np.column_stack([random_rotation(D), np.zeros((D, (lags-1) * D))])
+                np.column_stack([random_dynamics, np.zeros((D, (lags-1) * D))])
             for _ in range(K)])
 
         self._sqrt_Sigmas_init = np.tile(np.eye(D)[None, ...], (K, 1, 1))
