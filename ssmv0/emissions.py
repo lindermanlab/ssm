@@ -194,7 +194,7 @@ class _LinearEmissions(Emissions):
         # Assign each state a random projection of these dimensions
         Cs, ds = [], []
         for k in range(Keff):
-            weights = npr.randn(self.D, self.D * Keff)
+            weights = npr.randn(self.D, min(self.D * Keff, self.N))
             weights = np.linalg.svd(weights, full_matrices=False)[2]
             Cs.append((weights @ pca.components_).T)
             ds.append(pca.mean_)
