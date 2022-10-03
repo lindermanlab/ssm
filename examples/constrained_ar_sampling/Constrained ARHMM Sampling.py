@@ -1,6 +1,12 @@
 
 # coding: utf-8
 
+"""
+Constrained AR-HMM sampling
+===========================
+Here we sample an autoregressive hidden Markov model subject to a constraint.
+"""
+
 # # Constrained AR-HMM sampling
 # Sample an autoregressive hidden Markov model subject to a constraint, 
 # represented as an auxiliary potential.  The joint probability of the 
