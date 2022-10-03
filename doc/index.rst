@@ -6,6 +6,10 @@
 Welcome to ssm's documentation!
 ===============================
 
+.. important::
+  We're working full time on a JAX refactor of SSM that will take advantage of JIT compilation, GPU and TPU support, automatic differentation, etc. 
+  Please stay tuned for updates soon!
+
 This package has fast and flexible code for simulating, learning, and performing inference in a variety of state space models.
 Currently, it supports:
 

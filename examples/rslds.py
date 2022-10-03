@@ -1,7 +1,6 @@
 """
 Recurrent Switching Linear Dynamical System (rSLDS)
 ===================================================
-Here we sample an autoregressive hidden Markov model subject to a constraint.
 """
 
 import os
@@ -24,11 +23,6 @@ sns.set_context("talk")
 import ssm
 from ssm.util import random_rotation
 
-# Global parameters
-T = 10000
-K = 4
-D_obs = 10
-D_latent = 2
 
 # Helper functions for plotting results
 def plot_trajectory(z, x, ax=None, ls="-"):
@@ -83,7 +77,20 @@ def plot_most_likely_dynamics(model,
 
     return ax
 
-# Simulate the nascar data
+###############################################################################
+# Setting our model parameters
+# ----------------------------
+#
+# Let's first set a few global parameters for our model.
+
+T = 10000
+K = 4
+D_obs = 10
+D_latent = 2
+
+
+###############################################################################
+# Let's now stimulate the NASCAR data
 def make_nascar_model():
     As = [random_rotation(D_latent, np.pi/24.),
       random_rotation(D_latent, np.pi/48.)]
@@ -126,22 +133,26 @@ def make_nascar_model():
     true_rslds.emissions.inv_etas = np.log(1e-2) * np.ones((1, D_obs))
     return true_rslds
 
-# Sample from the model
+###############################################################################
+# We can sample from the model
 true_rslds = make_nascar_model()
 z, x, y = true_rslds.sample(T=T)
 
-# Fit a robust rSLDS with its default initialization
+###############################################################################
+# Let's fit a robust rSLDS with its default initialization
 rslds_svi = ssm.SLDS(D_obs, K, D_latent,
              transitions="recurrent_only",
              dynamics="diagonal_gaussian",
              emissions="gaussian_orthog",
              single_subspace=True)
 
+###############################################################################
 # Initialize the model with the observed data.  It is important
 # to call this before constructing the variational posterior since
 # the posterior constructor initialization looks at the rSLDS parameters.
 rslds_svi.initialize(y)
 
+###############################################################################
 # Fit with stochastic variational inference
 q_elbos_svi, q_svi = rslds_svi.fit(y, method="bbvi",
                                variational_posterior="tridiag",
@@ -149,6 +160,7 @@ q_elbos_svi, q_svi = rslds_svi.fit(y, method="bbvi",
 xhat_svi = q_svi.mean[0]
 zhat_svi = rslds_svi.most_likely_states(xhat_svi, y)
 
+###############################################################################
 # Fit with Laplace EM
 rslds_lem = ssm.SLDS(D_obs, K, D_latent,
              transitions="recurrent_only",
@@ -162,6 +174,7 @@ q_elbos_lem, q_lem = rslds_lem.fit(y, method="laplace_em",
 xhat_lem = q_lem.mean_continuous_states[0]
 zhat_lem = rslds_lem.most_likely_states(xhat_lem, y)
 
+###############################################################################
 # Plot some results
 plt.figure()
 plt.plot(q_elbos_svi, label="SVI")

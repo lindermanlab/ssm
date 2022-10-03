@@ -1,7 +1,6 @@
 """
 Linear Dynamical System (LDS)
 =============================
-Here we sample an autoregressive hidden Markov model subject to a constraint.
 """
 
 import autograd.numpy as np

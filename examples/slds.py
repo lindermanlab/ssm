@@ -1,7 +1,6 @@
 """
 Switching Linear Dynamical System (rSLDS)
 =========================================
-Here we sample an autoregressive hidden Markov model subject to a constraint.
 """
 
 import autograd.numpy as np
