@@ -24,10 +24,12 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 # -- Sphinx-gallery configuration ---------------------------------------------------
 # https://sphinx-gallery.github.io/stable/configuration.html
 
+from sphinx_gallery.sorting import FileNameSortKey
 sphinx_gallery_conf = {
     'filename_pattern': '/*.py',
     'ignore_pattern': r'Poisson-HMM-Demo\.py',
     'examples_dirs': ['../notebooks'],
+    'within_subsection_order': FileNameSortKey,
     'gallery_dirs': ['auto_examples'],
 }
 
@@ -36,10 +38,11 @@ sphinx_gallery_conf = {
 
 html_theme = 'sphinx_book_theme'
 html_theme_options = {
-    'repository_url': 'https://github.com/lindermanlan/ssm-docs',
-    'repository_branch': 'main',
+    'repository_url': 'https://github.com/lindermanlan/ssm',
+    'repository_branch': 'master',
     'launch_buttons': {
-        'colab_url': 'https://colab.research.google.com'
+        'colab_url': 'https://colab.research.google.com',
+        'binderhub_url': 'https://mybinder.org'
     },
 }
-html_static_path = ['_static']
+html_static_path = ['./_static']

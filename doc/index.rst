@@ -35,6 +35,8 @@ We support the following observation models:
 HMM inference is done with either expectation maximization (EM) or stochastic gradient descent (SGD).
 For SLDS, we use stochastic variational inference (SVI).
 
+.. toctree::
+
 .. include::
    auto_examples/index.rst
 
