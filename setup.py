@@ -59,5 +59,5 @@ if __name__ == "__main__":
               'Programming Language :: Python :: 3.7',
           ],
           packages=find_packages(),
-          extensions = cythonize(extensions)
+          ext_modules = cythonize(extensions)
           )
