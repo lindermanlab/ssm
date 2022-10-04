@@ -1,7 +1,7 @@
 # SSM: Bayesian learning and inference for state space models
 [![Test status](https://travis-ci.org/lindermanlab/ssm.svg?branch=master)](https://travis-ci.org/lindermanlab/ssm)
 
-**Note: We're working full time on a [JAX](https://github.com/google/jax) refactor of SSM that will take advantage of JIT compilation, GPU and TPU support, automatic differentation, etc. Please stay tuned for updates soon!**
+**Note: We're working full time on a [JAX](https://github.com/google/jax) refactor of SSM that will take advantage of JIT compilation, GPU and TPU support, automatic differentation, etc. You can keep track of our progress [here](https://github.com/probml/ssm-jax/). We're hoping to make an official release soon!**
 
 This package has fast and flexible code for simulating, learning, and performing inference in a variety of state space models.
 Currently, it supports:
