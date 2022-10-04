@@ -32,6 +32,7 @@ myst_enable_extensions = [
     # "linkify",
     # "substitution",
 ]
+nb_execution_timeout = 600
 
 # -- Sphinx-gallery configuration ---------------------------------------------------
 # https://sphinx-gallery.github.io/stable/configuration.html
