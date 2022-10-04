@@ -26,12 +26,13 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
 sphinx_gallery_conf = {
     'filename_pattern': '/*.py',
-    'examples_dirs': ['../examples', '../notebooks'],
-    'gallery_dirs': ['auto_examples', 'tutorials'],
+    'ignore_pattern': r'Poisson-HMM-Demo\.py',
+    'examples_dirs': ['../notebooks'],
+    'gallery_dirs': ['auto_examples'],
 }
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = 'press'
+html_theme = 'sphinx_book_theme'
 html_static_path = ['_static']

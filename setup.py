@@ -4,23 +4,6 @@ from Cython.Build import cythonize
 from setuptools.extension import Extension
 from setuptools import setup, find_packages
 
-
-def load_version():
-    """Executes nilearn/version.py in a globals dictionary and return it.
-
-    Note: importing nilearn is not an option because there may be
-    dependencies like nibabel which are not installed and
-    setup.py is supposed to install them.
-    """
-    # load all vars into globals, otherwise
-    #   the later function call using global vars doesn't work.
-    globals_dict = {}
-    with open(os.path.join('ssm', 'version.py')) as fp:
-        exec(fp.read(), globals_dict)
-
-    return globals_dict
-
-
 # Make sources available using relative paths from this file's directory.
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -38,17 +21,16 @@ extensions.append(
               )
 )
 
-_VERSION_GLOBALS = load_version()
 DISTNAME = 'ssm'
 DESCRIPTION = 'Bayesian learning and inference for a variety of state space models'
-with open('README.rst') as fp:
+with open('README.md') as fp:
     LONG_DESCRIPTION = fp.read()
 MAINTAINER = 'Scott Linderman'
 MAINTAINER_EMAIL = 'scott.linderman@stanford.edu'
 URL = ''
 LICENSE = 'MIT'
 DOWNLOAD_URL = ''
-VERSION = _VERSION_GLOBALS['__version__']
+VERSION = '0.0.1'
 
 
 if __name__ == "__main__":
@@ -74,11 +56,7 @@ if __name__ == "__main__":
               'Operating System :: POSIX',
               'Operating System :: Unix',
               'Operating System :: MacOS',
-              'Programming Language :: Python :: 3.6',
               'Programming Language :: Python :: 3.7',
-              'Programming Language :: Python :: 3.8',
-              'Programming Language :: Python :: 3.9',
-              'Programming Language :: Python :: 3.10',
           ],
           packages=find_packages(),
           extensions = cythonize(extensions)

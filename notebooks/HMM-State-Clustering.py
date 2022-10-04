@@ -1,26 +1,30 @@
----
-jupyter:
-  jupytext:
-    text_representation:
-      extension: .md
-      format_name: markdown
-      format_version: '1.3'
-      jupytext_version: 1.14.1
-  kernelspec:
-    display_name: Python 3
-    language: python
-    name: python3
----
+# ---
+# jupyter:
+#   jupytext:
+#     text_representation:
+#       extension: .py
+#       format_name: light
+#       format_version: '1.5'
+#       jupytext_version: 1.14.1
+#   kernelspec:
+#     display_name: Python 3
+#     language: python
+#     name: python3
+# ---
 
-<!-- #region nbpresent={"id": "5918355f-c759-41e8-9cc9-64baf78695b3"} -->
-# HMM State Clustering
-In this notebook we'll explore a post-hoc method for clustering HMM states.
-The idea is, given an HMM which has been fit to data, we reduce the number of states hierarchically by merging pairs of states. Let's say we start with an HMM with K states. The idea is that we'll try merging every pair of states and see which merge makes the log-likelihood of the data go down the least. Once we find that pair, we have K-1 states, and we repeat this process until we have satisfactorily few states.
+"""
+HMM State Clustering
+====================
+"""
 
-**Note**: This notebook is a little rough around the edges.
-<!-- #endregion -->
+# + [markdown] nbpresent={"id": "5918355f-c759-41e8-9cc9-64baf78695b3"}
+# # HMM State Clustering
+# In this notebook we'll explore a post-hoc method for clustering HMM states.
+# The idea is, given an HMM which has been fit to data, we reduce the number of states hierarchically by merging pairs of states. Let's say we start with an HMM with K states. The idea is that we'll try merging every pair of states and see which merge makes the log-likelihood of the data go down the least. Once we find that pair, we have K-1 states, and we repeat this process until we have satisfactorily few states.
+#
+# **Note**: This notebook is a little rough around the edges.
 
-```python nbpresent={"id": "346a61a3-9216-480d-b5b8-39a78782a8c3"}
+# + nbpresent={"id": "346a61a3-9216-480d-b5b8-39a78782a8c3"}
 import autograd.numpy as np
 import autograd.numpy.random as npr
 npr.seed(0)
@@ -30,7 +34,7 @@ from ssm.util import find_permutation
 from ssm.plots import gradient_cmap, white_to_color_cmap
 
 import matplotlib.pyplot as plt
-%matplotlib inline
+# %matplotlib inline
 
 import seaborn as sns
 sns.set_style("white")
@@ -47,9 +51,8 @@ color_names = [
 
 colors = sns.xkcd_palette(color_names)
 cmap = gradient_cmap(colors)
-```
 
-```python nbpresent={"id": "564edd16-a99d-4329-8e31-98fe1e1cef79"}
+# + nbpresent={"id": "564edd16-a99d-4329-8e31-98fe1e1cef79"}
 # Set the parameters of the HMM
 time_bins = 1000   # number of time bins
 num_states = 6   # number of discrete states
@@ -61,24 +64,20 @@ true_hmm = ssm.HMM(num_states, obs_dim, observations="gaussian")
 # Manually tweak the means to make them farther apart
 thetas = 2 * np.pi * npr.rand(num_states)
 true_hmm.observations.mus = 3 * np.column_stack((np.cos(thetas), np.sin(thetas)))
-```
+# -
 
-## For demonstration, make the last two states very similar
+# ## For demonstration, make the last two states very similar
 
-```python
 true_hmm.observations.mus[-1] = true_hmm.observations.mus[-2] + 1e-3 * npr.randn(obs_dim) 
-```
 
-<!-- #region nbpresent={"id": "846d39dd-47a8-4b70-860f-6943eb17fc7a"} -->
-## Sample some synthetic data
-<!-- #endregion -->
+# + [markdown] nbpresent={"id": "846d39dd-47a8-4b70-860f-6943eb17fc7a"}
+# ## Sample some synthetic data
 
-```python nbpresent={"id": "c441ffc6-38cb-4933-97b2-f62897046fd6"}
+# + nbpresent={"id": "c441ffc6-38cb-4933-97b2-f62897046fd6"}
 true_states, data = true_hmm.sample(time_bins)
 true_ll = true_hmm.log_probability(data)
-```
 
-```python nbpresent={"id": "c9b4a46a-2f86-4b7f-adb6-70c667a1ac67"}
+# + nbpresent={"id": "c9b4a46a-2f86-4b7f-adb6-70c667a1ac67"}
 # Plot the observation distributions
 lim = .85 * abs(data).max()
 XX, YY = np.meshgrid(np.linspace(-lim, lim, 100), np.linspace(-lim, lim, 100))
@@ -87,13 +86,11 @@ input = np.zeros((data.shape[0], 0))
 mask = np.ones_like(grid, dtype=bool)
 tag = None
 lls = true_hmm.observations.log_likelihoods(grid, input, mask, tag)
-```
 
-<!-- #region nbpresent={"id": "a201a5b1-0cff-4e1f-9367-c25a89ebac41"} -->
-Below, we plot the samples obtained from the HMM, color-coded according to the underlying state. The solid curves show regions of of equal probability density around each mean. The thin gray lines trace the latent variable as it transitions from one state to another.
-<!-- #endregion -->
+# + [markdown] nbpresent={"id": "a201a5b1-0cff-4e1f-9367-c25a89ebac41"}
+# Below, we plot the samples obtained from the HMM, color-coded according to the underlying state. The solid curves show regions of of equal probability density around each mean. The thin gray lines trace the latent variable as it transitions from one state to another.
 
-```python nbpresent={"id": "0feabc13-812b-4d5e-ac24-f8327ecb4d27"}
+# + nbpresent={"id": "0feabc13-812b-4d5e-ac24-f8327ecb4d27"}
 plt.figure(figsize=(6, 6))
 for k in range(num_states):
     plt.contour(XX, YY, np.exp(lls[:,k]).reshape(XX.shape), cmap=white_to_color_cmap(colors[k]))
@@ -102,21 +99,20 @@ for k in range(num_states):
 plt.xlabel("$x_1$")
 plt.ylabel("$x_2$")
 plt.title("Observation Distributions")
-```
 
-<!-- #region nbpresent={"id": "a58c7a02-2777-4af8-982f-e279bd3bbeb6"} -->
-Below, we visualize each component of of the observation variable as a time series. The colors correspond to the latent state. The dotted lines represent the "true" values of the observation variable (the mean) while the solid lines are the actual observations sampled from the HMM.
-<!-- #endregion -->
 
-# Cluster states from the original HMM
+# + [markdown] nbpresent={"id": "a58c7a02-2777-4af8-982f-e279bd3bbeb6"}
+# Below, we visualize each component of of the observation variable as a time series. The colors correspond to the latent state. The dotted lines represent the "true" values of the observation variable (the mean) while the solid lines are the actual observations sampled from the HMM.
+# -
 
-The `merge_two_states` function below takes in a trained HMM, and indices of two states, s1 and s2. It outputs a new HMM where all states except for s1 and s2 are the same, along with the log-likelihood of the data under the new model.
+# # Cluster states from the original HMM
+#
+# The `merge_two_states` function below takes in a trained HMM, and indices of two states, s1 and s2. It outputs a new HMM where all states except for s1 and s2 are the same, along with the log-likelihood of the data under the new model.
+#
+# Here's how we merge two states: In the E-step of the EM algorithm, we obtain a T x K table, which has the probability of being in state K at time T for every time point. To merge state k1 and k2, we take the two columns of the table corresponding to these two states and sum them. From this, we get a new table which is K-1 x T. We then run an M-step as normal to get the best parameters for our new K-1 state model, and evaluate the log likelihood.
+#
+# **NOTE**: as written, the below function does not support inputs or masks, and it is limited to HMMs with stationary transitions. 
 
-Here's how we merge two states: In the E-step of the EM algorithm, we obtain a T x K table, which has the probability of being in state K at time T for every time point. To merge state k1 and k2, we take the two columns of the table corresponding to these two states and sum them. From this, we get a new table which is K-1 x T. We then run an M-step as normal to get the best parameters for our new K-1 state model, and evaluate the log likelihood.
-
-**NOTE**: as written, the below function does not support inputs or masks, and it is limited to HMMs with stationary transitions. 
-
-```python
 def merge_two_states(hmm, s1, s2, datas, observations="gaussian"):
     
     def collapse_and_sum_2d(arr, i, j, axis=0):
@@ -169,9 +165,8 @@ def merge_two_states(hmm, s1, s2, datas, observations="gaussian"):
     new_ll = new_hmm.log_prior() + sum([ll for (_, _, ll) in expectations])
     return new_ll, new_hmm
         
-```
 
-```python
+
 def plot_hmm(hmm, data):
     # Get the most likely state sequence
     states = hmm.most_likely_states(data)
@@ -194,32 +189,32 @@ def plot_hmm(hmm, data):
     plt.ylabel("$x_2$")
     plt.title("Observation Distributions in merged HMM")
     
-```
 
-```python
+
+# +
 new_ll, new_hmm = merge_two_states(true_hmm, 0, 3, data)
 print("likelihood drop: ", new_ll - true_ll)
 
 plot_hmm(new_hmm, data)
-```
+# -
 
-Blue (0) and green (3) in the original model were not really similar, so we expected to see a big drop in likelihood in the merged model.  Let's do the same with the last two states, which we made similar by construction.
+# Blue (0) and green (3) in the original model were not really similar, so we expected to see a big drop in likelihood in the merged model.  Let's do the same with the last two states, which we made similar by construction.
 
-```python
+# +
 new_ll, new_hmm = merge_two_states(true_hmm, 4, 5, data)
 print("likelihood drop: ", new_ll - true_ll)
 
 plot_hmm(new_hmm, data)
-```
-
-Good! Looks like the drop in likelihood is actually a little lower for the "more similar" states.
 
 
-## Make a pairwise similarity matrix
+# -
 
-We can use the log-likelihood drop when merging states as a proxy for state "similarity." Two states which can be merged with minimal drop in likelihood might be considered similar.
+# Good! Looks like the drop in likelihood is actually a little lower for the "more similar" states.
 
-```python
+# ## Make a pairwise similarity matrix
+#
+# We can use the log-likelihood drop when merging states as a proxy for state "similarity." Two states which can be merged with minimal drop in likelihood might be considered similar.
+
 def make_similarity_matrix(hmm, data):
     num_states = hmm.K
     init_ll = hmm.log_probability(data)
@@ -232,24 +227,21 @@ def make_similarity_matrix(hmm, data):
             merged_hmms[s1, s2] = merged_hmm
             
     return similarity, merged_hmms
-```
 
-```python
+
 similarity, new_hmms = make_similarity_matrix(true_hmm, data)
 im = plt.imshow(similarity)
 plt.ylabel("state 1")
 plt.xlabel("state 2")
 plt.title("similarity")
 plt.colorbar()
-```
-
-These merges are perhaps a little counterintuitive at first.  In terms of likelihood drop, the first two states to be merged woudl be red (1) and yellow (2).  Their means more fairly different than those of purple and orange, but they have relatively large variance.  Let's see what happens when we do this recursively.
 
 
-## Hierarchical clustering by iteratively merging states
-We start with a K state HMM, then merge possible pair of states k1 and k2. We can see which are the best two states to merge by checking the new log-likelihood. We then rinse and repeat for our new K-1 state HMM, tracking the log-likelihood as we go, until there is only 1 state left. After each merge, we can show the observation distribution and new similarity matrix.
+# These merges are perhaps a little counterintuitive at first.  In terms of likelihood drop, the first two states to be merged woudl be red (1) and yellow (2).  Their means more fairly different than those of purple and orange, but they have relatively large variance.  Let's see what happens when we do this recursively.
 
-```python
+# ## Hierarchical clustering by iteratively merging states
+# We start with a K state HMM, then merge possible pair of states k1 and k2. We can see which are the best two states to merge by checking the new log-likelihood. We then rinse and repeat for our new K-1 state HMM, tracking the log-likelihood as we go, until there is only 1 state left. After each merge, we can show the observation distribution and new similarity matrix.
+
 def hierarchical_cluster(hmm, data, plot=True):
     num_states = hmm.K
     linkage = [None]
@@ -282,15 +274,14 @@ def hierarchical_cluster(hmm, data, plot=True):
             plot_hmm(hmms[-1], data)
     
     return linkage, likelihood_drops, hmms
-```
 
-```python
+
 linkage, likelihood_drops, hmms = hierarchical_cluster(true_hmm, data)
-```
 
-## Now plot the dendrogram using likelihood drop as similarity
 
-```python
+# ## Now plot the dendrogram using likelihood drop as similarity
+
+# +
 def dendrogram(num_states, linkage, likelihood_drops):
     plt.figure()
     
@@ -314,4 +305,3 @@ def dendrogram(num_states, linkage, likelihood_drops):
     plt.ylabel("likelihood drop")
         
 dendrogram(true_hmm.K, linkage, likelihood_drops)
-```

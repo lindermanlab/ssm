@@ -1,25 +1,30 @@
----
-jupyter:
-  jupytext:
-    text_representation:
-      extension: .md
-      format_name: markdown
-      format_version: '1.3'
-      jupytext_version: 1.14.1
-  kernelspec:
-    display_name: Python 3
-    language: python
-    name: python3
----
+# ---
+# jupyter:
+#   jupytext:
+#     text_representation:
+#       extension: .py
+#       format_name: light
+#       format_version: '1.5'
+#       jupytext_version: 1.14.1
+#   kernelspec:
+#     display_name: Python 3
+#     language: python
+#     name: python3
+# ---
 
-```python
+"""
+Poisson fLDS
+============
+"""
+
+# +
 import autograd.numpy as np
 import autograd.numpy.random as npr
 npr.seed(0)
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-%matplotlib inline
+# %matplotlib inline
 
 import seaborn as sns
 sns.set_style("white")
@@ -27,17 +32,15 @@ sns.set_context("talk")
 
 import ssm
 from ssm.util import random_rotation, find_permutation
-```
+# -
 
-```python
 # Set the parameters of the LDS
 T = 50      # number of time bins per batch
 B = 20      # number of batches
 D = 2       # number of latent dimensions
 N = 10      # number of observed dimensions
-```
 
-```python
+# +
 # Make an SLDS with the true parameters
 true_lds = ssm.LDS(N, D, emissions="poisson_nn", 
                emission_kwargs=dict(link="softplus", 
@@ -47,18 +50,16 @@ true_lds.dynamics.As[0] = .95 * random_rotation(D, theta=(1) * np.pi/20)
 
 # Sample a bunch of short trajectories 
 # (they all converge so we only learn from the initial condition)
-zs, xs, ys = list(zip(*[true_lds.sample(T) for _ in range(B)]))
-```
+xs, ys = list(zip(*[true_lds.sample(T) for _ in range(B)]))
+# -
 
-```python
 for x in xs:
     plt.plot(x[:, 0], x[:, 1])
 plt.xlabel("$x_1$")
 plt.ylabel("$x_2$")
 plt.title("Simulated latent trajectories")
-```
 
-```python
+# +
 # Compute the firing rates
 rates = [true_lds.smooth(x, y) for x, y in zip(xs, ys)]
 
@@ -70,9 +71,8 @@ for n in range(N):
     plt.xlabel("time")
     plt.ylabel("$\\lambda_{}(t)$".format(n+1))
 plt.suptitle("Simulated firing rates")
-```
+# -
 
-```python
 # Plot the nonlinear firing rate map for neuron 1
 xmin, xmax = np.concatenate(xs).min(), np.concatenate(xs).max()
 npts = 50
@@ -81,9 +81,7 @@ XX, YY = np.meshgrid(xx, xx)
 XY = np.column_stack((XX.ravel(), YY.ravel()))
 tuning_curves = true_lds.smooth(XY, np.zeros((npts**2, N)))
 assert np.all(tuning_curves > 0 )
-```
 
-```python
 vmax = 1.1 * tuning_curves.max()
 plt.figure(figsize=(12, 12))
 splt = 3
@@ -104,9 +102,7 @@ for i in range(splt):
             cax = divider.append_axes("right", size="5%", pad=0.05)
             plt.colorbar(im, cax=cax)
 plt.tight_layout()
-```
 
-```python
 for b in range(5):
     plt.figure()
     plt.imshow(ys[b].T, aspect="auto", interpolation="none")
@@ -114,9 +110,8 @@ for b in range(5):
     plt.ylabel("neuron")
     plt.title("Batch {}".format(b+1))
     plt.colorbar()
-```
 
-```python
+# +
 print("Fitting LDS with SVI")
 lds = ssm.LDS(N, D, emissions="poisson_nn", 
           emission_kwargs=dict(link="softplus", 
@@ -127,28 +122,21 @@ lds.initialize(ys)
 lds_elbos, q = lds.fit(ys, method="bbvi", variational_posterior="mf",
                        num_iters=10000, print_intvl=100, initialize=False)
 lds_xs = q.mean
-```
+# -
 
-```python
 plt.plot(lds_elbos)
 plt.xlabel("SVI Iteration")
 plt.ylabel("ELBO")
-```
 
-```python
 # Smooth the observations
 lds_ys = [lds.smooth(x, y) for x, y in zip(lds_xs, ys)]
-```
 
-```python
 plt.figure(figsize=(8,4))
 plt.plot(xs[0], '-k')
 plt.plot(lds_xs[0], '-')
 plt.ylabel("$x$")
 plt.xlim(0, T)
-```
 
-```python
 # Plot the smoothed observations
 plt.figure(figsize=(8,4))
 plt.plot(rates[0] + 10 * np.arange(N), '-k', lw=2)
@@ -156,4 +144,3 @@ plt.plot(lds_ys[0] + 10 * np.arange(N), '-', lw=2)
 plt.ylabel("$y$")
 plt.xlabel("time")
 plt.xlim(0, T)
-```

@@ -1,24 +1,29 @@
----
-jupyter:
-  jupytext:
-    text_representation:
-      extension: .md
-      format_name: markdown
-      format_version: '1.3'
-      jupytext_version: 1.14.1
-  kernelspec:
-    display_name: Python 3
-    language: python
-    name: python3
----
+# ---
+# jupyter:
+#   jupytext:
+#     text_representation:
+#       extension: .py
+#       format_name: light
+#       format_version: '1.5'
+#       jupytext_version: 1.14.1
+#   kernelspec:
+#     display_name: Python 3
+#     language: python
+#     name: python3
+# ---
 
-```python
+"""
+Poisson SLDS
+============
+"""
+
+# +
 import autograd.numpy as np
 import autograd.numpy.random as npr
 npr.seed(0)
 
 import matplotlib.pyplot as plt
-%matplotlib inline
+# %matplotlib inline
 
 import seaborn as sns
 sns.set_style("white")
@@ -26,17 +31,15 @@ sns.set_context("talk")
 
 import ssm
 from ssm.util import random_rotation, find_permutation
-```
+# -
 
-```python
 # Set the parameters of the SLDS
 T = 1000    # number of time bins
 K = 5       # number of discrete states
 D = 2       # number of latent dimensions
 N = 100     # number of observed dimensions
-```
 
-```python
+# +
 # Make an SLDS with the true parameters
 true_slds = ssm.SLDS(N, K, D, emissions="poisson_orthog", emission_kwargs=dict(link="softplus"))
 
@@ -54,16 +57,14 @@ z, x, y = true_slds.sample(T)
 # Mask off some data
 mask = npr.rand(T, N) < 0.95
 y_masked = y * mask
-```
+# -
 
-```python
 plt.imshow(y.T, aspect="auto", interpolation="none")
 plt.xlabel("time")
 plt.ylabel("neuron")
 plt.colorbar()
-```
 
-```python
+# +
 print("Fitting SLDS with BBVI")
 slds = ssm.SLDS(N, K, D, emissions="poisson_orthog", emission_kwargs=dict(link="softplus"))
 slds.initialize(y_masked, masks=mask)
@@ -80,9 +81,8 @@ q_bbvi_z = slds.most_likely_states(q_bbvi_x, y)
 
 # Smooth the observations
 q_bbvi_y = slds.smooth(q_bbvi_x, y)
-```
 
-```python
+# +
 print("Fitting SLDS with Laplace-EM")
 slds = ssm.SLDS(N, K, D, emissions="poisson_orthog", emission_kwargs=dict(link="softplus"))
 slds.initialize(y_masked, masks=mask)
@@ -98,24 +98,20 @@ q_lem_z = slds.most_likely_states(q_lem_x, y)
 
 # Smooth the data under the variational posterior
 q_lem_y = slds.smooth(q_lem_x, y)
-```
+# -
 
-```python
 plt.plot(q_bbvi_elbos, label="BBVI")
 plt.plot(q_lem_elbos[1:], label="Laplace-EM")
 plt.xlabel("Iteration")
 plt.ylabel("ELBO")
 plt.legend()
-```
 
-```python
 plt.plot(q_lem_elbos[1:], label="Laplace-EM")
 plt.xlabel("Iteration")
 plt.ylabel("ELBO")
 plt.legend()
-```
 
-```python
+# +
 # Plot the true and inferred states
 xlim = (0, 1000)
 
@@ -124,17 +120,15 @@ plt.imshow(np.column_stack((z, q_lem_z, q_bbvi_z)).T, aspect="auto")
 plt.plot(xlim, [0.5, 0.5], '-k', lw=2)
 plt.yticks([0, 1, 2], ["$z_{\\mathrm{true}}$", "$z_{\\mathrm{LEM}}$", "$z_{\\mathrm{BBVI}}$"])
 plt.xlim(xlim)
-```
+# -
 
-```python
 plt.figure(figsize=(8,4))
 plt.plot(x, '-k')
 plt.plot(q_bbvi_x, '-')
 plt.ylabel("$x$")
 plt.xlim(xlim)
-```
 
-```python
+# +
 # Plot the smoothed observations
 lim = max(y.max(), q_bbvi_y.max(), q_lem_y.max())
 plt.figure(figsize=(18,6))
@@ -156,4 +150,3 @@ plt.imshow(q_bbvi_y.T, aspect="auto", vmin=0, vmax=lim)
 plt.xlabel("time")
 plt.title("Inferred Rate, BBVI")
 plt.colorbar()
-```
