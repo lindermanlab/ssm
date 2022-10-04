@@ -1,17 +1,17 @@
-#!/usr/bin/env python
+#! /usr/bin/env python
 import os
-from distutils.core import setup
 from Cython.Build import cythonize
 from setuptools.extension import Extension
-import numpy as np
+from setuptools import setup, find_packages
 
+# Make sources available using relative paths from this file's directory.
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+# Create the extensions. Manually enumerate the required
 # Only compile with OpenMP if user asks for it
 USE_OPENMP = os.environ.get('USE_OPENMP', False)
 print("USE_OPENMP", USE_OPENMP)
-
-# Create the extensions. Manually enumerate the required
 extensions = []
-
 extensions.append(
     Extension('ssm.cstats',
               extra_compile_args=["-fopenmp"] if USE_OPENMP else [],
@@ -21,17 +21,43 @@ extensions.append(
               )
 )
 
-extensions = cythonize(extensions)
+DISTNAME = 'ssm'
+DESCRIPTION = 'Bayesian learning and inference for a variety of state space models'
+with open('README.md') as fp:
+    LONG_DESCRIPTION = fp.read()
+MAINTAINER = 'Scott Linderman'
+MAINTAINER_EMAIL = 'scott.linderman@stanford.edu'
+URL = ''
+LICENSE = 'MIT'
+DOWNLOAD_URL = ''
+VERSION = '0.0.1'
 
 
-setup(name='ssm',
-      version='0.0.1',
-      description='Bayesian learning and inference for a variety of state space models',
-      author='Scott Linderman',
-      author_email='scott.linderman@stanford.edu',
-      url='https://github.com/slinderman/ssm',
-      install_requires=['future', 'numpy', 'scipy', 'matplotlib', 'numba', 'scikit-learn', 'tqdm', 'autograd', 'seaborn'],
-      packages=['ssm','ssm.extensions','ssm.extensions.mp_srslds'],
-      ext_modules=extensions,
-      include_dirs=[np.get_include(),],
-      )
+if __name__ == "__main__":
+    setup(name=DISTNAME,
+          maintainer=MAINTAINER,
+          maintainer_email=MAINTAINER_EMAIL,
+          description=DESCRIPTION,
+          license=LICENSE,
+          url=URL,
+          version=VERSION,
+          download_url=DOWNLOAD_URL,
+          long_description=LONG_DESCRIPTION,
+          zip_safe=False,  # the package can run out of an .egg file
+          classifiers=[
+              'Intended Audience :: Science/Research',
+              'Intended Audience :: Developers',
+              'License :: OSI Approved',
+              'Programming Language :: C',
+              'Programming Language :: Python',
+              'Topic :: Software Development',
+              'Topic :: Scientific/Engineering',
+              'Operating System :: Microsoft :: Windows',
+              'Operating System :: POSIX',
+              'Operating System :: Unix',
+              'Operating System :: MacOS',
+              'Programming Language :: Python :: 3.7',
+          ],
+          packages=find_packages(),
+          extensions = cythonize(extensions)
+          )

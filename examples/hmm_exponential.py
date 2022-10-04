@@ -1,3 +1,8 @@
+"""
+Hidden Markov Model (HMM) with Exponential observations
+=======================================================
+"""
+
 import autograd.numpy as np
 import autograd.numpy.random as npr
 npr.seed(0)

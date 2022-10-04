@@ -1,3 +1,8 @@
+"""
+Linear Dynamical System (LDS)
+=============================
+"""
+
 import autograd.numpy as np
 import autograd.numpy.random as npr
 npr.seed(0)
@@ -46,7 +51,7 @@ b = npr.randn(D)
 true_lds.dynamics.As[0] = A
 true_lds.dynamics.bs[0] = b
 
-_, x, y = true_lds.sample(T)
+x, y = true_lds.sample(T)
 
 print("Fitting LDS with SVI")
 

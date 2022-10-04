@@ -1,3 +1,9 @@
+"""
+Hidden Markov Model (HMM)
+=========================
+Here we provide a simple example of fitting an HMM.
+"""
+
 import autograd.numpy as np
 import autograd.numpy.random as npr
 npr.seed(0)

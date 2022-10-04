@@ -1,3 +1,8 @@
+"""
+Switching Linear Dynamical System (rSLDS)
+=========================================
+"""
+
 import autograd.numpy as np
 import autograd.numpy.random as npr
 npr.seed(0)
@@ -96,7 +101,7 @@ plt.imshow(z[None, :], aspect="auto")
 # plt.imshow(np.row_stack((z, q_mf_z, q_struct_z)), aspect="auto")
 plt.imshow(np.row_stack((z, q_lem_z)), aspect="auto")
 # plt.yticks([0, 1, 2], ["$z_{{\\mathrm{{true}}}}$", "$z_{{\\mathrm{{mf}}}}$", "$z_{{\\mathrm{{lds}}}}$"])
-plt.yticks([0, 1, 2], ["$z_{{\\mathrm{{true}}}}$", "$z_{{\\mathrm{{L. EM}}}}$"])
+plt.yticks([0, 1], ["$z_{{\\mathrm{{true}}}}$", "$z_{{\\mathrm{{L. EM}}}}$"])
 plt.xlim(xlim)
 plt.title("True and Most Likely Inferred States")
 

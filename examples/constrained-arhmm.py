@@ -1,6 +1,12 @@
 
 # coding: utf-8
 
+"""
+Constrained AR-HMM sampling
+===========================
+Here we sample an autoregressive hidden Markov model subject to a constraint.
+"""
+
 # # Constrained AR-HMM sampling
 # Sample an autoregressive hidden Markov model subject to a constraint, 
 # represented as an auxiliary potential.  The joint probability of the 
@@ -30,10 +36,10 @@ from tqdm.auto import trange
 
 import matplotlib.pyplot as plt
 import matplotlib.animation as manimation
-get_ipython().run_line_magic('matplotlib', 'inline')
 
 import ssm
-from ssm.primitives import hmm_sample, lds_sample
+from ssm.messages import hmm_sample
+from ssm.primitives import lds_sample
 from ssm.observations import GaussianObservations
 from ssm.init_state_distns import InitialStateDistribution
 from ssm.preprocessing import trend_filter, pca_with_imputation

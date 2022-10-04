@@ -1,3 +1,8 @@
+"""
+Hidden Semi-Markov Model (HSMM)
+===============================
+"""
+
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from scipy.stats import nbinom
