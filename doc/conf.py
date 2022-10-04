@@ -38,8 +38,8 @@ sphinx_gallery_conf = {
 
 html_theme = 'sphinx_book_theme'
 html_theme_options = {
-    'repository_url': 'https://github.com/lindermanlan/ssm',
-    'repository_branch': 'master',
+    'repository_url': 'https://github.com/lindermanlan/ssm-docs',
+    'repository_branch': 'main',
     'launch_buttons': {
         'colab_url': 'https://colab.research.google.com',
         'binderhub_url': 'https://mybinder.org'
