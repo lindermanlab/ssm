@@ -11,7 +11,7 @@ before_install:
 - conda update --yes conda
 - conda config --add channels conda-forge
 install:
-- conda install --yes python=$TRAVIS_PYTHON_VERSION pip cython nose
+- conda install --yes python=$TRAVIS_PYTHON_VERSION pip cython numpy nose
 - pip install git+https://github.com/mattjj/pybasicbayes
 - pip install git+https://github.com/mattjj/pyhsmm
 - pip install git+https://github.com/mattjj/pylds

@@ -1,5 +1,6 @@
 #! /usr/bin/env python
 import os
+import numpy as np
 from Cython.Build import cythonize
 from setuptools.extension import Extension
 from setuptools import setup, find_packages
@@ -18,6 +19,7 @@ extensions.append(
               extra_link_args=["-fopenmp"] if USE_OPENMP else [],
               language="c++",
               sources=["ssm/cstats.pyx"],
+              include_dirs=[np.get_include()]
               )
 )
 
