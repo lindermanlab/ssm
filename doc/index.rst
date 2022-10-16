@@ -36,6 +36,19 @@ HMM inference is done with either expectation maximization (EM) or stochastic gr
 For SLDS, we use stochastic variational inference (SVI).
 
 .. toctree::
+   :maxdepth: 1
+
+   notebooks/1-Simple-HMM-Demo
+   notebooks/1b-Simple-Linear-Dynamical-System
+   notebooks/2-Input-Driven-HMM
+   notebooks/2b-Input-Driven-Observations-(GLM-HMM)
+   notebooks/3-Switching-Linear-Dynamical-System
+   notebooks/4-Recurrent-SLDS
+   notebooks/5-Poisson-SLDS
+   notebooks/6-Poisson-fLDS
+   notebooks/7-Variatonal-Laplace-EM-for-SLDS-Tutorial
+   notebooks/HMM-State-Clustering
+   notebooks/Multi-Population-rSLDS
 
 .. include::
    auto_examples/index.rst
