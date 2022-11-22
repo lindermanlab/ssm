@@ -457,17 +457,17 @@ class HMM(object):
                 self.transitions.m_step(expectations, datas, inputs, masks, tags, **transitions_mstep_kwargs)
                 self.observations.m_step(expectations, datas, inputs, masks, tags, **observations_mstep_kwargs)
                 lls.append(self.log_prior() + sum([ll for (_, _, ll) in expectations]))
+
+                if verbose == 2:
+                  pbar.set_description("LP: {:.1f}".format(lls[-1]))
+
+                # Check for convergence
+                if itr > 0 and abs(lls[-1] - lls[-2]) < tolerance:
+                    if verbose == 2:
+                      pbar.set_description("Converged to LP: {:.1f}".format(lls[-1]))
+                    break
             else:
                 self.observations.m_step(fixed_posteriors, datas, inputs, masks, tags, **observations_mstep_kwargs)
-
-            if verbose == 2:
-              pbar.set_description("LP: {:.1f}".format(lls[-1]))
-
-            # Check for convergence
-            if itr > 0 and abs(lls[-1] - lls[-2]) < tolerance:
-                if verbose == 2:
-                  pbar.set_description("Converged to LP: {:.1f}".format(lls[-1]))
-                break
 
         return lls
 
