@@ -429,7 +429,7 @@ class HMM(object):
 
         return lls
 
-    def _fit_em(self, datas, inputs, masks, tags, verbose = 2, num_iters=100, tolerance=0,
+    def _fit_em(self, datas, fixed_posteriors, inputs, masks, tags, verbose = 2, num_iters=100, tolerance=0,
                 init_state_mstep_kwargs={},
                 transitions_mstep_kwargs={},
                 observations_mstep_kwargs={},
@@ -446,17 +446,19 @@ class HMM(object):
 
         for itr in pbar:
             # E step: compute expected latent states with current parameters
-            expectations = [self.expected_states(data, input, mask, tag)
-                            for data, input, mask, tag,
-                            in zip(datas, inputs, masks, tags)]
 
-            # M step: maximize expected log joint wrt parameters
-            self.init_state_distn.m_step(expectations, datas, inputs, masks, tags, **init_state_mstep_kwargs)
-            self.transitions.m_step(expectations, datas, inputs, masks, tags, **transitions_mstep_kwargs)
-            self.observations.m_step(expectations, datas, inputs, masks, tags, **observations_mstep_kwargs)
+            if fixed_posteriors is None:
+                expectations = [self.expected_states(data, input, mask, tag)
+                                for data, input, mask, tag,
+                                in zip(datas, inputs, masks, tags)]
 
-            # Store progress
-            lls.append(self.log_prior() + sum([ll for (_, _, ll) in expectations]))
+                # M step: maximize expected log joint wrt parameters
+                self.init_state_distn.m_step(expectations, datas, inputs, masks, tags, **init_state_mstep_kwargs)
+                self.transitions.m_step(expectations, datas, inputs, masks, tags, **transitions_mstep_kwargs)
+                self.observations.m_step(expectations, datas, inputs, masks, tags, **observations_mstep_kwargs)
+                lls.append(self.log_prior() + sum([ll for (_, _, ll) in expectations]))
+            else:
+                self.observations.m_step(fixed_posteriors, datas, inputs, masks, tags, **observations_mstep_kwargs)
 
             if verbose == 2:
               pbar.set_description("LP: {:.1f}".format(lls[-1]))
@@ -470,7 +472,7 @@ class HMM(object):
         return lls
 
     @ensure_args_are_lists
-    def fit(self, datas, inputs=None, masks=None, tags=None,
+    def fit(self, datas, fixed_posteriors=None, inputs=None, masks=None, tags=None,
             verbose=2, method="em",
             initialize=True,
             init_method="random",
@@ -502,6 +504,7 @@ class HMM(object):
 
        # print(verbose)
         return _fitting_methods[method](datas,
+                                        fixed_posteriors=fixed_posteriors,
                                         inputs=inputs,
                                         masks=masks,
                                         tags=tags,
