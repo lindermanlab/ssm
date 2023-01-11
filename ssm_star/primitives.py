@@ -7,7 +7,7 @@ from autograd.extend import primitive, defvjp
 from autograd.tracer import getval
 from functools import partial
 
-from ssm.cstats import _blocks_to_bands_lower, _blocks_to_bands_upper, \
+from ssm_star.cstats import _blocks_to_bands_lower, _blocks_to_bands_upper, \
                        _bands_to_blocks_lower, _bands_to_blocks_upper, \
                        _transpose_banded, vjp_cholesky_banded_lower, \
                        _vjp_solve_banded_A, _vjp_solveh_banded_A

@@ -11,7 +11,7 @@ from ssm_star.util import random_rotation, ensure_args_are_lists, \
     logistic, logit, one_hot
 from ssm_star.regression import fit_linear_regression, generalized_newton_studentst_dof
 from ssm_star.preprocessing import interpolate_data
-from ssm.cstats import robust_ar_statistics
+from ssm_star.cstats import robust_ar_statistics
 from ssm_star.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
 import ssm_star.stats as stats
 
