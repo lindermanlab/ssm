@@ -4,7 +4,7 @@ import autograd.numpy as np
 import autograd.numpy.random as npr
 import scipy
 
-import ssm
+import ssm_star
 
 
 def test_sample(T=10, K=4, D=3, M=2):
@@ -45,33 +45,33 @@ def test_sample(T=10, K=4, D=3, M=2):
     # Sample basic (no prefix, inputs, etc.)
     for transitions in transition_names:
         for observations in observation_names:
-            hmm = ssm.HMM(K, D, M=0, transitions=transitions, observations=observations)
+            hmm = ssm_star.HMM(K, D, M=0, transitions=transitions, observations=observations)
             zsmpl, xsmpl = hmm.sample(T)
 
     # Sample with prefix
     for transitions in transition_names:
         for observations in observation_names:
-            hmm = ssm.HMM(K, D, M=0, transitions=transitions, observations=observations)
+            hmm = ssm_star.HMM(K, D, M=0, transitions=transitions, observations=observations)
             zpre, xpre = hmm.sample(3)
             zsmpl, xsmpl = hmm.sample(T, prefix=(zpre, xpre))
 
     # Sample with inputs
     for transitions in transition_names:
         for observations in observation_names:
-            hmm = ssm.HMM(K, D, M=M, transitions=transitions, observations=observations)
+            hmm = ssm_star.HMM(K, D, M=M, transitions=transitions, observations=observations)
             zpre, xpre = hmm.sample(3, input=npr.randn(3, M))
             zsmpl, xsmpl = hmm.sample(T, prefix=(zpre, xpre), input=npr.randn(T, M))
 
     # Sample without noise
     for transitions in transition_names:
         for observations in observation_names:
-            hmm = ssm.HMM(K, D, M=M, transitions=transitions, observations=observations)
+            hmm = ssm_star.HMM(K, D, M=M, transitions=transitions, observations=observations)
             zpre, xpre = hmm.sample(3, input=npr.randn(3, M))
             zsmpl, xsmpl = hmm.sample(T, prefix=(zpre, xpre), input=npr.randn(T, M), with_noise=False)
 
 
 def test_constrained_hmm(T=100, K=3, D=3):
-    hmm = ssm.HMM(K, D, M=0,
+    hmm = ssm_star.HMM(K, D, M=0,
                   transitions="constrained",
                   observations="gaussian")
     z, x = hmm.sample(T)
@@ -86,7 +86,7 @@ def test_constrained_hmm(T=100, K=3, D=3):
     transition_kwargs = dict(
         transition_mask=transition_mask
     )
-    fit_hmm = ssm.HMM(K, D, M=0,
+    fit_hmm = ssm_star.HMM(K, D, M=0,
                   transitions="constrained",
                   observations="gaussian",
                   transition_kwargs=transition_kwargs)
@@ -120,7 +120,7 @@ def test_hmm_likelihood(T=1000, K=5, D=2):
     true_lkhd = oldhmm.log_likelihood(y)
 
     # Make an HMM with these parameters
-    hmm = ssm.HMM(K, D, observations="diagonal_gaussian")
+    hmm = ssm_star.HMM(K, D, observations="diagonal_gaussian")
     hmm.transitions.log_Ps = np.log(A)
     hmm.observations.mus = C
     hmm.observations.sigmasq = sigma * np.ones((K, D))
@@ -162,7 +162,7 @@ def test_expectations(T=1000, K=20, D=2):
     true_E_trans = states.expected_transcounts
 
     # Make an HMM with these parameters
-    hmm = ssm.HMM(K, D, observations="diagonal_gaussian")
+    hmm = ssm_star.HMM(K, D, observations="diagonal_gaussian")
     hmm.transitions.log_Ps = np.log(A)
     hmm.observations.mus = C
     hmm.observations.sigmasq = sigma * np.ones((K, D))
@@ -204,7 +204,7 @@ def test_viterbi(T=1000, K=20, D=2):
     z_star = states.stateseq
 
     # Make an HMM with these parameters
-    hmm = ssm.HMM(K, D, observations="diagonal_gaussian")
+    hmm = ssm_star.HMM(K, D, observations="diagonal_gaussian")
     hmm.transitions.log_Ps = np.log(A)
     hmm.observations.mus = C
     hmm.observations.sigmasq = sigma * np.ones((K, D))
@@ -230,7 +230,7 @@ def test_hmm_mp_perf(T=10000, K=100, D=20):
     print("PyHSMM Fwd: ", pyhsmm_dt, "sec")
 
     # Run the SSM message passing code
-    from ssm.messages import forward_pass, backward_pass
+    from ssm_star.messages import forward_pass, backward_pass
     forward_pass(pi0, Ps, ll, out2) # Call once to compile, then time it
     tic = time()
     forward_pass(pi0, Ps, ll, out2)
@@ -282,7 +282,7 @@ def test_hmm_likelihood_perf(T=10000, K=50, D=20):
     print("PyHSMM: ", pyhsmm_dt, "sec. Val: ", true_lkhd)
 
     # Make an HMM with these parameters
-    hmm = ssm.HMM(K, D, observations="gaussian")
+    hmm = ssm_star.HMM(K, D, observations="gaussian")
     hmm.transitions.log_Ps = np.log(A)
     hmm.observations.mus = C
     hmm.observations._sqrt_Sigmas = np.sqrt(sigma) * np.array([np.eye(D) for k in range(K)])
@@ -293,14 +293,14 @@ def test_hmm_likelihood_perf(T=10000, K=50, D=20):
     print("SMM HMM: ", smm_dt, "sec. Val: ", test_lkhd)
 
     # Make an ARHMM with these parameters
-    arhmm = ssm.HMM(K, D, observations="ar")
+    arhmm = ssm_star.HMM(K, D, observations="ar")
     tic = time()
     arhmm.log_probability(y)
     arhmm_dt = time() - tic
     print("SSM ARHMM: ", arhmm_dt, "sec.")
 
     # Make an ARHMM with these parameters
-    arhmm = ssm.HMM(K, D, observations="ar")
+    arhmm = ssm_star.HMM(K, D, observations="ar")
     tic = time()
     arhmm.expected_states(y)
     arhmm_dt = time() - tic
@@ -310,17 +310,17 @@ def test_hmm_likelihood_perf(T=10000, K=50, D=20):
 def test_trace_product():
     A = np.random.randn(100, 50, 10)
     B = np.random.randn(100, 10, 50)
-    assert np.allclose(ssm.util.trace_product(A, B),
+    assert np.allclose(ssm_star.util.trace_product(A, B),
                        np.trace(A @ B, axis1=1, axis2=2))
 
     A = np.random.randn(50, 10)
     B = np.random.randn(10, 50)
-    assert np.allclose(ssm.util.trace_product(A, B),
+    assert np.allclose(ssm_star.util.trace_product(A, B),
                        np.trace(A @ B))
 
     A = np.random.randn(1, 1)
     B = np.random.randn(1, 1)
-    assert np.allclose(ssm.util.trace_product(A, B),
+    assert np.allclose(ssm_star.util.trace_product(A, B),
                        np.trace(A @ B))
 
 
@@ -415,22 +415,22 @@ def test_SLDSStructuredMeanField_entropy():
     ref_entropy = entropy_mv_gaussian(J_full, h_full)
 
     # Calculate entropy using kalman filter and posterior's entropy fn
-    info_args = ssm.messages.convert_mean_to_info_args(*params)
+    info_args = ssm_star.messages.convert_mean_to_info_args(*params)
     J_ini, h_ini, _, J_dyn_11,\
         J_dyn_21, J_dyn_22, h_dyn_1,\
         h_dyn_2, _, J_obs, h_obs, _ = info_args
 
     # J_obs[1:] += J_dyn_22
     # J_dyn_22[:] = 0
-    log_Z, smoothed_mus, smoothed_Sigmas, ExxnT = ssm.messages.\
+    log_Z, smoothed_mus, smoothed_Sigmas, ExxnT = ssm_star.messages.\
         kalman_info_smoother(*info_args)
 
 
     # Model is just a dummy model to simplify 
     # instantiating the posterior object.
-    model = ssm.SLDS(N, 1, D, emissions="gaussian", dynamics="gaussian")
+    model = ssm_star.SLDS(N, 1, D, emissions="gaussian", dynamics="gaussian")
     datas = params[-1]
-    post = ssm.variational.SLDSStructuredMeanFieldVariationalPosterior(model, datas)
+    post = ssm_star.variational.SLDSStructuredMeanFieldVariationalPosterior(model, datas)
 
     # Assign posterior to have info params that are the same as the ones used
     # in the reference entropy calculation.

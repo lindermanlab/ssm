@@ -9,7 +9,7 @@ from autograd.scipy.special import logsumexp, gammaln
 from scipy.special import polygamma, digamma
 from scipy.optimize import minimize
 from warnings import warn
-from ssm.util import check_shape
+from ssm_star.util import check_shape
 
 mean_functions = dict(
     identity=lambda x: x,

@@ -29,9 +29,9 @@ import autograd.numpy as np
 import autograd.numpy.random as npr
 npr.seed(0)
 
-import ssm
-from ssm.util import find_permutation
-from ssm.plots import gradient_cmap, white_to_color_cmap
+import ssm_star
+from ssm_star.util import find_permutation
+from ssm_star.plots import gradient_cmap, white_to_color_cmap
 
 import matplotlib.pyplot as plt
 # %matplotlib inline
@@ -59,7 +59,7 @@ num_states = 6   # number of discrete states
 obs_dim = 2       # dimensionality of observation
 
 # Make an HMM
-true_hmm = ssm.HMM(num_states, obs_dim, observations="gaussian")
+true_hmm = ssm_star.HMM(num_states, obs_dim, observations="gaussian")
 
 # Manually tweak the means to make them farther apart
 thetas = 2 * np.pi * npr.rand(num_states)
@@ -154,7 +154,7 @@ def merge_two_states(hmm, s1, s2, datas, observations="gaussian"):
         expectations_new.append((Ez_new, Ezz_new, py))
     
     # Perform M-Step to get params for new hmm
-    new_hmm = ssm.HMM(K-1, D, observations=observations)
+    new_hmm = ssm_star.HMM(K-1, D, observations=observations)
     new_hmm.init_state_distn.m_step(expectations_new, datas, inputs, masks, tags)
     new_hmm.transitions.m_step(expectations_new, datas, inputs, masks, tags)
     new_hmm.observations.m_step(expectations_new, datas, inputs, masks, tags)

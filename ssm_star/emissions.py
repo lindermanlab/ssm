@@ -5,12 +5,12 @@ import autograd.numpy.random as npr
 from autograd.scipy.special import gammaln
 from autograd import hessian
 
-from ssm.util import ensure_args_are_lists, \
+from ssm_star.util import ensure_args_are_lists, \
     logistic, logit, softplus, inv_softplus
-from ssm.preprocessing import interpolate_data, pca_with_imputation
-from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
-from ssm.stats import independent_studentst_logpdf, bernoulli_logpdf
-from ssm.regression import fit_linear_regression
+from ssm_star.preprocessing import interpolate_data, pca_with_imputation
+from ssm_star.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
+from ssm_star.stats import independent_studentst_logpdf, bernoulli_logpdf
+from ssm_star.regression import fit_linear_regression
 
 # Observation models for SLDS
 class Emissions(object):

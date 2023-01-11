@@ -9,7 +9,7 @@ from scipy.stats import norm, t, bernoulli, poisson, vonmises
 from scipy.stats import multivariate_normal as mvn
 from scipy.special import logsumexp
 
-from ssm.stats import multivariate_normal_logpdf, \
+from ssm_star.stats import multivariate_normal_logpdf, \
     expected_multivariate_normal_logpdf, diagonal_gaussian_logpdf, \
     independent_studentst_logpdf, bernoulli_logpdf, categorical_logpdf, \
     poisson_logpdf, vonmises_logpdf

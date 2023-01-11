@@ -63,9 +63,9 @@ color_names = ["windows blue",
 
 colors = sns.xkcd_palette(color_names)
 
-import ssm
-from ssm.util import random_rotation
-from ssm.plots import plot_dynamics_2d
+import ssm_star
+from ssm_star.util import random_rotation
+from ssm_star.plots import plot_dynamics_2d
 
 # Specify whether or not to save figures
 save_figures = False
@@ -139,7 +139,7 @@ obs_dim = 10      # number of observed dimensions
 
 # +
 # Make an LDS with somewhat interesting dynamics parameters
-true_lds = ssm.LDS(obs_dim, state_dim, emissions="gaussian_orthog")
+true_lds = ssm_star.LDS(obs_dim, state_dim, emissions="gaussian_orthog")
 
 A0 = .99 * random_rotation(state_dim, theta=np.pi/20)
 S = np.arange(1, state_dim+1)
@@ -268,7 +268,7 @@ if save_figures:
 data = emissions
 
 print("Fitting LDS with Laplace-EM using structured variational posterior")
-lds = ssm.LDS(obs_dim, state_dim, emissions="gaussian")
+lds = ssm_star.LDS(obs_dim, state_dim, emissions="gaussian")
 elbos, q = lds.fit(data, method="laplace_em", num_iters=10)
 
 # Get the posterior mean of the continuous states
@@ -377,7 +377,7 @@ plt.tight_layout()
 # +
 import copy
 
-plds = ssm.LDS(obs_dim, state_dim, emissions="poisson_orthog", emission_kwargs=dict(link="softplus"))
+plds = ssm_star.LDS(obs_dim, state_dim, emissions="poisson_orthog", emission_kwargs=dict(link="softplus"))
 plds.dynamics.params = copy.deepcopy(true_lds.dynamics.params)
 plds.emissions.ds = 0 * np.ones(obs_dim)
 states_plds, obs_plds = plds.sample(time_bins)

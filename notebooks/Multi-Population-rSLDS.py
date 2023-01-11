@@ -104,10 +104,10 @@ Multi-Population rSLDS
 
 # + colab={"base_uri": "https://localhost:8080/", "height": 581} colab_type="code" id="ruUnNqi5RZqT" outputId="228b6c8e-c064-46c2-ce57-9ad88daca5c8"
 try:
-    import ssm
+    import ssm_star
 except:
     # !pip install git+https://github.com/lindermanlab/ssm.git#egg=ssm
-    import ssm
+    import ssm_star
 
 # + colab={"base_uri": "https://localhost:8080/", "height": 71} colab_type="code" id="zDn3tEJhRFQv" outputId="2f1ca1d0-8f17-404a-897f-57b8c5d353cb"
 #### General packages
@@ -122,7 +122,7 @@ sns.set_style("white")
 sns.set_context("talk")
 sns.set_style('ticks',{"xtick.major.size":8,
 "ytick.major.size":8})
-from ssm.plots import gradient_cmap, white_to_color_cmap
+from ssm_star.plots import gradient_cmap, white_to_color_cmap
 
 color_names = [
     "purple",
@@ -139,14 +139,14 @@ cmap = gradient_cmap(colors)
 # + colab={} colab_type="code" id="0rq19iIQRFQy"
 #### SSM PACKAGES ###
 
-import ssm
-from ssm.variational import SLDSMeanFieldVariationalPosterior, SLDSTriDiagVariationalPosterior, \
+import ssm_star
+from ssm_star.variational import SLDSMeanFieldVariationalPosterior, SLDSTriDiagVariationalPosterior, \
     SLDSStructuredMeanFieldVariationalPosterior
-from ssm.util import random_rotation, find_permutation, relu
+from ssm_star.util import random_rotation, find_permutation, relu
 
 #Load from extensions
-from ssm.extensions.mp_srslds.emissions_ext import GaussianOrthogonalCompoundEmissions, PoissonOrthogonalCompoundEmissions
-from ssm.extensions.mp_srslds.transitions_ext import StickyRecurrentOnlyTransitions, StickyRecurrentTransitions
+from ssm_star.extensions.mp_srslds.emissions_ext import GaussianOrthogonalCompoundEmissions, PoissonOrthogonalCompoundEmissions
+from ssm_star.extensions.mp_srslds.transitions_ext import StickyRecurrentOnlyTransitions, StickyRecurrentTransitions
 
 # + [markdown] colab_type="text" id="Ty3EOi8bRFQ1"
 # ## Simulate (somewhat realistic) data
@@ -213,7 +213,7 @@ b_all=np.zeros([K,D]) #Initialize dynamics offset
 
 
 #Create initial ground truth model, that we will modify
-true_slds = ssm.SLDS(N=np.sum(N_vec),K=K,D=int(np.sum(D_vec)),
+true_slds = ssm_star.SLDS(N=np.sum(N_vec),K=K,D=int(np.sum(D_vec)),
              dynamics="gaussian",
              emissions=poiss_comp_emissions,
              transitions=true_sro_trans)
@@ -397,7 +397,7 @@ sro_trans=StickyRecurrentOnlyTransitions(K=K,D=np.sum(D_vec), l2_penalty_similar
 # + colab={"base_uri": "https://localhost:8080/", "height": 166, "referenced_widgets": ["36b4e6c4b2064572a4412f8bc298caeb", "97247a689ff744689528aa9555c13c62", "581b2c1a39eb439581308a5cdea07389", "e8e6a6b80ed14b77900e87e1c779f459", "2e200ca5be3141f2b2ee041ec8b08e49", "f4e534f4d6ac45c6a7da04be7d341968", "ced98407e9ee4ee4bd0baaa24d4765b9", "14de5bf9b23f47d4867e135cf156ac97", "6bd4692a8c95492d84f6353069342d4f", "62f38f8736314a098f91d7486b5b84f6", "d7ffd5a5a8874c2d8e593cb29c8f14b2", "2ddbbe21934547db9e365d905ea1f024", "19ad77a391f7459f811262d5bdbeb783", "5da21c8eac7041898c7a468f0388e632", "eb1c51978e0f4b79968cf6618a959007", "c0204fcad9f64dd48580f7d17767abc6"]} colab_type="code" id="n7WRqQufRFRd" outputId="28ddbaaa-221c-4ca8-db59-b76bbeff1dd0"
 K=3 #Number of discrete states
 
-rslds = ssm.SLDS(N=np.sum(N_vec),K=K,D=np.sum(D_vec),
+rslds = ssm_star.SLDS(N=np.sum(N_vec),K=K,D=np.sum(D_vec),
              dynamics="gaussian",
              emissions=poiss_comp_emissions,
              transitions=sro_trans,

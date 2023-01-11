@@ -29,8 +29,8 @@ import seaborn as sns
 sns.set_style("white")
 sns.set_context("talk")
 
-import ssm
-from ssm.util import random_rotation, find_permutation
+import ssm_star
+from ssm_star.util import random_rotation, find_permutation
 # -
 
 # Set the parameters of the SLDS
@@ -41,7 +41,7 @@ N = 100     # number of observed dimensions
 
 # +
 # Make an SLDS with the true parameters
-true_slds = ssm.SLDS(N, K, D, emissions="poisson_orthog", emission_kwargs=dict(link="softplus"))
+true_slds = ssm_star.SLDS(N, K, D, emissions="poisson_orthog", emission_kwargs=dict(link="softplus"))
 
 # Set rotational dynamics
 for k in range(K):
@@ -66,7 +66,7 @@ plt.colorbar()
 
 # +
 print("Fitting SLDS with BBVI")
-slds = ssm.SLDS(N, K, D, emissions="poisson_orthog", emission_kwargs=dict(link="softplus"))
+slds = ssm_star.SLDS(N, K, D, emissions="poisson_orthog", emission_kwargs=dict(link="softplus"))
 slds.initialize(y_masked, masks=mask)
 
 q_bbvi_elbos, q_bbvi = slds.fit(y_masked, masks=mask, method="bbvi", 
@@ -84,7 +84,7 @@ q_bbvi_y = slds.smooth(q_bbvi_x, y)
 
 # +
 print("Fitting SLDS with Laplace-EM")
-slds = ssm.SLDS(N, K, D, emissions="poisson_orthog", emission_kwargs=dict(link="softplus"))
+slds = ssm_star.SLDS(N, K, D, emissions="poisson_orthog", emission_kwargs=dict(link="softplus"))
 slds.initialize(y_masked, masks=mask)
 
 q_lem_elbos, q_lem = slds.fit(y_masked, masks=mask, method="laplace_em",

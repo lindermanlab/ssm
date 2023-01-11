@@ -35,9 +35,9 @@ import autograd.numpy as np
 import autograd.numpy.random as npr
 npr.seed(0)
 
-import ssm
-from ssm.util import find_permutation
-from ssm.plots import gradient_cmap, white_to_color_cmap
+import ssm_star
+from ssm_star.util import find_permutation
+from ssm_star.plots import gradient_cmap, white_to_color_cmap
 
 import matplotlib.pyplot as plt
 # %matplotlib inline
@@ -106,7 +106,7 @@ num_states = 5    # number of discrete states
 obs_dim = 2       # dimensionality of observation
 
 # Make an HMM
-true_hmm = ssm.HMM(num_states, obs_dim, observations="gaussian")
+true_hmm = ssm_star.HMM(num_states, obs_dim, observations="gaussian")
 
 # Manually tweak the means to make them farther apart
 thetas = np.linspace(0, 2 * np.pi, num_states, endpoint=False)
@@ -214,7 +214,7 @@ data = obs # Treat observations generated above as synthetic data.
 N_iters = 50
 
 ## testing the constrained transitions class
-hmm = ssm.HMM(num_states, obs_dim, observations="gaussian")
+hmm = ssm_star.HMM(num_states, obs_dim, observations="gaussian")
 
 hmm_lls = hmm.fit(obs, method="em", num_iters=N_iters, init_method="kmeans")
 
@@ -324,8 +324,8 @@ plt.show()
 #
 
 # + nbpresent={"id": "30e94251-7e72-42f6-9329-7f43500f5e05"}
-true_state_list, true_durations = ssm.util.rle(true_states)
-inferred_state_list, inferred_durations = ssm.util.rle(hmm_z)
+true_state_list, true_durations = ssm_star.util.rle(true_states)
+inferred_state_list, inferred_durations = ssm_star.util.rle(hmm_z)
 
 # Rearrange the lists of durations to be a nested list where
 # the nth inner list is a list of durations for state n

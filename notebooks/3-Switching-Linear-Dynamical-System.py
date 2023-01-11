@@ -86,9 +86,9 @@ color_names = ["windows blue",
 colors = sns.xkcd_palette(color_names)
 cmap = ListedColormap(colors)
 
-import ssm
-from ssm.util import random_rotation, find_permutation
-from ssm.plots import plot_dynamics_2d
+import ssm_star
+from ssm_star.util import random_rotation, find_permutation
+from ssm_star.plots import plot_dynamics_2d
 
 save_figures = False
 # -
@@ -120,7 +120,7 @@ emissions_dim = 10      # number of observed dimensions
 
 # +
 # Make an SLDS with the true parameters
-true_slds = ssm.SLDS(emissions_dim,
+true_slds = ssm_star.SLDS(emissions_dim,
                      n_disc_states,
                      latent_dim,
                      emissions="gaussian_orthog")
@@ -251,7 +251,7 @@ data = emissions
 print("Fitting SLDS with BBVI and Mean-Field Posterior")
 
 # Create the model and initialize its parameters
-slds = ssm.SLDS(emissions_dim, n_disc_states, latent_dim, emissions="gaussian_orthog")
+slds = ssm_star.SLDS(emissions_dim, n_disc_states, latent_dim, emissions="gaussian_orthog")
 
 # Fit the model using BBVI with a mean field variational posterior
 q_mf_elbos, q_mf = slds.fit(data, method="bbvi",
@@ -273,7 +273,7 @@ q_mf_y = slds.smooth(q_mf_x, data)
 
 # +
 print("Fitting SLDS with BBVI using structured variational posterior")
-slds = ssm.SLDS(emissions_dim, n_disc_states, latent_dim, emissions="gaussian_orthog")
+slds = ssm_star.SLDS(emissions_dim, n_disc_states, latent_dim, emissions="gaussian_orthog")
 
 # Fit the model using SVI with a structured variational posterior
 q_struct_elbos, q_struct = slds.fit(data, method="bbvi",
@@ -297,7 +297,7 @@ q_struct_y = slds.smooth(q_struct_x, data)
 print("Fitting SLDS with Laplace-EM")
 
 # Create the model and initialize its parameters
-slds = ssm.SLDS(emissions_dim, n_disc_states, latent_dim, emissions="gaussian_orthog")
+slds = ssm_star.SLDS(emissions_dim, n_disc_states, latent_dim, emissions="gaussian_orthog")
 
 # Fit the model using Laplace-EM with a structured variational posterior
 q_lem_elbos, q_lem = slds.fit(data, method="laplace_em",

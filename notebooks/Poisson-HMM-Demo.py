@@ -36,7 +36,7 @@ from scipy.linalg import block_diag
 import autograd.numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
-import ssm
+import ssm_star
 
 # %matplotlib inline
 # -
@@ -237,7 +237,7 @@ num_states = 5
 num_neurons = train_datas[0].shape[1]
 
 # Manually set the initial state distribution
-init_dist = ssm.init_state_distns.FixedInitialStateDistribution(num_states,
+init_dist = ssm_star.init_state_distns.FixedInitialStateDistribution(num_states,
                                                                 num_neurons,
                                                                 pi0 = np.array([1, 0, 0, 0, 0]))
 
@@ -271,7 +271,7 @@ A = np.array(
 # Create our HMM
 transition_mask = (A > 0)
 transition_kwargs = {"transition_mask": transition_mask}
-simple_hmm = ssm.HMM(num_states,
+simple_hmm = ssm_star.HMM(num_states,
                      num_neurons,
                      observations="poisson",
                      transitions="constrained",

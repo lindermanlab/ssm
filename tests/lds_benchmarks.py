@@ -1,12 +1,12 @@
 import time
-import ssm
+import ssm_star
 import numpy as np
 import copy
 import scipy
 import timeit
 
-from ssm.util import SEED
-from ssm.primitives import lds_log_probability
+from ssm_star.util import SEED
+from ssm_star.primitives import lds_log_probability
 from test_lds import make_lds_parameters
 
 
@@ -19,10 +19,10 @@ def time_laplace_em_end2end(ncalls=5):
     print("Benchmarking 1 iter of laplace-em fitting on Vanilla LDS.")
     params_list = [SINGLE_DATA_PARAMS, MULT_DATA_PARAMS]
     for (N, D, T, num_datas) in params_list:
-        lds_true = ssm.LDS(N, D, dynamics="gaussian", emissions="gaussian")
+        lds_true = ssm_star.LDS(N, D, dynamics="gaussian", emissions="gaussian")
         datas = [lds_true.sample(T)[1] for _ in range(num_datas)]
 
-        lds_new = ssm.LDS(N, D, dynamics="gaussian", emissions="gaussian")
+        lds_new = ssm_star.LDS(N, D, dynamics="gaussian", emissions="gaussian")
         print("N, D, T, num_datas: = ", N, D, T, num_datas)
         total = timeit.timeit(lambda: lds_new.fit(datas, initialize=False, num_iters=1),
             number=ncalls)
@@ -32,7 +32,7 @@ def time_lds_sample(ncalls=20):
     print("Testing continuous sample performance:")
     params_list = [SINGLE_DATA_PARAMS, MULT_DATA_PARAMS]
     for (N, D, T, num_datas) in params_list:
-        lds_true = ssm.LDS(N, D, dynamics="gaussian", emissions="gaussian")
+        lds_true = ssm_star.LDS(N, D, dynamics="gaussian", emissions="gaussian")
         datas = [lds_true.sample(T)[1] for _ in range(num_datas)]
         
         # Calling fit will return a variational posterior object.

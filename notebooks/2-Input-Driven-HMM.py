@@ -38,9 +38,9 @@ Input Driven HMM
 import numpy as np
 import numpy.random as npr
 import matplotlib.pyplot as plt
-import ssm
+import ssm_star
 import seaborn as sns
-from ssm.util import one_hot, find_permutation
+from ssm_star.util import one_hot, find_permutation
 
 # %matplotlib inline
 
@@ -87,7 +87,7 @@ input_dim = 1    # input dimension
 num_categories = 3    # number of output types/categories
 
 # Make an HMM
-true_hmm = ssm.HMM(num_states, obs_dim, input_dim, 
+true_hmm = ssm_star.HMM(num_states, obs_dim, input_dim, 
                observations="categorical", observation_kwargs=dict(C=num_categories),
                transitions="inputdriven")
 
@@ -155,7 +155,7 @@ plt.show()
 # +
 # Now create a new HMM and fit it to the data with EM
 N_iters = 100
-hmm = ssm.HMM(num_states, obs_dim, input_dim, 
+hmm = ssm_star.HMM(num_states, obs_dim, input_dim, 
           observations="categorical", observation_kwargs=dict(C=num_categories),
           transitions="inputdriven")
 

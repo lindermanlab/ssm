@@ -74,8 +74,8 @@ colors = sns.xkcd_palette(color_names)
 sns.set_style("white")
 sns.set_context("talk")
 
-import ssm
-from ssm.util import random_rotation, find_permutation
+import ssm_star
+from ssm_star.util import random_rotation, find_permutation
 
 # Helper functions for plotting results
 def plot_trajectory(z, x, ax=None, ls="-"):
@@ -186,7 +186,7 @@ def make_nascar_model():
     Rs = np.row_stack((100*w1, 100*w2, 10*w3,10*w4))
     r = np.concatenate((100*b1, 100*b2, 10*b3, 10*b4))
     
-    true_rslds = ssm.SLDS(D_obs, K, D_latent, 
+    true_rslds = ssm_star.SLDS(D_obs, K, D_latent, 
                       transitions="recurrent_only",
                       dynamics="diagonal_gaussian",
                       emissions="gaussian_orthog",
@@ -300,7 +300,7 @@ plt.tight_layout()
 
 # +
 # Fit an rSLDS with its default initialization, using Laplace-EM with a structured variational posterior
-rslds = ssm.SLDS(D_obs, K, D_latent,
+rslds = ssm_star.SLDS(D_obs, K, D_latent,
              transitions="recurrent_only",
              dynamics="diagonal_gaussian",
              emissions="gaussian_orthog",
@@ -318,7 +318,7 @@ rslds_lem = copy.deepcopy(rslds)
 
 # +
 # Fit an rSLDS with its default initialization, using BBVI with a structured variational posterior
-rslds = ssm.SLDS(D_obs, K, D_latent, 
+rslds = ssm_star.SLDS(D_obs, K, D_latent, 
              transitions="recurrent_only",
              dynamics="diagonal_gaussian",
              emissions="gaussian_orthog",

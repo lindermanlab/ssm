@@ -48,8 +48,8 @@ color_names = ["windows blue",
 
 colors = sns.xkcd_palette(color_names)
 
-import ssm
-from ssm.util import random_rotation, find_permutation
+import ssm_star
+from ssm_star.util import random_rotation, find_permutation
 # -
 
 # Set the parameters of the SLDS
@@ -60,7 +60,7 @@ N = 10      # number of observed dimensions
 
 # +
 # Make an SLDS with the true parameters
-true_slds = ssm.SLDS(N, K, D, emissions="gaussian_orthog")
+true_slds = ssm_star.SLDS(N, K, D, emissions="gaussian_orthog")
 for k in range(K):
     true_slds.dynamics.As[k] = .95 * random_rotation(D, theta=(k+1) * np.pi/20)
 z, x, y = true_slds.sample(T)
@@ -123,7 +123,7 @@ for alpha in alphas:
     print("Fitting SLDS with Laplace-EM, alpha = {}".format(alpha))
 
     # Create the model and initialize its parameters
-    slds = ssm.SLDS(N, K, D, emissions="gaussian_orthog")
+    slds = ssm_star.SLDS(N, K, D, emissions="gaussian_orthog")
     slds.initialize(y_masked, masks=mask)
 
     # Fit the model using Laplace-EM with a structured variational posterior

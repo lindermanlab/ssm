@@ -4,8 +4,8 @@ from autograd.scipy.special import logsumexp
 from autograd import grad, elementwise_grad
 from autograd.test_util import check_grads
 
-from ssm.messages import forward_pass, backward_pass, grad_hmm_normalizer
-from ssm.primitives import hmm_normalizer
+from ssm_star.messages import forward_pass, backward_pass, grad_hmm_normalizer
+from ssm_star.primitives import hmm_normalizer
 
 from tqdm import trange
 

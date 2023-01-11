@@ -11,8 +11,8 @@ npr.seed(0)
 import matplotlib
 import matplotlib.pyplot as plt
 
-import ssm
-from ssm.util import find_permutation
+import ssm_star
+from ssm_star.util import find_permutation
 
 # Set the parameters of the HMM
 T = 500     # number of time bins
@@ -20,7 +20,7 @@ K = 5       # number of discrete states
 D = 2       # number of observed dimensions
 
 # Make an HMM with the true parameters
-true_hmm = ssm.HMM(K, D, observations="diagonal_gaussian")
+true_hmm = ssm_star.HMM(K, D, observations="diagonal_gaussian")
 z, y = true_hmm.sample(T)
 z_test, y_test = true_hmm.sample(T)
 true_ll = true_hmm.log_probability(y)
@@ -49,7 +49,7 @@ results = {}
 for obs in observations:
     for method in methods:
         print("Fitting {} HMM with {}".format(obs, method))
-        model = ssm.HMM(K, D, observations=obs)
+        model = ssm_star.HMM(K, D, observations=obs)
         train_lls = model.fit(y, method=method)
         test_ll = model.log_likelihood(y_test)
         smoothed_y = model.smooth(y)

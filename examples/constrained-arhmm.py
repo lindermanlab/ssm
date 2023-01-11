@@ -37,12 +37,12 @@ from tqdm.auto import trange
 import matplotlib.pyplot as plt
 import matplotlib.animation as manimation
 
-import ssm
-from ssm.messages import hmm_sample
-from ssm.primitives import lds_sample
-from ssm.observations import GaussianObservations
-from ssm.init_state_distns import InitialStateDistribution
-from ssm.preprocessing import trend_filter, pca_with_imputation
+import ssm_star
+from ssm_star.messages import hmm_sample
+from ssm_star.primitives import lds_sample
+from ssm_star.observations import GaussianObservations
+from ssm_star.init_state_distns import InitialStateDistribution
+from ssm_star.preprocessing import trend_filter, pca_with_imputation
 
 
 # In[2]:
@@ -268,7 +268,7 @@ for mu in mog.observations.mus:
 # In[9]:
 
 
-arhmm = ssm.HMM(K=8, D=D, observations="ar")
+arhmm = ssm_star.HMM(K=8, D=D, observations="ar")
 arhmm.fit(x)
 
 

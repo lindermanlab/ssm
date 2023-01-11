@@ -6,19 +6,19 @@ import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd import value_and_grad, grad
 
-from ssm.optimizers import adam_step, rmsprop_step, sgd_step, lbfgs, \
+from ssm_star.optimizers import adam_step, rmsprop_step, sgd_step, lbfgs, \
     convex_combination, newtons_method_block_tridiag_hessian
-from ssm.primitives import hmm_normalizer
-from ssm.messages import hmm_expected_states, viterbi
-from ssm.util import ensure_args_are_lists, \
+from ssm_star.primitives import hmm_normalizer
+from ssm_star.messages import hmm_expected_states, viterbi
+from ssm_star.util import ensure_args_are_lists, \
     ensure_slds_args_not_none, ensure_variational_args_are_lists, ssm_pbar
 
-import ssm.observations as obs
-import ssm.transitions as trans
-import ssm.init_state_distns as isd
-import ssm.emissions as emssn
-import ssm.hmm as hmm
-import ssm.variational as varinf
+import ssm_star.observations as obs
+import ssm_star.transitions as trans
+import ssm_star.init_state_distns as isd
+import ssm_star.emissions as emssn
+import ssm_star.hmm as hmm
+import ssm_star.variational as varinf
 
 __all__ = ['SLDS', 'LDS']
 

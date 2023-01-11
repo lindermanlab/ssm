@@ -7,7 +7,7 @@ from autograd.scipy.stats import norm
 from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
-from ssm.util import ensure_args_are_lists
+from ssm_star.util import ensure_args_are_lists
 
 
 class _Hierarchical(object):

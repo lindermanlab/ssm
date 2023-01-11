@@ -7,7 +7,7 @@ from autograd.scipy.special import logsumexp
 from autograd.misc.optimizers import sgd, adam
 from autograd import grad
 
-from ssm.util import ensure_args_are_lists
+from ssm_star.util import ensure_args_are_lists
 
 class InitialStateDistribution(object):
     def __init__(self, K, D, M=0):

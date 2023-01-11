@@ -14,16 +14,16 @@ USE_OPENMP = os.environ.get('USE_OPENMP', False)
 print("USE_OPENMP", USE_OPENMP)
 extensions = []
 extensions.append(
-    Extension('ssm.cstats',
+    Extension('ssm_star.cstats',
               extra_compile_args=["-fopenmp"] if USE_OPENMP else [],
               extra_link_args=["-fopenmp"] if USE_OPENMP else [],
               language="c++",
-              sources=["ssm/cstats.pyx"],
+              sources=["ssm_star/cstats.pyx"],
               include_dirs=[np.get_include()]
               )
 )
 
-DISTNAME = 'ssm'
+DISTNAME = 'ssm_star'
 DESCRIPTION = 'Bayesian learning and inference for a variety of state space models'
 with open('README.md') as fp:
     LONG_DESCRIPTION = fp.read()

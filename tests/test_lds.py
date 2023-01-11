@@ -1,6 +1,6 @@
 import time
-import ssm
-from ssm.util import SEED
+import ssm_star
+from ssm_star.util import SEED
 import copy
 import scipy
 import itertools as it
@@ -11,7 +11,7 @@ import autograd.numpy.random as npr
 from autograd.test_util import check_grads
 from autograd import hessian
 
-from ssm.primitives import \
+from ssm_star.primitives import \
     blocks_to_bands, bands_to_blocks, transpose_banded, \
     solveh_banded, solve_banded, convert_lds_to_block_tridiag, \
     lds_log_probability, grad_cholesky_banded, cholesky_banded, \
@@ -483,13 +483,13 @@ def test_lds_sample_and_fit(T=100, N=15, K=3, D=10, num_cases=25):
                     posterior
                 )
             )
-            true_slds = ssm.SLDS(N, K, D,
+            true_slds = ssm_star.SLDS(N, K, D,
                                 transitions=transitions,
                                 dynamics=dynamics,
                                 emissions=emissions)
             z, x, y = true_slds.sample(T)
 
-            fit_slds = ssm.SLDS(N, K, D,
+            fit_slds = ssm_star.SLDS(N, K, D,
                                 transitions=transitions,
                                 dynamics=dynamics,
                                 emissions=emissions)
@@ -502,13 +502,13 @@ def test_lds_sample_and_fit(T=100, N=15, K=3, D=10, num_cases=25):
 
 def lbfgs_newton_perf_comparison(T=100, N=15, K=3, D=10, ntrials=5, n_iters=20):
     np.random.seed(seed=123)
-    true_slds = ssm.SLDS(N, K, D,
+    true_slds = ssm_star.SLDS(N, K, D,
                             transitions="recurrent",
                             dynamics="gaussian",
                             emissions="gaussian")
     z, x, y = true_slds.sample(T)
 
-    fit_slds = ssm.SLDS(N, K, D,
+    fit_slds = ssm_star.SLDS(N, K, D,
                         transitions="recurrent",
                         dynamics="gaussian",
                         emissions="gaussian")
@@ -571,7 +571,7 @@ def test_laplace_em(T=100, N=15, K=3, D=10, num_cases=25):
     print("Testing SLDS and RSLDS...")
     for idx in test_case_indices:
         dynamics, emissions, transitions, input_dim = test_cases[idx]
-        true_slds = ssm.SLDS(N, K, D, M=input_dim,
+        true_slds = ssm_star.SLDS(N, K, D, M=input_dim,
                                 transitions=transitions,
                                 dynamics="gaussian",
                                 emissions=emissions)
@@ -584,7 +584,7 @@ def test_laplace_em(T=100, N=15, K=3, D=10, num_cases=25):
         zs, xs, ys = list(zip(*datas))
 
         # Fit an SLDS to the data
-        fit_slds = ssm.SLDS(N, K, D, M=input_dim,
+        fit_slds = ssm_star.SLDS(N, K, D, M=input_dim,
                             transitions=transitions,
                             dynamics="gaussian",
                             emissions=emissions)
@@ -612,11 +612,11 @@ def test_laplace_em_hessian(N=5, K=3, D=2, T=20):
             print("Checking analytical hessian for transitions={},  "
                   "and emissions={}".format(transitions, emissions)
             )
-            slds = ssm.SLDS(N, K, D, transitions=transitions,
+            slds = ssm_star.SLDS(N, K, D, transitions=transitions,
                             dynamics="gaussian",
                             emissions=emissions)
             z, x, y = slds.sample(T)
-            new_slds = ssm.SLDS(N, K, D, transitions="standard",
+            new_slds = ssm_star.SLDS(N, K, D, transitions="standard",
                             dynamics="gaussian",
                             emissions=emissions)
 
