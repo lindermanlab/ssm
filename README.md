@@ -1,7 +1,17 @@
 # SSM_star: Bayesian learning and inference for state space models
-This is a fork of SSM.   Note that we need numpy==1.23.5 to avoid an importing error with "SystemError: initialization of _internal failed without raising an exception."   
+This is a fork of SSM.   
 
-The remainder of the README is from SSM.
+## Tests
+The unit tests are mostly all passing.  However, 1 unit test (of 18) fails in `test_lds.py`.  In particular, `test_lds_log_probability_perf` is currently failing, with an assertion error about dimensionalities matching.  It is unclear to me why this is failing on my end, even though the build seems to be passing in the cloud.   Perhaps the build does not require unit tests to pass. 
+
+
+## Installation 
+Installation (to Python 3.8) required some extra steps not specified in the ssm repo.    In particular, note that for `src/`, we need numpy==1.23.5 to avoid an importing error with "SystemError: initialization of _internal failed without raising an exception."  Moreover, `tests/` require additional dependencies, such as `pyhsmm`, that also must be installed from git branches rather than from pypi. 
+For more information, see `requirements.txt` and `dev-requirements.txt`.
+For development, we need pylds and pyhsmm for comparison. 
+
+
+**The remainder of the README is from SSM.**
 
 
 **Note: We're working full time on a [JAX](https://github.com/google/jax) refactor of SSM that will take advantage of JIT compilation, GPU and TPU support, automatic differentation, etc. You can keep track of our progress [here](https://github.com/probml/ssm-jax/). We're hoping to make an official release soon!**

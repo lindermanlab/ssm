@@ -1,0 +1,11 @@
+pylds # for unit tests.
+pytest 
+
+# Pip installing from the git repo works, even though pip installing does not.
+# This is because the master branch is far ahead of what has been published to pypi.
+# See https://pypi.org/project/pyhsmm/#history for the pyhsmm release history.
+# See https://github.com/lindermanlab/ssm/issues/155 for the issue with unit tests.
+git+https://github.com/mattjj/pybasicbayes
+git+https://github.com/mattjj/pyhsmm
+git+https://github.com/mattjj/pylds
+
