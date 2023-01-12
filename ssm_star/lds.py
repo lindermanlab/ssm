@@ -1,3 +1,21 @@
+""""
+Play with Linderman SSSM code to understand inference and replicate it
+https://github.com/lindermanlab/ssm/blob/a414dfebb5a04195970552c1f17db19ee24a7e21/ssm/lds.py#L26
+
+Along the way
+1. Document.
+    - Describe default behavior in the docstrings 
+    (e.g. we describe the default initial state distribution for SLDS instead of having to hunt thru code)
+    - Give types of arguments
+    (e.g., what is `perm` here: https://github.com/lindermanlab/ssm/blob/a414dfebb5a04195970552c1f17db19ee24a7e21/ssm/init_state_distns.py#L37)
+    (e.g., what is `init_state_distn`)
+    with links to class definitions in code. 
+2. [Maybe] Use my notation, or at least write a conversion. 
+3. [Maybe] Rewrite as functional programming.
+"""
+
+from typing import Optional 
+
 import copy
 import warnings
 from tqdm.auto import trange
@@ -6,6 +24,7 @@ import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd import value_and_grad, grad
 
+import ssm_star
 from ssm_star.optimizers import adam_step, rmsprop_step, sgd_step, lbfgs, \
     convex_combination, newtons_method_block_tridiag_hessian
 from ssm_star.primitives import hmm_normalizer
@@ -22,29 +41,59 @@ import ssm_star.variational as varinf
 
 __all__ = ['SLDS', 'LDS']
 
-
 class SLDS(object):
     """
     Switching linear dynamical system fit with
     stochastic variational inference on the marginal model,
     integrating out the discrete states.
-    """
-    def __init__(self, N, K, D, *, M=0,
-                 init_state_distn=None,
-                 transitions="standard",
-                 transition_kwargs=None,
-                 dynamics="gaussian",
-                 dynamics_kwargs=None,
-                 emissions="gaussian_orthog",
-                 emission_kwargs=None,
-                 single_subspace=True,
-                 **kwargs):
 
-        # Make the initial state distribution
+    TODO: Explain this. 
+
+    Arguments:
+        N: number of observed dimensions
+        K: number of discrete states
+        D: number of latent dimensions
+        M : TODO
+        init_state_distn : The initial (discrete) state distribution.
+            If None, this defaults to a uniform distribution. 
+            Reference: https://github.com/lindermanlab/ssm/blob/a414dfebb5a04195970552c1f17db19ee24a7e21/ssm/init_state_distns.py#L12
+        transitions: Determines the way in which regimes can transition into one another.  
+            Possible string values are given in the code below.
+            The string gets transformed into an object of type ssm.Transitions.
+            https://github.com/lindermanlab/ssm/blob/a414dfebb5a04195970552c1f17db19ee24a7e21/ssm/transitions.py#L16
+            which stores the transition parameters, gives an M-step (either in closed form or via BFGS),
+            and computes the negative Hessian of the expected log transition probabilities 
+            (See Sec B.2, pp.7, of http://proceedings.mlr.press/v119/zoltowski20a/zoltowski20a-supp.pdf)
+            The default object is `ssm.transitions.StationaryTransitions`,
+            which is a Standard HMM with fixed initial distribution and transition matrix.
+            (Do they mean "homogenous" instead of "stationary"?)
+            https://github.com/lindermanlab/ssm/blob/a414dfebb5a04195970552c1f17db19ee24a7e21/ssm/transitions.py#L83
+            The default initialization for the transition matrix is sticky (but randomly so). 
+            https://github.com/lindermanlab/ssm/blob/a414dfebb5a04195970552c1f17db19ee24a7e21/ssm/transitions.py#L89-L90
+        single_subspace: TODO 
+    """
+
+    def __init__(self, N, K, D, *, M=0,
+                init_state_distn=None,
+                transitions="standard",
+                transition_kwargs=None,
+                dynamics="gaussian",
+                dynamics_kwargs=None,
+                emissions="gaussian_orthog",
+                emission_kwargs=None,
+                single_subspace=True,
+                **kwargs):
+
+        # Make the initial (dicrete) state distribution
+        # By default, this is uniform. 
+        # We can e.g. do init_state_distn.log_pi0
+        # One would expect init_state_distn.pi_0, but all we have is init_state_distn.initial_state_distn,
+        # which is a poor name due to (a) lack of symmetry and (b) recursivity of name.
+        # See https://github.com/lindermanlab/ssm/blob/a414dfebb5a04195970552c1f17db19ee24a7e21/ssm/init_state_distns.py#L12
+        
         if init_state_distn is None:
             init_state_distn = isd.InitialStateDistribution(K, D, M=M)
-        assert isinstance(init_state_distn, isd.InitialStateDistribution)
-
+            
         # Make the transition model
         transition_classes = dict(
             standard=trans.StationaryTransitions,
@@ -57,19 +106,35 @@ class SLDS(object):
             nn_recurrent=trans.NeuralNetworkRecurrentTransitions
             )
 
+        # transitions: Determines the way in which regimes can transition into one another.  
+        #     The string gets transformed into an object of type ssm.Transitions.
+        #     https://github.com/lindermanlab/ssm/blob/a414dfebb5a04195970552c1f17db19ee24a7e21/ssm/transitions.py#L16
+        #     The default object is `ssm.Transitions.StationaryTransitions`,
+        #     which is a Standard HMM with fixed initial distribution and transition matrix.
+        #     (Do they mean "homogenous" instead of "stationary"?)
+        #     https://github.com/lindermanlab/ssm/blob/a414dfebb5a04195970552c1f17db19ee24a7e21/ssm/transitions.py#L83
+        #
+        # TODO: Study m_step and neg_hessian_expected_log_trans_prob
         if isinstance(transitions, str):
             transitions = transitions.lower()
             if transitions not in transition_classes:
                 raise Exception("Invalid transition model: {}. Must be one of {}".
                     format(transitions, list(transition_classes.keys())))
-
-            transition_kwargs = transition_kwargs or {}
+            # Rk: The below is a nice way to override a None default.
+            transition_kwargs = transition_kwargs or {} 
+            # Rk: transitions has shifted from a string to an object at ssm.transitions;
+            # I don't think I like this.  I might want to rename the former transitions_str.
             transitions = transition_classes[transitions](K, D, M=M, **transition_kwargs)
         if not isinstance(transitions, trans.Transitions):
             raise TypeError("'transitions' must be a subclass of"
                             " ssm.transitions.Transitions")
 
+
         # Make the dynamics distn
+        # TODO:  What is this class giving us? The way that the continuous state evolves?
+        # If so, why does "gaussian" give `obs.AutoRegressiveObservations` ? 
+        # And why is AutoregressiveObservations the default?
+        # And why is all of this called `obs`, since it's about the internal state, not what's actually observed?
         dynamics_classes = dict(
             none=obs.GaussianObservations,
             gaussian=obs.AutoRegressiveObservations,
@@ -93,6 +158,8 @@ class SLDS(object):
                             " ssm.observations.Observations")
 
         # Make the emission distn
+        # `gaussian_orthog` is the default.
+        # TODO: What is emssn.GaussianOrthogonalEmissions?  Why woud this be the default?
         emission_classes = dict(
             gaussian=emssn.GaussianEmissions,
             gaussian_orthog=emssn.GaussianOrthogonalEmissions,
