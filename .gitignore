@@ -117,3 +117,6 @@ notebooks/*.html
 .vscode
 
 .DS_Store
+
+# Mike W's stuff
+devel/
