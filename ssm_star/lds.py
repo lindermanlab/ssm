@@ -697,7 +697,6 @@ class SLDS(object):
             # In this case, we can do an exact M-step on the dynamics by passing
             # in the true sufficient statistics for the continuous state.
             kwargs["continuous_expectations"] = variational_posterior.continuous_expectations
-            breakpoint()
             self.dynamics.m_step(**kwargs)
         else:
             # Otherwise, do an approximate m-step by sampling.

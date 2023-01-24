@@ -1125,7 +1125,6 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         states from the posterior distribution.
         """
         K, D, M, lags = self.K, self.D, self.M, self.lags
-        breakpoint()
         # Collect sufficient statistics
         if continuous_expectations is None:
             ExuxuTs, ExuyTs, EyyTs, Ens = self._get_sufficient_statistics(expectations, datas, inputs)
