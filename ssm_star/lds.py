@@ -230,10 +230,30 @@ class SLDS(object):
                    num_init_iters=50,
                    discrete_state_init_method="random",
                    num_init_restarts=1):
+        """
+        Arguments:
+            datas:  I believe that (at least after running @ensure_args_are_lists),
+                this is a List of N numpy arrays with shape (T_i,1).  Each 
+                entry in the list gives an observed sequence (y_seq) with length T_i. 
+            masks: At least after running @ensure_args_are_lists, this is a
+                a List of N numpy arrays with shape (T_i,1).  Each 
+                entry in the numpy array is a boolean (actually, it seems to be 
+                a np.array with shape (1,) and dtype boolean; not sure why or if 
+                that matters) which tells us whether to INCLUDE the observation 
+                into the analysis.
+        """
         # First initialize the observation model
         self.emissions.initialize(datas, inputs, masks, tags)
 
-        # Get the initialized variational mean for the data
+        # SSM repo: Get the initialized variational mean for the data
+        # Invert is a way to get x-hat given y, (C_k, d_k).
+        # it's kind of like linear regression
+        # The psuedo-inverse is used.
+        # https://github.com/lindermanlab/ssm/blob/a414dfebb5a04195970552c1f17db19ee24a7e21/ssm/emissions.py#L144
+        # They use the average emission parameters.
+        # Q: Can we use our previous work to get a better value for xs, at least in the case
+        # of pLGSSM?
+      
         xs = [self.emissions.invert(data, input, mask, tag)
               for data, input, mask, tag in zip(datas, inputs, masks, tags)]
         xmasks = [np.ones_like(x, dtype=bool) for x in xs]
@@ -481,6 +501,9 @@ class SLDS(object):
             log_likes = np.mean(
                 [self.dynamics.log_likelihoods(x, input, x_mask, tag)
                  for x in x_samples], axis=0)
+            # The list has shape (S, T, D), where S is # of Monte Carlo samples, T is number of timesteps
+            # of observations, and D is dimensionality of continuous states.            
+            # After taking the mean, `log_likes` has shape (T,D)
 
             if not self.emissions.single_subspace:
                 log_likes += np.mean(
@@ -532,7 +555,6 @@ class SLDS(object):
 
         J_obs = self.emissions.\
             neg_hessian_log_emissions_prob(data, input, mask, tag, x, Ez)
-
         return J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs
 
     def _laplace_hessian_neg_expected_log_joint(self, data, input, mask, tag, x, Ez, Ezzp1, scale=1):
@@ -675,6 +697,7 @@ class SLDS(object):
             # In this case, we can do an exact M-step on the dynamics by passing
             # in the true sufficient statistics for the continuous state.
             kwargs["continuous_expectations"] = variational_posterior.continuous_expectations
+            breakpoint()
             self.dynamics.m_step(**kwargs)
         else:
             # Otherwise, do an approximate m-step by sampling.

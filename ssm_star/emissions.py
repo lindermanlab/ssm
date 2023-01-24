@@ -184,20 +184,63 @@ class _LinearEmissions(Emissions):
             lr.fit(np.vstack(inputs), np.vstack(datas))
             self.Fs = np.tile(lr.coef_[None, :, :], (Keff, 1, 1))
 
-        # Compute residual after accounting for input
+        ### Compute residual after accounting for input
+        # F is the matrix pre-multiplying the input.  See
+        # https://github.com/lindermanlab/ssm/blob/a414dfebb5a04195970552c1f17db19ee24a7e21/ssm/emissions.py#L106
         resids = [data - np.dot(input, self.Fs[0].T) for data, input in zip(datas, inputs)]
 
+        ###
         # Run PCA to get a linear embedding of the data with the maximum effective dimension
+        ###
+
+        # https://github.com/lindermanlab/ssm/blob/a414dfebb5a04195970552c1f17db19ee24a7e21/ssm/preprocessing.py#L5
+        # pca has type sklearn.decomposition._pca.PCA
         pca, xs, ll = pca_with_imputation(min(self.D * Keff, self.N),
                                           resids, masks, num_iters=num_iters)
 
-        # Assign each state a random projection of these dimensions
+        ###
+        #  Assign each state a random projection of these dimensions
+        ###
+        
+        # See the comments embedded in the code below for details on what is happening.
+        # Overall, the emissions are initialized as follows:
+        #
+        # To get C's, we do:
+        #   1. Set Keff = 1 if single_subspace (default), else Keff = K
+        #   2. n_components = D * K_eff, unless N (obs dim) is smaller than than that, then we do N.
+        #   3. Compute `n_components` principal components of the data
+        #   4. Sample from a standard normal to map the `n_components` components into D dimensional space.
+        #
+        # To get d's, we do the empirical mean of each dimension.
+        #
+        # TODO: What if step (4) gives a bad scale for C?
+
         Cs, ds = [], []
         for k in range(Keff):
             weights = npr.randn(self.D, self.D * Keff)
             weights = np.linalg.svd(weights, full_matrices=False)[2]
+            #gets the V matrix from the SVD. 
+            # TODO: Why V and not U? 
+            # TODO: is this just generating a random orthogonal transform
+            # (well, a slice thereof, since it doesn't have to be square)?
+            # TODO: Do we have orthonormal rows or orthonormal columns? Why?
             Cs.append((weights @ pca.components_).T)
+            # What are `pca.components_`?  By doing ?pca, 
+            # (or via https://scikit-learn.org/stable/modules/generated/sklearn.decomposition.PCA.html),
+            # we find that 
+            #   components_ : ndarray of shape (n_components, n_features)
+            #       Principal axes in feature space, representing the directions of
+            #       maximum variance in the data. Equivalently, the right singular
+            #       vectors of the centered input data, parallel to its eigenvectors.
+            #       The components are sorted by decreasing ``explained_variance_``.
+                
             ds.append(pca.mean_)
+            # What is `pca.mean_`?  By doing ?pca, 
+            # (or via https://scikit-learn.org/stable/modules/generated/sklearn.decomposition.PCA.html),
+            # we find that 
+            #   mean_:  Per-feature empirical mean, estimated from the training set.
+            #   This is equal to X.mean(axis=0).
+            
 
         # Find the components with the largest power
         self.Cs = np.array(Cs)
@@ -389,7 +432,14 @@ class GaussianEmissions(_GaussianEmissionsMixin, _LinearEmissions):
 
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
+        # The first step handles missing data with linear interpolation.  
+        # I confirmed manually that it doesn't
+        # do anything if there is missing data. 
+        # Interpolation is described at https://github.com/lindermanlab/ssm/blob/a414dfebb5a04195970552c1f17db19ee24a7e21/ssm/preprocessing.py#L108
+        # We basically do linear interpolation via np.interp().
         datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
+        # The _initialize_with_pca function is given at
+        # https://github.com/lindermanlab/ssm/blob/a414dfebb5a04195970552c1f17db19ee24a7e21/ssm/emissions.py#L177
         pca = self._initialize_with_pca(datas, inputs=inputs, masks=masks, tags=tags)
         self.inv_etas[:,...] = np.log(pca.noise_variance_)
 

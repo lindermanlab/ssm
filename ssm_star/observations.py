@@ -1010,7 +1010,6 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
         ll_ar = np.column_stack([stats.multivariate_normal_logpdf(data[L:], mu[L:], Sigma)
                                for mu, Sigma in zip(mus, self.Sigmas)])
-
         return np.row_stack((ll_init, ll_ar))
 
     def _get_sufficient_statistics(self, expectations, datas, inputs):
@@ -1126,7 +1125,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         states from the posterior distribution.
         """
         K, D, M, lags = self.K, self.D, self.M, self.lags
-
+        breakpoint()
         # Collect sufficient statistics
         if continuous_expectations is None:
             ExuxuTs, ExuyTs, EyyTs, Ens = self._get_sufficient_statistics(expectations, datas, inputs)
