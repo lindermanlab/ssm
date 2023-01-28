@@ -3,8 +3,7 @@ import autograd.numpy as np
 import ssm_star
 
 from ssm_star.demos.generate import (
-    generate_1dim_data_with_1dim_states,
-    generate_3dim_data_with_2dim_states,
+    generate_multi_dim_data_with_multi_dim_states_and_two_regimes,
 )
 
 ###
@@ -18,18 +17,20 @@ num_init_ar_hmms = 1
 # Generate Data
 ####
 
-#y, x_true, z_true = generate_1dim_data_with_1dim_states()
-y, x_true, z_true = generate_3dim_data_with_2dim_states()
+#y, x_true, z_true = generate_1dim_data_with_1dim_states_and_two_regimes()
+obs_dim, state_dim = 4,3
+y, x_true, z_true = generate_multi_dim_data_with_multi_dim_states_and_two_regimes(obs_dim, state_dim)
 
 K_true = len(set(z_true))
-D_true =  np.shape(x_true)[1]
-N =  np.shape(y)[1]
+D_true = state_dim 
+N =  obs_dim
 
 # TODO: Stop hardcoding this stuff
 
 ###
 # Inference 
 ###
+ 
 
 print("Fitting SLDS using Linderman's SSM repo")
 slds = ssm_star.SLDS(N, K_true, D_true, emissions="gaussian")

@@ -13,7 +13,7 @@ from lds.piecewise.util import make_ssm_params_by_regime_from_list_of_dicts
 
 np.set_printoptions(suppress=True, precision=3)
 
-def generate_1dim_data_with_1dim_states() -> Tuple[np.array, np.array]:
+def generate_1dim_data_with_1dim_states_and_two_regimes() -> Tuple[np.array, np.array]:
 
     ###
     # Hyperparameters
@@ -53,7 +53,7 @@ def generate_1dim_data_with_1dim_states() -> Tuple[np.array, np.array]:
     )
     return y_seq, state_seq_true, regime_seq_true
 
-def generate_3dim_data_with_2dim_states():
+def generate_multi_dim_data_with_multi_dim_states_and_two_regimes(obs_dim, state_dim):
 
     regime_run_length = 50
     regime_seq_true = ([0] * regime_run_length + [1] * regime_run_length) * 2
@@ -73,8 +73,6 @@ def generate_3dim_data_with_2dim_states():
     num_regimes = len(params_dicts_by_regimes)
     seed_for_generating_data = 2000
     seeds_for_generating_ssm_params_by_regime = [i for i in range(num_regimes)]
-    state_dim = 2
-    obs_dim = 3
 
     ssm_params_by_regime = make_ssm_params_by_regime_from_list_of_dicts(
         params_dicts_by_regimes,
