@@ -2,8 +2,8 @@ import autograd.numpy as np
 
 import ssm_star
 
-from ssm_star.demos.generate import (
-    generate_multi_dim_data_with_multi_dim_states_and_two_regimes,
+from ssm_star.team.generate import (
+    generate_multi_dim_data_with_multi_dim_states_and_two_regimes
 )
 
 ###
@@ -22,18 +22,17 @@ obs_dim, state_dim = 4,3
 y, x_true, z_true = generate_multi_dim_data_with_multi_dim_states_and_two_regimes(obs_dim, state_dim)
 
 K_true = len(set(z_true))
-D_true = state_dim 
-N =  obs_dim
+D_true =  np.shape(x_true)[1]
+N =  np.shape(y)[1]
 
 # TODO: Stop hardcoding this stuff
 
 ###
 # Inference 
 ###
- 
 
 print("Fitting SLDS using Linderman's SSM repo")
-slds = ssm_star.SLDS(N, K_true, D_true, emissions="gaussian")
+slds = ssm_star.SLDS(N, K_true, D_true, emissions="gaussian", transitions="system_driven")
 
 ### Warning!  Linderman's initialization seems to assume that the obs dim exceeds the state dim!
 # And if initialization is not done, results are very poor.

@@ -2,7 +2,7 @@ import autograd.numpy as np
 
 import ssm_star
 
-from ssm_star.demos.generate import (
+from ssm_star.new.generate import (
     generate_multi_dim_data_with_multi_dim_states_and_two_regimes
 )
 

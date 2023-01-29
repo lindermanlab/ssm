@@ -354,6 +354,7 @@ class SLDS(object):
 
         ### Sample z and x
         # TODO: stop hardcoding L and system_regimes
+        # TODO: providing L is breaking the other recurrent transition classes. 
         SYSTEM_REGIMES_INDICES = np.tile(range(self.transitions.L), int(T))[:T+pad]
         from lds.util import one_hot_encoded_array_from_categorical_indices
         SYSTEM_REGIMES_ONE_HOT = one_hot_encoded_array_from_categorical_indices(SYSTEM_REGIMES_INDICES, self.transitions.L)
@@ -370,8 +371,6 @@ class SLDS(object):
             z[t] = npr.choice(self.K, p=Pt[z[t-1]])
             x[t] = self.dynamics.sample_x(z[t], x[:t], input=input[t], tag=tag, with_noise=with_noise)
         
-        breakpoint()
-
         # Sample observations given latent states
         # TODO: sample in the loop above?
         y = self.emissions.sample(z, x, input=input, tag=tag)

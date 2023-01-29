@@ -287,10 +287,11 @@ class SystemDrivenTransitions(InputDrivenTransitions):
         # TODO: Initialize Xis at a more reasonable value.
         # I'm setting it high for experimentation purposes.
         #self.Xis = np.zeros((K,L))
-        # TODO: Make lambda_ settable elsewhere
-        lambda_ = 0.0
+        # TODO: Make lambda_ settable elsewhere.  It is the strength of the system-level influence
+        # on the transitions. 
+        lambda_ = 100.0
         self.lambda_ = lambda_
-        
+
         if L>K:
             # TODO: this will break if L is not an even multiple of K 
             self.Xis = np.tile(np.eye(K,K), int(L/K))* lambda_
@@ -332,7 +333,6 @@ class SystemDrivenTransitions(InputDrivenTransitions):
             T = number of timesteps (axis 0 in `data`). 
             L = number of system-level regimes
         """
-
         T, _ = data.shape
 
         # Previous state effect
