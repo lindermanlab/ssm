@@ -337,7 +337,6 @@ def test_lds_sample_grad(T=10, D=2):
     check_grads(lds_sample, argnum=3, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts, z=z)
     check_grads(lds_sample, argnum=4, modes=['rev'], order=1)(As, bs, Qi_sqrts, ms, Ri_sqrts, z=z)
 
-
 def test_lds_log_probability_perf(T=1000, D=10, N_iter=10):
     """
     Compare performance of banded method vs message passing in pylds.

@@ -39,7 +39,8 @@ import ssm_star.emissions as emssn
 import ssm_star.hmm as hmm
 import ssm_star.variational as varinf
 
-__all__ = ['SLDS', 'LDS']
+__all__ = ['SLDS', 'SLDS', 'LDS']
+
 
 class SLDS(object):
     """
@@ -53,7 +54,7 @@ class SLDS(object):
         N: number of observed dimensions
         K: number of discrete states
         D: number of latent dimensions
-        M : TODO
+        M : number of dimensions of exogenous covariates
         init_state_distn : The initial (discrete) state distribution.
             If None, this defaults to a uniform distribution. 
             Reference: https://github.com/lindermanlab/ssm/blob/a414dfebb5a04195970552c1f17db19ee24a7e21/ssm/init_state_distns.py#L12
@@ -353,20 +354,34 @@ class SLDS(object):
             xmask = np.ones((T+pad,) + D, dtype=bool)
 
         ### Sample z and x
-        # TODO: stop hardcoding L and system_regimes
-        # TODO: providing L is breaking the other recurrent transition classes. 
-        SYSTEM_REGIMES_INDICES = np.tile(range(self.transitions.L), int(T))[:T+pad]
-        from lds.util import one_hot_encoded_array_from_categorical_indices
-        SYSTEM_REGIMES_ONE_HOT = one_hot_encoded_array_from_categorical_indices(SYSTEM_REGIMES_INDICES, self.transitions.L)
 
-
+        ###
+        # Adjustments for system-driven transitons 
+        ###
+        if type(self.transitions)==ssm_star.transitions.SystemDrivenTransitions:
+            using_system_driven_transitions=True 
+        else:
+            using_system_driven_transitions=False 
+        
+        if using_system_driven_transitions:
+            # TODO: stop hardcoding L and system_regimes
+            # TODO: providing L is breaking the other recurrent transition classes. 
+            
+            SYSTEM_REGIMES_INDICES = np.tile(range(self.transitions.L), int(T))[:T+pad]
+            from lds.util import one_hot_encoded_array_from_categorical_indices
+            SYSTEM_REGIMES_ONE_HOT = one_hot_encoded_array_from_categorical_indices(SYSTEM_REGIMES_INDICES, self.transitions.L)
+            
         for t in range(pad, T+pad):
+            if using_system_driven_transitions:
+                kwargs_for_system_driven_transitions = dict(system_regimes_one_hot =  SYSTEM_REGIMES_ONE_HOT[t-1:t+1])
+            else:
+                kwargs_for_system_driven_transitions = dict()
             Pt = np.exp(self.transitions.log_transition_matrices(
                 x[t-1:t+1], 
                 input[t-1:t+1], 
                 mask=xmask[t-1:t+1], 
                 tag=tag,
-                system_regimes_one_hot =  SYSTEM_REGIMES_ONE_HOT[t-1:t+1],
+                **kwargs_for_system_driven_transitions,
                 ))[0]
             z[t] = npr.choice(self.K, p=Pt[z[t-1]])
             x[t] = self.dynamics.sample_x(z[t], x[:t], input=input[t], tag=tag, with_noise=with_noise)
