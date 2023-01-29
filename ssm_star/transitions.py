@@ -262,6 +262,115 @@ class InputDrivenTransitions(StickyTransitions):
         T, D = data.shape
         return np.zeros((T-1, D, D))
 
+
+class SystemDrivenTransitions(InputDrivenTransitions):
+    """
+    Generalization of the RecurrentTransitions class so that the (discrete) regime transitions
+    for an entity can also depend on system-level regimes. 
+
+    Note that now the transitions can now depend on:
+        - observations (actually the continuous states in the case of switching SSMs)
+        - exogenous inputs 
+        - system regimes. 
+    """
+    # TODO: Do we really need a separate class for this? Or can we just modify
+    # the arguments to the 
+    def __init__(self, K, D, M=0, alpha=1, kappa=0, L=4):
+        # TODO: Stop hard-coding L 
+
+        super(SystemDrivenTransitions, self).__init__(K, D, M, alpha=alpha, kappa=kappa)
+
+        ### Parameters linking past observations to regime distribution
+        self.Rs = np.zeros((K, D))
+        
+        ### Parameters Linking system regime to regime distribution
+        # TODO: Initialize Xis at a more reasonable value.
+        # I'm setting it high for experimentation purposes.
+        #self.Xis = np.zeros((K,L))
+        # TODO: Make lambda_ settable elsewhere
+        lambda_ = 0.0
+        self.lambda_ = lambda_
+        
+        if L>K:
+            # TODO: this will break if L is not an even multiple of K 
+            self.Xis = np.tile(np.eye(K,K), int(L/K))* lambda_
+        else:
+            self.Xis=np.eye(K,L) * lambda_ 
+
+        ### Number of system regimes 
+        self.L = L 
+
+
+    @property
+    def params(self):
+        # TODO: Why are the parameters encoded as tuples?! I guess because we're sharing them
+        # across the K regimes?
+        return super(SystemDrivenTransitions, self).params + (self.Rs,) + (self.Xis, )
+
+    @params.setter
+    def params(self, value):
+        # TODO: When, if ever, is this setter called during sampling/inference? (Maybe investigate with debugger)
+        # How should we modify this so that we can set Xis?
+        self.Rs = value[-1]
+        super(SystemDrivenTransitions, self.__class__).params.fset(self, value[:-1])
+
+    def permute(self, perm):
+        """
+        Permute the discrete latent states.
+        """
+        super(SystemDrivenTransitions, self).permute(perm)
+        self.Rs = self.Rs[perm]
+        self.Xis = self.Xis[perm]
+
+    def log_transition_matrices(self, data, input, mask, tag, system_regimes_one_hot=None):
+        """
+        Arguments:
+            system_regimes_one_hot: An array of length (T, L) with dtype=int giving the integer-values
+                of the system-level regimes.
+        
+        Notation
+            T = number of timesteps (axis 0 in `data`). 
+            L = number of system-level regimes
+        """
+
+        T, _ = data.shape
+
+        # Previous state effect
+        log_Ps = np.tile(self.log_Ps[None, :, :], (T-1, 1, 1))
+        # Input effect
+        log_Ps = log_Ps + np.dot(input[1:], self.Ws.T)[:, None, :]
+        # Past observations effect
+        log_Ps = log_Ps + np.dot(data[:-1], self.Rs.T)[:, None, :]
+
+        if system_regimes_one_hot is not None:
+            # Rk: I have added this section so the system-level regimes also affect the transition probabilities
+            # within softmax 
+            log_Ps = log_Ps + np.dot(system_regimes_one_hot[1:], self.Xis.T)[:, None, :]
+        return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
+
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        # TODO: Check if this is updating xi.
+        Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
+
+    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+        # Rk: This method should not change from the corresponding method from `RecurrentTransitions`,
+        # because the Xi parameter (governing system-influence on entity-level regime transitions) is
+        # NOT a function of the continuous state, x. 
+        #
+        # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
+        T, D = data.shape
+        hess = np.zeros((T-1,D,D))
+        vtildes = np.exp(self.log_transition_matrices(data, input, mask, tag)) # normalized probabilities
+        Ez = np.sum(expected_joints, axis=2) # marginal over z from T=1 to T-1
+        for k in range(self.K):
+            vtilde = vtildes[:,k,:] # normalized probabilities given state k
+            Rv = vtilde @ self.Rs
+            hess += Ez[:,k][:,None,None] * \
+                    ( np.einsum('tn, ni, nj ->tij', -vtilde, self.Rs, self.Rs) \
+                    + np.einsum('ti, tj -> tij', Rv, Rv))
+        return -1 * hess
+
+
 class RecurrentTransitions(InputDrivenTransitions):
     """
     Generalization of the input driven HMM in which the observations serve as future inputs
@@ -289,6 +398,9 @@ class RecurrentTransitions(InputDrivenTransitions):
         self.Rs = self.Rs[perm]
 
     def log_transition_matrices(self, data, input, mask, tag):
+        """
+        Transition probabilities are given by a softmax GLM.
+        """
         T, _ = data.shape
         # Previous state effect
         log_Ps = np.tile(self.log_Ps[None, :, :], (T-1, 1, 1))

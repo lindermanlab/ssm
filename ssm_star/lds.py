@@ -103,7 +103,8 @@ class SLDS(object):
             recurrent=trans.RecurrentTransitions,
             recurrent_only=trans.RecurrentOnlyTransitions,
             rbf_recurrent=trans.RBFRecurrentTransitions,
-            nn_recurrent=trans.NeuralNetworkRecurrentTransitions
+            nn_recurrent=trans.NeuralNetworkRecurrentTransitions,
+            system_driven=trans.SystemDrivenTransitions,
             )
 
         # transitions: Determines the way in which regimes can transition into one another.  
@@ -310,6 +311,13 @@ class SLDS(object):
                self.emissions.log_prior()
 
     def sample(self, T, input=None, tag=None, prefix=None, with_noise=True):
+        """
+        Arguments:
+            prefix: If not None, appears to be a tuple (zhist, xhist, yhist)
+                which I believe is giving information about the head (start) of the sequence.
+                I believe we only return what we are appending to. 
+        """
+        # TODO: What is `tag`?
         N = self.N
         K = self.K
         D = (self.D,) if isinstance(self.D, int) else self.D
@@ -344,11 +352,25 @@ class SLDS(object):
             input = np.zeros((T+pad,) + M) if input is None else np.concatenate((np.zeros((pad,) + M), input))
             xmask = np.ones((T+pad,) + D, dtype=bool)
 
-        # Sample z and x
+        ### Sample z and x
+        # TODO: stop hardcoding L and system_regimes
+        SYSTEM_REGIMES_INDICES = np.tile(range(self.transitions.L), int(T))[:T+pad]
+        from lds.util import one_hot_encoded_array_from_categorical_indices
+        SYSTEM_REGIMES_ONE_HOT = one_hot_encoded_array_from_categorical_indices(SYSTEM_REGIMES_INDICES, self.transitions.L)
+
+
         for t in range(pad, T+pad):
-            Pt = np.exp(self.transitions.log_transition_matrices(x[t-1:t+1], input[t-1:t+1], mask=xmask[t-1:t+1], tag=tag))[0]
+            Pt = np.exp(self.transitions.log_transition_matrices(
+                x[t-1:t+1], 
+                input[t-1:t+1], 
+                mask=xmask[t-1:t+1], 
+                tag=tag,
+                system_regimes_one_hot =  SYSTEM_REGIMES_ONE_HOT[t-1:t+1],
+                ))[0]
             z[t] = npr.choice(self.K, p=Pt[z[t-1]])
             x[t] = self.dynamics.sample_x(z[t], x[:t], input=input[t], tag=tag, with_noise=with_noise)
+        
+        breakpoint()
 
         # Sample observations given latent states
         # TODO: sample in the loop above?
