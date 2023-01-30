@@ -87,10 +87,15 @@ def random_rotation(n, theta=None):
 
 
 def ensure_args_are_lists(f):
-    def wrapper(self, datas, inputs=None, masks=None, tags=None, **kwargs):
+    def wrapper(self, datas, inputs=None, masks=None, tags=None, system_inputs=None, **kwargs):
+        breakpoint()
         datas = [datas] if not isinstance(datas, (list, tuple)) else datas
 
         M = (self.M,) if isinstance(self.M, int) else self.M
+        L = (self.L,) if isinstance(self.L, int) else self.L
+        # Rk: We represent M, the dim of exogenous covariates, as a tuple because
+        # we will set shapes of np.arrays via tuple addition.  e.g.
+        # (T,)+(M,)=(T,M).  Similarly for L, the dim of system regime identifiers.
         assert isinstance(M, tuple)
 
         if inputs is None:
@@ -108,7 +113,12 @@ def ensure_args_are_lists(f):
         elif not isinstance(tags, (list, tuple)):
             tags = [tags]
 
-        return f(self, datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
+        if system_inputs is None:
+            system_inputs = [np.zeros((data.shape[0],) +L) for data in datas]
+        elif not isinstance(system_inputs, (list, tuple)):
+            system_inputs = [system_inputs]
+
+        return f(self, datas, inputs=inputs, masks=masks, tags=tags, system_inputs=system_inputs, **kwargs)
 
     return wrapper
 

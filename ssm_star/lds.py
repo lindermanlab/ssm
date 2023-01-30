@@ -39,7 +39,7 @@ import ssm_star.emissions as emssn
 import ssm_star.hmm as hmm
 import ssm_star.variational as varinf
 
-__all__ = ['SLDS', 'SLDS', 'LDS']
+__all__ = ['SLDS', 'LDS']
 
 
 class SLDS(object):
@@ -55,6 +55,7 @@ class SLDS(object):
         K: number of discrete states
         D: number of latent dimensions
         M : number of dimensions of exogenous covariates
+        L : number of system-level states 
         init_state_distn : The initial (discrete) state distribution.
             If None, this defaults to a uniform distribution. 
             Reference: https://github.com/lindermanlab/ssm/blob/a414dfebb5a04195970552c1f17db19ee24a7e21/ssm/init_state_distns.py#L12
@@ -74,7 +75,7 @@ class SLDS(object):
         single_subspace: TODO 
     """
 
-    def __init__(self, N, K, D, *, M=0,
+    def __init__(self, N, K, D, *, M=0, L=0,
                 init_state_distn=None,
                 transitions="standard",
                 transition_kwargs=None,
@@ -93,6 +94,7 @@ class SLDS(object):
         # See https://github.com/lindermanlab/ssm/blob/a414dfebb5a04195970552c1f17db19ee24a7e21/ssm/init_state_distns.py#L12
         
         if init_state_distn is None:
+            # TODO: Modify this based on L. Should see what role M is playing.
             init_state_distn = isd.InitialStateDistribution(K, D, M=M)
             
         # Make the transition model
@@ -126,7 +128,7 @@ class SLDS(object):
             transition_kwargs = transition_kwargs or {} 
             # Rk: transitions has shifted from a string to an object at ssm.transitions;
             # I don't think I like this.  I might want to rename the former transitions_str.
-            transitions = transition_classes[transitions](K, D, M=M, **transition_kwargs)
+            transitions = transition_classes[transitions](K, D, M=M, L=L, **transition_kwargs)
         if not isinstance(transitions, trans.Transitions):
             raise TypeError("'transitions' must be a subclass of"
                             " ssm.transitions.Transitions")
@@ -206,7 +208,7 @@ class SLDS(object):
             raise TypeError("'emissions' must be a subclass of"
                             " ssm.emissions.Emissions")
 
-        self.N, self.K, self.D, self.M = N, K, D, M
+        self.N, self.K, self.D, self.M, self.L = N, K, D, M, L
         self.init_state_distn = init_state_distn
         self.transitions = transitions
         self.dynamics = dynamics
@@ -227,7 +229,7 @@ class SLDS(object):
         self.emissions.params = value[3]
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None,
+    def initialize(self, datas, inputs=None, masks=None, tags=None, system_inputs=None,
                    verbose=0,
                    num_init_iters=50,
                    discrete_state_init_method="random",
@@ -276,7 +278,7 @@ class SLDS(object):
                             transitions=copy.deepcopy(self.transitions),
                             observations=copy.deepcopy(self.dynamics))
 
-            arhmm.fit(xs, inputs=inputs, masks=xmasks, tags=tags,
+            arhmm.fit(xs, inputs=inputs, masks=xmasks, tags=tags, system_inputs=system_inputs,
                       verbose=verbose,
                       method="em",
                       num_iters=num_init_iters,
@@ -311,7 +313,7 @@ class SLDS(object):
                self.dynamics.log_prior() + \
                self.emissions.log_prior()
 
-    def sample(self, T, input=None, tag=None, prefix=None, with_noise=True):
+    def sample(self, T, input=None, tag=None, prefix=None, with_noise=True, system_input=None):
         """
         Arguments:
             prefix: If not None, appears to be a tuple (zhist, xhist, yhist)
@@ -323,16 +325,19 @@ class SLDS(object):
         K = self.K
         D = (self.D,) if isinstance(self.D, int) else self.D
         M = (self.M,) if isinstance(self.M, int) else self.M
+        L = (self.L,) if isinstance(self.L, int) else self.L
         assert isinstance(D, tuple)
         assert isinstance(M, tuple)
+        assert isinstance(L, tuple)
 
         # If prefix is given, pad the output with it
         if prefix is None:
+            # TODO: Why pad with 1 by default?
             pad = 1
             z = np.zeros(T+1, dtype=int)
             x = np.zeros((T+1,) + D)
-            # input = np.zeros((T+1,) + M) if input is None else input
             input = np.zeros((T+1,) + M) if input is None else np.concatenate((np.zeros((1,) + M), input))
+            system_input = np.zeros((T+1,) + L) if system_input is None else np.concatenate((np.zeros((1,) + L), system_input))
             xmask = np.ones((T+1,) + D, dtype=bool)
 
             # Sample the first state from the initial distribution
@@ -351,37 +356,17 @@ class SLDS(object):
             x = np.concatenate((xhist, np.zeros((T,) + D)))
             # input = np.zeros((T+pad,) + M) if input is None else input
             input = np.zeros((T+pad,) + M) if input is None else np.concatenate((np.zeros((pad,) + M), input))
+            system_input = np.zeros((T+pad,) + L) if system_input is None else np.concatenate((np.zeros((pad,) + L), system_input))
             xmask = np.ones((T+pad,) + D, dtype=bool)
 
-        ### Sample z and x
-
-        ###
-        # Adjustments for system-driven transitons 
-        ###
-        if type(self.transitions)==ssm_star.transitions.SystemDrivenTransitions:
-            using_system_driven_transitions=True 
-        else:
-            using_system_driven_transitions=False 
-        
-        if using_system_driven_transitions:
-            # TODO: stop hardcoding L and system_regimes
-            # TODO: providing L is breaking the other recurrent transition classes. 
-            
-            SYSTEM_REGIMES_INDICES = np.tile(range(self.transitions.L), int(T))[:T+pad]
-            from lds.util import one_hot_encoded_array_from_categorical_indices
-            SYSTEM_REGIMES_ONE_HOT = one_hot_encoded_array_from_categorical_indices(SYSTEM_REGIMES_INDICES, self.transitions.L)
-            
+        ### Sample z and x  
         for t in range(pad, T+pad):
-            if using_system_driven_transitions:
-                kwargs_for_system_driven_transitions = dict(system_regimes_one_hot =  SYSTEM_REGIMES_ONE_HOT[t-1:t+1])
-            else:
-                kwargs_for_system_driven_transitions = dict()
             Pt = np.exp(self.transitions.log_transition_matrices(
                 x[t-1:t+1], 
                 input[t-1:t+1], 
                 mask=xmask[t-1:t+1], 
                 tag=tag,
-                **kwargs_for_system_driven_transitions,
+                system_input=system_input[t-1:t+1],
                 ))[0]
             z[t] = npr.choice(self.K, p=Pt[z[t-1]])
             x[t] = self.dynamics.sample_x(z[t], x[:t], input=input[t], tag=tag, with_noise=with_noise)
@@ -708,7 +693,7 @@ class SLDS(object):
         continuous_samples = variational_posterior.sample_continuous_states()
         discrete_expectations = variational_posterior.discrete_expectations
         # Note: discrete_expectations is actually a tuple. 
-        # (expected_states, expected_joints, ???some_float???),
+        #   (expected_states, expected_joints, ???log_like_from_hmm???),
         # where:
         #     expected_states: has shape (T,K), appears to give the proability
         #         of being in each regime at each time step.
@@ -723,7 +708,6 @@ class SLDS(object):
             curr_prms = copy.deepcopy(distn.params)
             if curr_prms == tuple(): continue # TODO: Why?
             distn.m_step(discrete_expectations, continuous_samples, inputs, xmasks, tags)
-            breakpoint()
             distn.params = convex_combination(curr_prms, distn.params, alpha)
 
         kwargs = dict(expectations=discrete_expectations,

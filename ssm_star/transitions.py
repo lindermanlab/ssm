@@ -13,8 +13,8 @@ from ssm_star.optimizers import adam, bfgs, lbfgs, rmsprop, sgd
 
 
 class Transitions(object):
-    def __init__(self, K, D, M=0):
-        self.K, self.D, self.M = K, D, M
+    def __init__(self, K, D, M=0, L=0):
+        self.K, self.D, self.M, self.L = K, D, M, L
 
     @property
     def params(self):
@@ -34,11 +34,13 @@ class Transitions(object):
     def log_prior(self):
         return 0
 
-    def log_transition_matrices(self, data, input, mask, tag):
+    def log_transition_matrices(self, data, input, mask, tag, system_input):
         raise NotImplementedError
 
-    def transition_matrices(self, data, input, mask, tag):
-        return np.exp(self.log_transition_matrices(data, input, mask, tag))
+    def transition_matrices(self, data, input, mask, tag, system_input):
+        # TODO: Give system_input=None default for backwards compatibility when not using
+        # SystemDrivenTransitions.
+        return np.exp(self.log_transition_matrices(data, input, mask, tag, system_input))
 
     def m_step(self, 
                 expectations: List[Tuple[np.array, np.array, float]], 
@@ -100,10 +102,10 @@ class Transitions(object):
 
 class StationaryTransitions(Transitions):
     """
-    Standard Hidden Markov Model with fixed initial distribution and transition matrix.
+    Standard Hidden Markov Model with fixsed initial distribution and transition matrix.
     """
-    def __init__(self, K, D, M=0):
-        super(StationaryTransitions, self).__init__(K, D, M=M)
+    def __init__(self, K, D, M=0, L=0):
+        super(StationaryTransitions, self).__init__(K, D, M=M, L=L)
         Ps = .95 * np.eye(K) + .05 * npr.rand(K, K)
         Ps /= Ps.sum(axis=1, keepdims=True)
         self.log_Ps = np.log(Ps)
@@ -126,7 +128,7 @@ class StationaryTransitions(Transitions):
     def transition_matrix(self):
         return np.exp(self.log_Ps - logsumexp(self.log_Ps, axis=1, keepdims=True))
 
-    def log_transition_matrices(self, data, input, mask, tag):
+    def log_transition_matrices(self, data, input, mask, tag, system_input):
         log_Ps = self.log_Ps - logsumexp(self.log_Ps, axis=1, keepdims=True)
         return log_Ps[None, :, :]
 
@@ -201,8 +203,8 @@ class StickyTransitions(StationaryTransitions):
 
     pi_k ~ Dir(alpha + kappa * e_k)
     """
-    def __init__(self, K, D, M=0, alpha=1, kappa=100):
-        super(StickyTransitions, self).__init__(K, D, M=M)
+    def __init__(self, K, D, M=0, L=0, alpha=1, kappa=100):
+        super(StickyTransitions, self).__init__(K, D, M=M, L=L)
         self.alpha = alpha
         self.kappa = kappa
 
@@ -234,8 +236,8 @@ class InputDrivenTransitions(StickyTransitions):
     determined by a generalized linear model applied to the
     exogenous input.
     """
-    def __init__(self, K, D, M, alpha=1, kappa=0, l2_penalty=0.0):
-        super(InputDrivenTransitions, self).__init__(K, D, M=M, alpha=alpha, kappa=kappa)
+    def __init__(self, K, D, M, L=0, alpha=1, kappa=0, l2_penalty=0.0):
+        super(InputDrivenTransitions, self).__init__(K, D, M=M, L=L, alpha=alpha, kappa=kappa)
 
         # Parameters linking input to state distribution
         self.Ws = npr.randn(K, M)
@@ -263,7 +265,7 @@ class InputDrivenTransitions(StickyTransitions):
         lp = lp + np.sum(-0.5 * self.l2_penalty * self.Ws**2)
         return lp
 
-    def log_transition_matrices(self, data, input, mask, tag):
+    def log_transition_matrices(self, data, input, mask, tag, system_input):
         T = data.shape[0]
         assert input.shape[0] == T
         # Previous state effect
@@ -293,11 +295,11 @@ class SystemDrivenTransitions(InputDrivenTransitions):
     """
     # TODO: Do we really need a separate class for this? Or can we just modify
     # the arguments to the 
-    def __init__(self, K, D, M=0, alpha=1, kappa=0, L=4):
+    def __init__(self, K, D, M=0, alpha=1, kappa=0, L=0):
+        
         # TODO: Stop hard-coding L 
-
-        super(SystemDrivenTransitions, self).__init__(K, D, M, alpha=alpha, kappa=kappa)
-
+        super(SystemDrivenTransitions, self).__init__(K, D, M, L=L, alpha=alpha, kappa=kappa)
+  
         ### Parameters linking past observations to regime distribution
         self.Rs = np.zeros((K, D))
         
@@ -311,7 +313,8 @@ class SystemDrivenTransitions(InputDrivenTransitions):
         self.lambda_ = lambda_
 
         if L>K:
-            # TODO: this will break if L is not an even multiple of K 
+            if np.mod(L,K) !=0:
+                raise NotImplementedError("Code for setting Xis parameter will currently break if L is not an even multiple of K.")
             self.Xis = np.tile(np.eye(K,K), int(L/K))* lambda_
         else:
             self.Xis=np.eye(K,L) * lambda_ 
@@ -350,11 +353,11 @@ class SystemDrivenTransitions(InputDrivenTransitions):
         self.Rs = self.Rs[perm]
         self.Xis = self.Xis[perm]
 
-    def log_transition_matrices(self, data, input, mask, tag, system_regimes_one_hot=None):
+    def log_transition_matrices(self, data, input, mask, tag, system_input):
         """
         Arguments:
-            system_regimes_one_hot: An array of length (T, L) with dtype=int giving the integer-values
-                of the system-level regimes.
+            system_input: Formerly called `system_regimes_one_hot`.
+                An array of length (T, L) with dtype=int giving the integer-valuesof the system-level regimes.
         
         Notation
             T = number of timesteps (axis 0 in `data`). 
@@ -368,21 +371,18 @@ class SystemDrivenTransitions(InputDrivenTransitions):
         log_Ps = log_Ps + np.dot(input[1:], self.Ws.T)[:, None, :]
         # Past observations effect
         log_Ps = log_Ps + np.dot(data[:-1], self.Rs.T)[:, None, :]
-
-        if system_regimes_one_hot is not None:
-            # Rk: I have added this section so the system-level regimes also affect the transition probabilities
-            # within softmax 
-            log_Ps = log_Ps + np.dot(system_regimes_one_hot[1:], self.Xis.T)[:, None, :]
+        # System regimes effect
+        log_Ps = log_Ps + np.dot(system_input[1:], self.Xis.T)[:, None, :]
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
-    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, system_inputs, **kwargs):
         # TODO: Are there closed-form updates for SOME of the transitions parameters?!
         # If so, can we have the code accomplish that?
         # TODO: Check if this is updating xi.
         # Rk: I like that this is making the use of the base class method explicit. 
-        Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
+        Transitions.m_step(self, expectations, datas, inputs, masks, tags, system_inputs, **kwargs)
 
-    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, system_input, expected_joints):
         # Rk: This method should not change from the corresponding method from `RecurrentTransitions`,
         # because the Xi parameter (governing system-influence on entity-level regime transitions) is
         # NOT a function of the continuous state, x. 
@@ -390,7 +390,7 @@ class SystemDrivenTransitions(InputDrivenTransitions):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
         T, D = data.shape
         hess = np.zeros((T-1,D,D))
-        vtildes = np.exp(self.log_transition_matrices(data, input, mask, tag)) # normalized probabilities
+        vtildes = np.exp(self.log_transition_matrices(data, input, mask, tag, system_input)) # normalized probabilities
         Ez = np.sum(expected_joints, axis=2) # marginal over z from T=1 to T-1
         for k in range(self.K):
             vtilde = vtildes[:,k,:] # normalized probabilities given state k
@@ -427,7 +427,7 @@ class RecurrentTransitions(InputDrivenTransitions):
         super(RecurrentTransitions, self).permute(perm)
         self.Rs = self.Rs[perm]
 
-    def log_transition_matrices(self, data, input=None, mask=None, tag=None):
+    def log_transition_matrices(self, data, input=None, mask=None, tag=None, system_input=None):
         """
         Transition probabilities are given by a softmax GLM.
         """

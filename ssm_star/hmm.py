@@ -251,9 +251,9 @@ class HMM(object):
             return z[pad:], data[pad:]
 
     @ensure_args_not_none
-    def expected_states(self, data, input=None, mask=None, tag=None):
+    def expected_states(self, data, input=None, mask=None, tag=None, system_input=None):
         pi0 = self.init_state_distn.initial_state_distn
-        Ps = self.transitions.transition_matrices(data, input, mask, tag)
+        Ps = self.transitions.transition_matrices(data, input, mask, tag, system_input)
         log_likes = self.observations.log_likelihoods(data, input, mask, tag)
         return hmm_expected_states(pi0, Ps, log_likes)
 
@@ -272,12 +272,12 @@ class HMM(object):
         return hmm_filter(pi0, Ps, log_likes)
 
     @ensure_args_not_none
-    def smooth(self, data, input=None, mask=None, tag=None):
+    def smooth(self, data, input=None, mask=None, tag=None, system_input=None):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
-        Ez, _, _ = self.expected_states(data, input, mask)
+        Ez, _, _ = self.expected_states(data, input, mask, system_input)
         return self.observations.smooth(Ez, data, input, tag)
 
     def log_prior(self):
@@ -289,7 +289,7 @@ class HMM(object):
                self.observations.log_prior()
 
     @ensure_args_are_lists
-    def log_likelihood(self, datas, inputs=None, masks=None, tags=None):
+    def log_likelihood(self, datas, inputs=None, masks=None, tags=None, system_inputs=None):
         """
         Compute the log probability of the data under the current
         model parameters.
@@ -298,20 +298,20 @@ class HMM(object):
         :return total log probability of the data.
         """
         ll = 0
-        for data, input, mask, tag in zip(datas, inputs, masks, tags):
+        for data, input, mask, tag, system_input in zip(datas, inputs, masks, tags, system_inputs):
             pi0 = self.init_state_distn.initial_state_distn
-            Ps = self.transitions.transition_matrices(data, input, mask, tag)
+            Ps = self.transitions.transition_matrices(data, input, mask, tag, system_input)
             log_likes = self.observations.log_likelihoods(data, input, mask, tag)
             ll += hmm_normalizer(pi0, Ps, log_likes)
             assert np.isfinite(ll)
         return ll
 
     @ensure_args_are_lists
-    def log_probability(self, datas, inputs=None, masks=None, tags=None):
-        return self.log_likelihood(datas, inputs, masks, tags) + self.log_prior()
+    def log_probability(self, datas, inputs=None, masks=None, tags=None, system_inputs=None):
+        return self.log_likelihood(datas, inputs, masks, tags, system_inputs) + self.log_prior()
 
     def expected_log_likelihood(
-            self, expectations, datas, inputs=None, masks=None, tags=None):
+            self, expectations, datas, inputs=None, masks=None, tags=None, system_inputs=None):
         """
         Compute log-likelihood given current model parameters.
 
@@ -319,11 +319,11 @@ class HMM(object):
         :return total log probability of the data.
         """
         ell = 0.0
-        for (Ez, Ezzp1, _), data, input, mask, tag in \
-                zip(expectations, datas, inputs, masks, tags):
+        for (Ez, Ezzp1, _), data, input, mask, tag, system_input in \
+                zip(expectations, datas, inputs, masks, tags, system_inputs):
 
             pi0 = self.init_state_distn.initial_state_distn
-            log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
+            log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag, system_input)
             log_likes = self.observations.log_likelihoods(data, input, mask, tag)
 
             ell += np.sum(Ez[0] * np.log(pi0))
@@ -334,24 +334,24 @@ class HMM(object):
         return ell
 
     def expected_log_probability(
-            self, expectations, datas, inputs=None, masks=None, tags=None):
+            self, expectations, datas, inputs=None, masks=None, tags=None, system_inputs=None):
         """
         Compute the log-probability of the data given current
         model parameters.
         """
         ell = self.expected_log_likelihood(
-            expectations, datas, inputs=inputs, masks=masks, tags=tags)
+            expectations, datas, inputs=inputs, masks=masks, tags=tags, system_inputs=system_inputs)
         return ell + self.log_prior()
 
     # Model fitting
-    def _fit_sgd(self, optimizer, datas, inputs, masks, tags, verbose = 2, num_iters=1000, **kwargs):
+    def _fit_sgd(self, optimizer, datas, inputs, masks, tags, system_inputs=None, verbose = 2, num_iters=1000, **kwargs):
         """
         Fit the model with maximum marginal likelihood.
         """
         T = sum([data.shape[0] for data in datas])
         def _objective(params, itr):
             self.params = params
-            obj = self.log_probability(datas, inputs, masks, tags)
+            obj = self.log_probability(datas, inputs, masks, tags, system_inputs)
             return -obj / T
 
         # Set up the progress bar
@@ -370,7 +370,7 @@ class HMM(object):
 
         return lls
 
-    def _fit_stochastic_em(self, optimizer, datas, inputs, masks, tags, verbose = 2, num_epochs=100, **kwargs):
+    def _fit_stochastic_em(self, optimizer, datas, inputs, masks, tags, system_inputs=None, verbose = 2, num_epochs=100, **kwargs):
         """
         Replace the M-step of EM with a stochastic gradient update using the ELBO computed
         on a minibatch of data.
@@ -384,22 +384,22 @@ class HMM(object):
             epoch = itr // M
             m = itr % M
             i = perm[epoch][m]
-            return datas[i], inputs[i], masks[i], tags[i][i]
+            return datas[i], inputs[i], masks[i], tags[i][i], system_inputs[i]
 
         # Define the objective (negative ELBO)
         def _objective(params, itr):
             # Grab a minibatch of data
-            data, input, mask, tag = _get_minibatch(itr)
+            data, input, mask, tag, system_input = _get_minibatch(itr)
             Ti = data.shape[0]
 
             # E step: compute expected latent states with current parameters
-            Ez, Ezzp1, _ = self.expected_states(data, input, mask, tag)
+            Ez, Ezzp1, _ = self.expected_states(data, input, mask, tag, system_input)
 
             # M step: set the parameter and compute the (normalized) objective function
             self.params = params
             pi0 = self.init_state_distn.initial_state_distn
-            log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag)
-            log_likes = self.observations.log_likelihoods(data, input, mask, tag)
+            log_Ps = self.transitions.log_transition_matrices(data, input, mask, tag, system_input)
+            log_likes = self.observations.log_likelihoods(data, input, mask, tag, system_input)
 
             # Compute the expected log probability
             # (Scale by number of length of this minibatch.)
@@ -429,7 +429,7 @@ class HMM(object):
 
         return lls
 
-    def _fit_em(self, datas, inputs, masks, tags, verbose = 2, num_iters=100, tolerance=0,
+    def _fit_em(self, datas, inputs, masks, tags, system_inputs=None, verbose = 2, num_iters=100, tolerance=0,
                 init_state_mstep_kwargs={},
                 transitions_mstep_kwargs={},
                 observations_mstep_kwargs={},
@@ -440,15 +440,15 @@ class HMM(object):
         E step: compute E[z_t] and E[z_t, z_{t+1}] with message passing;
         M-step: analytical maximization of E_{p(z | x)} [log p(x, z; theta)].
         """
-        lls  = [self.log_probability(datas, inputs, masks, tags)]
+        lls  = [self.log_probability(datas, inputs, masks, tags, system_inputs)]
 
         pbar = ssm_pbar(num_iters, verbose, "LP: {:.1f}", [lls[-1]])
 
         for itr in pbar:
             # E step: compute expected latent states with current parameters
-            expectations = [self.expected_states(data, input, mask, tag)
-                            for data, input, mask, tag,
-                            in zip(datas, inputs, masks, tags)]
+            expectations = [self.expected_states(data, input, mask, tag, system_input)
+                            for data, input, mask, tag, system_input
+                            in zip(datas, inputs, masks, tags, system_inputs)]
 
             # M step: maximize expected log joint wrt parameters
             self.init_state_distn.m_step(expectations, datas, inputs, masks, tags, **init_state_mstep_kwargs)
@@ -470,7 +470,7 @@ class HMM(object):
         return lls
 
     @ensure_args_are_lists
-    def fit(self, datas, inputs=None, masks=None, tags=None,
+    def fit(self, datas, inputs=None, masks=None, tags=None, system_inputs=None,
             verbose=2, method="em",
             initialize=True,
             init_method="random",
@@ -493,6 +493,7 @@ class HMM(object):
                             inputs=inputs,
                             masks=masks,
                             tags=tags,
+                            system_inputs = system_inputs,
                             init_method=init_method)
 
         if isinstance(self.transitions,
@@ -505,6 +506,7 @@ class HMM(object):
                                         inputs=inputs,
                                         masks=masks,
                                         tags=tags,
+                                        system_inputs=system_inputs,
                                         verbose=verbose,
                                         **kwargs)
 
@@ -691,10 +693,10 @@ class HSMM(HMM):
             return z[pad:], data[pad:]
 
     @ensure_args_not_none
-    def expected_states(self, data, input=None, mask=None, tag=None):
+    def expected_states(self, data, input=None, mask=None, tag=None, system_input=None):
         m = self.state_map
         pi0 = self.init_state_distn.initial_state_distn
-        Ps = self.transitions.transition_matrices(data, input, mask, tag)
+        Ps = self.transitions.transition_matrices(data, input, mask, tag, system_input)
         log_likes = self.observations.log_likelihoods(data, input, mask, tag)
         Ez, Ezzp1, normalizer = hmm_expected_states(replicate(pi0, m), Ps, replicate(log_likes, m))
 
@@ -704,44 +706,44 @@ class HSMM(HMM):
         return Ez, Ezzp1, normalizer
 
     @ensure_args_not_none
-    def most_likely_states(self, data, input=None, mask=None, tag=None):
+    def most_likely_states(self, data, input=None, mask=None, tag=None, system_input=None):
         m = self.state_map
         pi0 = self.init_state_distn.initial_state_distn
-        Ps = self.transitions.transition_matrices(data, input, mask, tag)
+        Ps = self.transitions.transition_matrices(data, input, mask, tag, system_input)
         log_likes = self.observations.log_likelihoods(data, input, mask, tag)
         z_star = viterbi(replicate(pi0, m), Ps, replicate(log_likes, m))
         return self.state_map[z_star]
 
     @ensure_args_not_none
-    def filter(self, data, input=None, mask=None, tag=None):
+    def filter(self, data, input=None, mask=None, tag=None, system_input=None):
         m = self.state_map
         pi0 = self.init_state_distn.initial_state_distn
-        Ps = self.transitions.transition_matrices(data, input, mask, tag)
+        Ps = self.transitions.transition_matrices(data, input, mask, tag, system_input)
         log_likes = self.observations.log_likelihoods(data, input, mask, tag)
         pzp1 = hmm_filter(replicate(pi0, m), Ps, replicate(log_likes, m))
         return collapse(pzp1, m)
 
     @ensure_args_not_none
-    def posterior_sample(self, data, input=None, mask=None, tag=None):
+    def posterior_sample(self, data, input=None, mask=None, tag=None, system_input=None):
         m = self.state_map
         pi0 = self.init_state_distn.initial_state_distn
-        Ps = self.transitions.transition_matrices(data, input, mask, tag)
+        Ps = self.transitions.transition_matrices(data, input, mask, tag, system_input)
         log_likes = self.observations.log_likelihoods(data, input, mask, tag)
         z_smpl = hmm_sample(replicate(pi0, m), Ps, replicate(log_likes, m))
         return self.state_map[z_smpl]
 
     @ensure_args_not_none
-    def smooth(self, data, input=None, mask=None, tag=None):
+    def smooth(self, data, input=None, mask=None, tag=None, system_input=None):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
         m = self.state_map
-        Ez, _, _ = self.expected_states(data, input, mask)
+        Ez, _, _ = self.expected_states(data, input, mask, system_input)
         return self.observations.smooth(Ez, data, input, tag)
 
     @ensure_args_are_lists
-    def log_likelihood(self, datas, inputs=None, masks=None, tags=None):
+    def log_likelihood(self, datas, inputs=None, masks=None, tags=None, system_inputs=None):
         """
         Compute the log probability of the data under the current
         model parameters.
@@ -753,13 +755,13 @@ class HSMM(HMM):
         ll = 0
         for data, input, mask, tag in zip(datas, inputs, masks, tags):
             pi0 = self.init_state_distn.initial_state_distn
-            Ps = self.transitions.transition_matrices(data, input, mask, tag)
+            Ps = self.transitions.transition_matrices(data, input, mask, tag, system_input)
             log_likes = self.observations.log_likelihoods(data, input, mask, tag)
             ll += hmm_normalizer(replicate(pi0, m), Ps, replicate(log_likes, m))
             assert np.isfinite(ll)
         return ll
 
-    def expected_log_probability(self, expectations, datas, inputs=None, masks=None, tags=None):
+    def expected_log_probability(self, expectations, datas, inputs=None, masks=None, tags=None, system_inputs=None):
         """
         Compute the log probability of the data under the current
         model parameters.
