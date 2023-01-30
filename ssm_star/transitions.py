@@ -1,14 +1,13 @@
-from functools import partial
 from warnings import warn
+from typing import Tuple, List 
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.special import logsumexp
-from autograd.scipy.stats import dirichlet
 from autograd import hessian
 
-from ssm_star.util import one_hot, logistic, relu, rle, ensure_args_are_lists, LOG_EPS, DIV_EPS
-from ssm_star.regression import fit_multiclass_logistic_regression, fit_negative_binomial_integer_r
+from ssm_star.util import logistic, relu, rle, ensure_args_are_lists, LOG_EPS
+from ssm_star.regression import fit_negative_binomial_integer_r
 from ssm_star.stats import multivariate_normal_logpdf
 from ssm_star.optimizers import adam, bfgs, lbfgs, rmsprop, sgd
 
@@ -41,11 +40,30 @@ class Transitions(object):
     def transition_matrices(self, data, input, mask, tag):
         return np.exp(self.log_transition_matrices(data, input, mask, tag))
 
-    def m_step(self, expectations, datas, inputs, masks, tags,
-               optimizer="lbfgs", num_iters=1000, **kwargs):
+    def m_step(self, 
+                expectations: List[Tuple[np.array, np.array, float]], 
+                datas: List[np.array],
+                inputs: List[np.array], 
+                masks: List[np.array], 
+                tags: List[np.array],
+                optimizer="lbfgs",
+                num_iters=1000, 
+                **kwargs
+        ):
         """
         If M-step cannot be done in closed form for the transitions, default to BFGS.
+
+        Arguments:
+            expectations: a list (often of length one, not sure why we have a list) 
+                (expected_states, expected_joints, ???log_like_from_hmm???),
+                where:
+                    expected_states: has shape (T,K), appears to give the proability
+                        of being in each regime at each time step.
+                    expected_joints: has shape (T-1,K,K), appears to give the pairwise
+                        marginals for the regime transitions; each (K,K) submatrix sums to 1.  
         """
+        # TOOD: Why are we passing lists of length one?
+        # breakpoint()
         optimizer = dict(sgd=sgd, adam=adam, rmsprop=rmsprop, bfgs=bfgs, lbfgs=lbfgs)[optimizer]
 
         # Maximize the expected log joint
@@ -303,17 +321,26 @@ class SystemDrivenTransitions(InputDrivenTransitions):
 
 
     @property
-    def params(self):
-        # TODO: Why are the parameters encoded as tuples?! I guess because we're sharing them
-        # across the K regimes?
+    def params(self) -> Tuple[np.array]:
+        """
+        Returns:
+            A tuple of parameters: (log_Ps, Ws, Rs, Xis), where:
+                log_Ps: the log of the baseline regime transition prob matrix; 
+                    apparently this object can be at least temporarily unnormalized,
+                    since we apply an optimizer to it. 
+                Ws: the (K,M) matrix mapping exogenous inputs to regime destination potentials
+                Rs: the (K,D) matrix mapping continuous states to regime destination potentials
+                Xis: the (K,L) matrix mapping system-level regime (one-hots or probs) to regime destination potentials                
+        """
         return super(SystemDrivenTransitions, self).params + (self.Rs,) + (self.Xis, )
 
     @params.setter
     def params(self, value):
         # TODO: When, if ever, is this setter called during sampling/inference? (Maybe investigate with debugger)
         # How should we modify this so that we can set Xis?
-        self.Rs = value[-1]
-        super(SystemDrivenTransitions, self.__class__).params.fset(self, value[:-1])
+        self.Rs = value[-2]
+        self.Xis =  value[-1]
+        super(SystemDrivenTransitions, self.__class__).params.fset(self, value[:-2])
 
     def permute(self, perm):
         """
@@ -349,7 +376,10 @@ class SystemDrivenTransitions(InputDrivenTransitions):
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        # TODO: Are there closed-form updates for SOME of the transitions parameters?!
+        # If so, can we have the code accomplish that?
         # TODO: Check if this is updating xi.
+        # Rk: I like that this is making the use of the base class method explicit. 
         Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
     def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
@@ -397,17 +427,26 @@ class RecurrentTransitions(InputDrivenTransitions):
         super(RecurrentTransitions, self).permute(perm)
         self.Rs = self.Rs[perm]
 
-    def log_transition_matrices(self, data, input, mask, tag):
+    def log_transition_matrices(self, data, input=None, mask=None, tag=None):
         """
         Transition probabilities are given by a softmax GLM.
         """
+
+        # TODO: I have added "=None" defaults to these parameters so that a caller could
+        # inspect the log transition matrices over time (post-inference) via
+        # slds.transitions.log_transition_matrices(x_true).
+        # 
+        # However, this change breaks the pattern used elsewhere in the codebase.  I should
+        # probably have a seperate PR where the "=None" is given throughout. 
+
         T, _ = data.shape
         # Previous state effect
         log_Ps = np.tile(self.log_Ps[None, :, :], (T-1, 1, 1))
-        # Input effect
-        log_Ps = log_Ps + np.dot(input[1:], self.Ws.T)[:, None, :]
         # Past observations effect
         log_Ps = log_Ps + np.dot(data[:-1], self.Rs.T)[:, None, :]
+        if input is not None:
+            # Input effect
+            log_Ps = log_Ps + np.dot(input[1:], self.Ws.T)[:, None, :]
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):

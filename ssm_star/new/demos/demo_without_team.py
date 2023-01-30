@@ -29,11 +29,11 @@ N =  obs_dim
 
 ###
 # Inference 
-###
+###s
  
 
 print("Fitting SLDS using Linderman's SSM repo")
-slds = ssm_star.SLDS(N, K_true, D_true, emissions="gaussian")
+slds = ssm_star.SLDS(N, K_true, D_true, emissions="gaussian", transitions="recurrent")
 
 ### Warning!  Linderman's initialization seems to assume that the obs dim exceeds the state dim!
 # And if initialization is not done, results are very poor.

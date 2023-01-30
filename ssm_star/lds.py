@@ -707,6 +707,13 @@ class SLDS(object):
         # Compute necessary expectations either analytically or via samples
         continuous_samples = variational_posterior.sample_continuous_states()
         discrete_expectations = variational_posterior.discrete_expectations
+        # Note: discrete_expectations is actually a tuple. 
+        # (expected_states, expected_joints, ???some_float???),
+        # where:
+        #     expected_states: has shape (T,K), appears to give the proability
+        #         of being in each regime at each time step.
+        #     expected_joints: has shape (T-1,K,K), appears to give the pairwise
+        #         marginals for the regime transitions; each (K,K) submatrix sums to 1.  
 
         # Approximate update of initial distribution  and transition params.
         # Replace the expectation wrt x with sample from q(x). The parameter
@@ -714,8 +721,9 @@ class SLDS(object):
         xmasks = [np.ones_like(x, dtype=bool) for x in continuous_samples]
         for distn in [self.init_state_distn, self.transitions]:
             curr_prms = copy.deepcopy(distn.params)
-            if curr_prms == tuple(): continue
+            if curr_prms == tuple(): continue # TODO: Why?
             distn.m_step(discrete_expectations, continuous_samples, inputs, xmasks, tags)
+            breakpoint()
             distn.params = convex_combination(curr_prms, distn.params, alpha)
 
         kwargs = dict(expectations=discrete_expectations,
