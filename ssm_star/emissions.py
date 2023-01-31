@@ -5,6 +5,8 @@ import autograd.numpy.random as npr
 from autograd.scipy.special import gammaln
 from autograd import hessian
 
+from sklearn.linear_model import LinearRegression
+
 from ssm_star.util import ensure_args_are_lists, \
     logistic, logit, softplus, inv_softplus
 from ssm_star.preprocessing import interpolate_data, pca_with_imputation
@@ -14,9 +16,9 @@ from ssm_star.regression import fit_linear_regression
 
 # Observation models for SLDS
 class Emissions(object):
-    def __init__(self, N, K, D, M=0, single_subspace=True):
-        self.N, self.K, self.D, self.M, self.single_subspace = \
-            N, K, D, M, single_subspace
+    def __init__(self, N, K, D, M=0, L=0, single_subspace=True):
+        self.N, self.K, self.D, self.M, self.L, self.single_subspace = \
+            N, K, D, M, L, single_subspace
 
     @property
     def params(self):
@@ -30,7 +32,7 @@ class Emissions(object):
         pass
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, num_em_iters=25):
+    def initialize(self, datas, inputs=None, masks=None, tags=None, system_inputs=None, num_em_iters=25):
         pass
 
     def initialize_from_arhmm(self, arhmm, pca):
@@ -108,8 +110,8 @@ class _LinearEmissions(Emissions):
     where C is an emission matrix, d is a bias, F an input matrix,
     and u is an input.
     """
-    def __init__(self, N, K, D, M=0, single_subspace=True):
-        super(_LinearEmissions, self).__init__(N, K, D, M=M, single_subspace=single_subspace)
+    def __init__(self, N, K, D, M=0, L=0, single_subspace=True):
+        super(_LinearEmissions, self).__init__(N, K, D, M=M, L=L, single_subspace=single_subspace)
 
         # Initialize linear layer.  Set _Cs to be private so that it can be
         # changed in subclasses.
@@ -174,20 +176,27 @@ class _LinearEmissions(Emissions):
             + self.ds
 
     @ensure_args_are_lists
-    def _initialize_with_pca(self, datas, inputs=None, masks=None, tags=None, num_iters=20):
+    def _initialize_with_pca(self, datas, inputs=None, masks=None, tags=None, system_inputs=None, num_iters=20):
         Keff = 1 if self.single_subspace else self.K
 
+        breakpoint()
         # First solve a linear regression for data given input
-        if self.M > 0:
-            from sklearn.linear_model import LinearRegression
+        if self.M > 0 or self.L>0:
             lr = LinearRegression(fit_intercept=False)
-            lr.fit(np.vstack(inputs), np.vstack(datas))
-            self.Fs = np.tile(lr.coef_[None, :, :], (Keff, 1, 1))
-
+            #`all_inputs` are the exogenous inputs and then the system inputs
+            all_inputs=np.concatenate((inputs,system_inputs), axis=2)
+            # the vstack converts the list of `datas`, `inputs`, into a vertical stack. 
+            lr.fit(np.vstack(all_inputs), np.vstack(datas))
+            lr_weights = lr.coef_[None, :, :] # has shape (Keff, N, M+L)
+            lr_weights_exogenous_inputs = lr_weights[:,:,:self.M]
+            lr_weights_system_inputs=lr_weights[:,:,self.M:self.M+self.L]
+            self.Fs = np.tile(lr_weights_exogenous_inputs, (Keff, 1, 1))
+            self.Fs = np.tile(lr_weights_exogenous_inputs, (Keff, 1, 1))
+            
         ### Compute residual after accounting for input
         # F is the matrix pre-multiplying the input.  See
         # https://github.com/lindermanlab/ssm/blob/a414dfebb5a04195970552c1f17db19ee24a7e21/ssm/emissions.py#L106
-        resids = [data - np.dot(input, self.Fs[0].T) for data, input in zip(datas, inputs)]
+        resids = [data - np.dot(input, self.Fs[0].T) for data, input, system_input  in zip(datas, inputs, system_inputs)]
 
         ###
         # Run PCA to get a linear embedding of the data with the maximum effective dimension
@@ -388,8 +397,8 @@ class _NeuralNetworkEmissions(Emissions):
 
 # Observation models for SLDS
 class _GaussianEmissionsMixin(object):
-    def __init__(self, N, K, D, M=0, single_subspace=True, **kwargs):
-        super(_GaussianEmissionsMixin, self).__init__(N, K, D, M=M, single_subspace=single_subspace, **kwargs)
+    def __init__(self, N, K, D, M=0, L=0, single_subspace=True, **kwargs):
+        super(_GaussianEmissionsMixin, self).__init__(N, K, D, M=M, L=L, single_subspace=single_subspace, **kwargs)
         self.inv_etas = -1 + npr.randn(1, N) if single_subspace else npr.randn(K, N)
 
     @property
@@ -431,7 +440,7 @@ class _GaussianEmissionsMixin(object):
 class GaussianEmissions(_GaussianEmissionsMixin, _LinearEmissions):
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None):
+    def initialize(self, datas, inputs=None, masks=None, tags=None, system_inputs=None):
         # The first step handles missing data with linear interpolation.  
         # I confirmed manually that it doesn't
         # do anything if there is missing data. 
@@ -440,7 +449,7 @@ class GaussianEmissions(_GaussianEmissionsMixin, _LinearEmissions):
         datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
         # The _initialize_with_pca function is given at
         # https://github.com/lindermanlab/ssm/blob/a414dfebb5a04195970552c1f17db19ee24a7e21/ssm/emissions.py#L177
-        pca = self._initialize_with_pca(datas, inputs=inputs, masks=masks, tags=tags)
+        pca = self._initialize_with_pca(datas, inputs=inputs, masks=masks, tags=tags, system_inputs=system_inputs)
         self.inv_etas[:,...] = np.log(pca.noise_variance_)
 
     def neg_hessian_log_emissions_prob(self, data, input, mask, tag, x, Ez):

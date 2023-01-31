@@ -202,7 +202,7 @@ class SLDS(object):
                     format(emissions, list(emission_classes.keys())))
 
             emission_kwargs = emission_kwargs or {}
-            emissions = emission_classes[emissions](N, K, D, M=M,
+            emissions = emission_classes[emissions](N, K, D, M=M, L=L,
                 single_subspace=single_subspace, **emission_kwargs)
         if not isinstance(emissions, emssn.Emissions):
             raise TypeError("'emissions' must be a subclass of"
@@ -247,7 +247,7 @@ class SLDS(object):
                 into the analysis.
         """
         # First initialize the observation model
-        self.emissions.initialize(datas, inputs, masks, tags)
+        self.emissions.initialize(datas, inputs, masks, tags, system_inputs=system_inputs)
 
         # SSM repo: Get the initialized variational mean for the data
         # Invert is a way to get x-hat given y, (C_k, d_k).
@@ -258,6 +258,7 @@ class SLDS(object):
         # Q: Can we use our previous work to get a better value for xs, at least in the case
         # of pLGSSM?
       
+        # TODO: Do we need to have emissions be aware of system_inputs for the inversion?
         xs = [self.emissions.invert(data, input, mask, tag)
               for data, input, mask, tag in zip(datas, inputs, masks, tags)]
         xmasks = [np.ones_like(x, dtype=bool) for x in xs]
@@ -273,7 +274,7 @@ class SLDS(object):
             if verbose > 0:
                 print("Initializing with an ARHMM using {} steps of EM.".format(num_init_iters))
 
-            arhmm = hmm.HMM(self.K, self.D, M=self.M,
+            arhmm = hmm.HMM(self.K, self.D, M=self.M, L=self.L, 
                             init_state_distn=copy.deepcopy(self.init_state_distn),
                             transitions=copy.deepcopy(self.transitions),
                             observations=copy.deepcopy(self.dynamics))
@@ -290,6 +291,7 @@ class SLDS(object):
                 best_lp =  copy.deepcopy(current_lp)
                 best_arhmm = copy.deepcopy(arhmm)
 
+        breakpoint()
         self.init_state_distn = copy.deepcopy(best_arhmm.init_state_distn)
         self.transitions = copy.deepcopy(best_arhmm.transitions)
         self.dynamics = copy.deepcopy(best_arhmm.observations)

@@ -87,15 +87,18 @@ def random_rotation(n, theta=None):
 
 
 def ensure_args_are_lists(f):
-    def wrapper(self, datas, inputs=None, masks=None, tags=None, system_inputs=None, **kwargs):
-        breakpoint()
+    def wrapper(self, datas, inputs=None, masks=None, tags=None, **kwargs):
+        
+        # TODO: We currently are implicitly running two versions of this function;
+        # one for when there is a `system_inputs` argument and one for when not.
+        # Handle this situation better!
+
         datas = [datas] if not isinstance(datas, (list, tuple)) else datas
 
         M = (self.M,) if isinstance(self.M, int) else self.M
-        L = (self.L,) if isinstance(self.L, int) else self.L
         # Rk: We represent M, the dim of exogenous covariates, as a tuple because
         # we will set shapes of np.arrays via tuple addition.  e.g.
-        # (T,)+(M,)=(T,M).  Similarly for L, the dim of system regime identifiers.
+        # (T,)+(M,)=(T,M). 
         assert isinstance(M, tuple)
 
         if inputs is None:
@@ -113,12 +116,18 @@ def ensure_args_are_lists(f):
         elif not isinstance(tags, (list, tuple)):
             tags = [tags]
 
-        if system_inputs is None:
-            system_inputs = [np.zeros((data.shape[0],) +L) for data in datas]
-        elif not isinstance(system_inputs, (list, tuple)):
-            system_inputs = [system_inputs]
-
-        return f(self, datas, inputs=inputs, masks=masks, tags=tags, system_inputs=system_inputs, **kwargs)
+        # The system_inputs argument is only relevant for the transitions, not the emissions.  
+        if "system_inputs" in kwargs.keys():
+            system_inputs=kwargs["system_inputs"]
+            kwargs.pop("system_inputs")
+            L = (self.L,) if isinstance(self.L, int) else self.L
+            if system_inputs is None:
+                system_inputs = [np.zeros((data.shape[0],) +L) for data in datas]
+            elif not isinstance(system_inputs, (list, tuple)):
+                system_inputs = [system_inputs]
+            return f(self, datas, inputs=inputs, masks=masks, tags=tags, system_inputs=system_inputs, **kwargs)
+        else:
+            return f(self, datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
 
     return wrapper
 

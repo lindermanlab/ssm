@@ -25,7 +25,7 @@ class Transitions(object):
         raise NotImplementedError
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None):
+    def initialize(self, datas, inputs=None, masks=None, tags=None, system_inputs=None):
         pass
 
     def permute(self, perm):
@@ -48,6 +48,7 @@ class Transitions(object):
                 inputs: List[np.array], 
                 masks: List[np.array], 
                 tags: List[np.array],
+                system_inputs: List[np.array],
                 optimizer="lbfgs",
                 num_iters=1000, 
                 **kwargs
@@ -65,15 +66,14 @@ class Transitions(object):
                         marginals for the regime transitions; each (K,K) submatrix sums to 1.  
         """
         # TOOD: Why are we passing lists of length one?
-        # breakpoint()
         optimizer = dict(sgd=sgd, adam=adam, rmsprop=rmsprop, bfgs=bfgs, lbfgs=lbfgs)[optimizer]
 
         # Maximize the expected log joint
         def _expected_log_joint(expectations):
             elbo = self.log_prior()
-            for data, input, mask, tag, (expected_states, expected_joints, _) \
-                in zip(datas, inputs, masks, tags, expectations):
-                log_Ps = self.log_transition_matrices(data, input, mask, tag)
+            for data, input, mask, tag, system_input, (expected_states, expected_joints, _) \
+                in zip(datas, inputs, masks, tags, system_inputs, expectations):
+                log_Ps = self.log_transition_matrices(data, input, mask, tag, system_input)
                 elbo += np.sum(expected_joints * log_Ps)
             return elbo
 
@@ -91,6 +91,7 @@ class Transitions(object):
                       state=optimizer_state, full_output=True, **kwargs)
 
     def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+        # TODO: Update to include system_inputs 
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
         warn("Analytical Hessian is not implemented for this transition class. \
               Optimization via Laplace-EM may be slow. Consider using an \

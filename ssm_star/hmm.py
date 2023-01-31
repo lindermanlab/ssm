@@ -33,7 +33,7 @@ class HMM(object):
     In the code we will sometimes refer to the discrete
     latent state sequence as z and the data as x.
     """
-    def __init__(self, K, D, M=0, init_state_distn=None,
+    def __init__(self, K, D, M=0, L=0, init_state_distn=None,
                  transitions='standard',
                  transition_kwargs=None,
                  hierarchical_transition_tags=None,
@@ -121,7 +121,7 @@ class HMM(object):
             raise TypeError("'observations' must be a subclass of"
                             " ssm.observations.Observations")
 
-        self.K, self.D, self.M = K, D, M
+        self.K, self.D, self.M, self.L = K, D, M, L 
         self.init_state_distn = init_state_distn
         self.transitions = transitions
         self.observations = observations
@@ -139,12 +139,12 @@ class HMM(object):
         self.observations.params = value[2]
 
     @ensure_args_are_lists
-    def initialize(self, datas, inputs=None, masks=None, tags=None, init_method="random"):
+    def initialize(self, datas, inputs=None, masks=None, tags=None, system_inputs=None, init_method="random"):
         """
         Initialize parameters given data.
         """
         self.init_state_distn.initialize(datas, inputs=inputs, masks=masks, tags=tags)
-        self.transitions.initialize(datas, inputs=inputs, masks=masks, tags=tags)
+        self.transitions.initialize(datas, inputs=inputs, masks=masks, tags=tags, system_inputs=system_inputs)
         self.observations.initialize(datas, inputs=inputs, masks=masks, tags=tags, init_method=init_method)
 
     def permute(self, perm):
@@ -308,7 +308,7 @@ class HMM(object):
 
     @ensure_args_are_lists
     def log_probability(self, datas, inputs=None, masks=None, tags=None, system_inputs=None):
-        return self.log_likelihood(datas, inputs, masks, tags, system_inputs) + self.log_prior()
+        return self.log_likelihood(datas, inputs, masks, tags, system_inputs=system_inputs) + self.log_prior()
 
     def expected_log_likelihood(
             self, expectations, datas, inputs=None, masks=None, tags=None, system_inputs=None):
@@ -440,19 +440,19 @@ class HMM(object):
         E step: compute E[z_t] and E[z_t, z_{t+1}] with message passing;
         M-step: analytical maximization of E_{p(z | x)} [log p(x, z; theta)].
         """
-        lls  = [self.log_probability(datas, inputs, masks, tags, system_inputs)]
+        lls  = [self.log_probability(datas, inputs, masks, tags, system_inputs=system_inputs)]
 
         pbar = ssm_pbar(num_iters, verbose, "LP: {:.1f}", [lls[-1]])
 
         for itr in pbar:
             # E step: compute expected latent states with current parameters
-            expectations = [self.expected_states(data, input, mask, tag, system_input)
+            expectations = [self.expected_states(data, input, mask, tag, system_input=system_input)
                             for data, input, mask, tag, system_input
                             in zip(datas, inputs, masks, tags, system_inputs)]
 
             # M step: maximize expected log joint wrt parameters
             self.init_state_distn.m_step(expectations, datas, inputs, masks, tags, **init_state_mstep_kwargs)
-            self.transitions.m_step(expectations, datas, inputs, masks, tags, **transitions_mstep_kwargs)
+            self.transitions.m_step(expectations, datas, inputs, masks, tags, system_inputs, **transitions_mstep_kwargs)
             self.observations.m_step(expectations, datas, inputs, masks, tags, **observations_mstep_kwargs)
 
             # Store progress
@@ -501,7 +501,6 @@ class HMM(object):
             if method != "em":
                 raise Exception("Only EM is implemented for constrained transitions.")
 
-       # print(verbose)
         return _fitting_methods[method](datas,
                                         inputs=inputs,
                                         masks=masks,
@@ -771,25 +770,25 @@ class HSMM(HMM):
         """
         raise NotImplementedError("Need to get raw expectations for the expected transition probability.")
 
-    def _fit_em(self, datas, inputs, masks, tags, verbose = 2, num_iters=100, **kwargs):
+    def _fit_em(self, datas, inputs, masks, tags, system_inputs= None, verbose = 2, num_iters=100, **kwargs):
         """
         Fit the parameters with expectation maximization.
 
         E step: compute E[z_t] and E[z_t, z_{t+1}] with message passing;
         M-step: analytical maximization of E_{p(z | x)} [log p(x, z; theta)].
         """
-        lls = [self.log_probability(datas, inputs, masks, tags)]
+        lls = [self.log_probability(datas, inputs, masks, tags, system_inputs)]
 
         pbar = ssm_pbar(num_iters, verbose, "LP: {:.1f}", [lls[-1]])
 
         for itr in pbar:
             # E step: compute expected latent states with current parameters
-            expectations = [self.expected_states(data, input, mask, tag)
-                            for data, input, mask, tag in zip(datas, inputs, masks, tags)]
+            expectations = [self.expected_states(data, input, mask, tag, system_input)
+                            for data, input, mask, tag, system_input in zip(datas, inputs, masks, tags, system_inputs)]
 
             # E step: also sample the posterior for stochastic M step of transition model
-            samples = [self.posterior_sample(data, input, mask, tag)
-                       for data, input, mask, tag in zip(datas, inputs, masks, tags)]
+            samples = [self.posterior_sample(data, input, mask, tag, system_input)
+                       for data, input, mask, tag, system_input in zip(datas, inputs, masks, tags, system_inputs)]
 
             # M step: maximize expected log joint wrt parameters
             self.init_state_distn.m_step(expectations, datas, inputs, masks, tags, **kwargs)
