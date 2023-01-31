@@ -1255,7 +1255,7 @@ class AutoRegressiveDiagonalNoiseObservations(AutoRegressiveObservations):
 
     The parameters are fit via maximum likelihood estimation.
     """
-    def __init__(self, K, D, M=0, lags=1,
+    def __init__(self, K, D, M=0, seed=0, lags=1,
                  l2_penalty_A=1e-8,
                  l2_penalty_b=1e-8,
                  l2_penalty_V=1e-8):
