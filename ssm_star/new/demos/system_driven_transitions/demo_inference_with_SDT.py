@@ -30,7 +30,7 @@ N =  4 # obs_dim
 T = 200
 seed = 10
 observed_time_series_is_influenced_by_system = True 
-lambda_=100.0 # strength of influence of system on observed time series.
+lambda_=0.0 # strength of influence of system on observed time series.
  
 # Inference 
 num_iters_laplace_em = 100
@@ -59,7 +59,7 @@ if observed_time_series_is_influenced_by_system:
 
     # insight into system level regimes 
     print(f"lambda_, the strength of influence of system level regimes on transitions between entity regimes is: {lambda_}")
-    print(f"Xi, the KxL t.p.m governing how current system regime influences current entity regime is: \n {slds.transitions.Xis}")
+    print(f"Xi, the KxL t.p.m governing how current system regime influences current entity regime is: \n {slds_for_generation.transitions.Xis}")
     z_true, x_true, y = slds_for_generation.sample(T, system_input=SYSTEM_REGIMES_ONE_HOT)
     plot_sample(x_true, y, z_true)
 else:
