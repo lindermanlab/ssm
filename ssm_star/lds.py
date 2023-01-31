@@ -378,33 +378,33 @@ class SLDS(object):
         return z[pad:], x[pad:], y[pad:]
 
     @ensure_slds_args_not_none
-    def expected_states(self, variational_mean, data, input=None, mask=None, tag=None):
+    def expected_states(self, variational_mean, data, input=None, mask=None, tag=None, system_input=None):
         x_mask = np.ones_like(variational_mean, dtype=bool)
         pi0 = self.init_state_distn.initial_state_distn
-        Ps = self.transitions.transition_matrices(variational_mean, input, x_mask, tag)
+        Ps = self.transitions.transition_matrices(variational_mean, input, x_mask, tag, system_input)
         log_likes = self.dynamics.log_likelihoods(variational_mean, input, x_mask, tag)
         log_likes += self.emissions.log_likelihoods(data, input, mask, tag, variational_mean)
         return hmm_expected_states(pi0, Ps, log_likes)
 
     @ensure_slds_args_not_none
-    def most_likely_states(self, variational_mean, data, input=None, mask=None, tag=None):
+    def most_likely_states(self, variational_mean, data, input=None, mask=None, tag=None, system_input=None):
         pi0 = self.init_state_distn.initial_state_distn
-        Ps = self.transitions.transition_matrices(variational_mean, input, mask, tag)
+        Ps = self.transitions.transition_matrices(variational_mean, input, mask, tag, system_input)
         log_likes = self.dynamics.log_likelihoods(variational_mean, input, np.ones_like(variational_mean, dtype=bool), tag)
         log_likes += self.emissions.log_likelihoods(data, input, mask, tag, variational_mean)
         return viterbi(pi0, Ps, log_likes)
 
     @ensure_slds_args_not_none
-    def smooth(self, variational_mean, data, input=None, mask=None, tag=None):
+    def smooth(self, variational_mean, data, input=None, mask=None, tag=None, system_input=None):
         """
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
-        Ez, _, _ = self.expected_states(variational_mean, data, input, mask, tag)
+        Ez, _, _ = self.expected_states(variational_mean, data, input, mask, tag, system_input=system_input)
         return self.emissions.smooth(Ez, variational_mean, data, input, tag)
 
     @ensure_args_are_lists
-    def log_probability(self, datas, inputs=None, masks=None, tags=None):
+    def log_probability(self, datas, inputs=None, masks=None, tags=None, system_input=None):
         warnings.warn("Cannot compute exact marginal log probability for the SLDS.")
         return np.nan
 

@@ -75,3 +75,27 @@ q_elbos, q = slds.fit(
 # get final values 
 e3, t3, d3 = slds.emissions.params, slds.transitions.params, slds.dynamics.params 
 
+###
+# Postmortem
+###
+
+from lds.piecewise.metrics import compute_regime_labeling_accuracy
+
+# TODO: Make `method` and `variational_posterior` arguments to the function
+# TODO: Relabel q_x, q_y, q_z as expectations.
+# TODO: Figure out what all the entries of q_EZ are.
+q_Ez, q_x = q.mean[0]
+q_y = slds.smooth(q_x, y)
+z_most_likely = slds.most_likely_states(q_x, y)
+pct_correct_regimes = compute_regime_labeling_accuracy(z_most_likely, z_true)
+print(f"\n Pct correct segmentations: {pct_correct_regimes:.02f}.")
+
+
+# Plot the true and inferred states
+plt.figure(figsize=(8, 9))
+
+plt.subplot(411)
+plt.imshow(z_true[None, :], aspect="auto")
+plt.imshow(np.row_stack((z_true, z_most_likely)), aspect="auto")
+plt.yticks([0, 1], ["$z_{{\\mathrm{{true}}}}$", "$z_{{\\mathrm{{est}}}}$"])
+plt.title("True and Most Likely Inferred States")
