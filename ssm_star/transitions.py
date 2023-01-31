@@ -90,7 +90,7 @@ class Transitions(object):
             optimizer(_objective, self.params, num_iters=num_iters,
                       state=optimizer_state, full_output=True, **kwargs)
 
-    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints, **kwargs):
         # TODO: Update to include system_inputs 
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
         warn("Analytical Hessian is not implemented for this transition class. \
@@ -143,7 +143,7 @@ class StationaryTransitions(Transitions):
         log_P = np.log(P)
         self.log_Ps = log_P - logsumexp(log_P, axis=-1, keepdims=True)
 
-    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints, **kwargs):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
         T, D = data.shape
         return np.zeros((T-1, D, D))
@@ -226,7 +226,7 @@ class StickyTransitions(StationaryTransitions):
         assert np.all(P >= 0), "mode is well defined only when transition matrix entries are non-negative! Check alpha >= 1"
         self.log_Ps = np.log(P)
 
-    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints, **kwargs):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
         T, D = data.shape
         return np.zeros((T-1, D, D))
@@ -278,7 +278,7 @@ class InputDrivenTransitions(StickyTransitions):
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
-    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints, **kwargs):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
         T, D = data.shape
         return np.zeros((T-1, D, D))
@@ -310,7 +310,7 @@ class SystemDrivenTransitions(InputDrivenTransitions):
         #self.Xis = np.zeros((K,L))
         # TODO: Make lambda_ settable elsewhere.  It is the strength of the system-level influence
         # on the transitions. 
-        lambda_ = 100.0
+        lambda_ = 1.0 #100.0
         self.lambda_ = lambda_
 
         if L>K:
@@ -374,6 +374,7 @@ class SystemDrivenTransitions(InputDrivenTransitions):
         log_Ps = log_Ps + np.dot(data[:-1], self.Rs.T)[:, None, :]
         # System regimes effect
         log_Ps = log_Ps + np.dot(system_input[1:], self.Xis.T)[:, None, :]
+
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
     def m_step(self, expectations, datas, inputs, masks, tags, system_inputs, **kwargs):
@@ -383,7 +384,7 @@ class SystemDrivenTransitions(InputDrivenTransitions):
         # Rk: I like that this is making the use of the base class method explicit. 
         Transitions.m_step(self, expectations, datas, inputs, masks, tags, system_inputs, **kwargs)
 
-    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, system_input, expected_joints):
+    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints, system_input):
         # Rk: This method should not change from the corresponding method from `RecurrentTransitions`,
         # because the Xi parameter (governing system-influence on entity-level regime transitions) is
         # NOT a function of the continuous state, x. 
@@ -453,7 +454,7 @@ class RecurrentTransitions(InputDrivenTransitions):
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
-    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints, **kwargs):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
         T, D = data.shape
         hess = np.zeros((T-1,D,D))
@@ -507,7 +508,7 @@ class RecurrentOnlyTransitions(Transitions):
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
-    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints, **kwargs):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
         v = np.dot(input[1:], self.Ws.T) + np.dot(data[:-1], self.Rs.T) + self.r
         shifted_exp = np.exp(v - np.max(v,axis=1,keepdims=True))

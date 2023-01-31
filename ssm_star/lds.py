@@ -291,7 +291,6 @@ class SLDS(object):
                 best_lp =  copy.deepcopy(current_lp)
                 best_arhmm = copy.deepcopy(arhmm)
 
-        breakpoint()
         self.init_state_distn = copy.deepcopy(best_arhmm.init_state_distn)
         self.transitions = copy.deepcopy(best_arhmm.transitions)
         self.dynamics = copy.deepcopy(best_arhmm.observations)
@@ -492,7 +491,7 @@ class SLDS(object):
 
     def _fit_laplace_em_discrete_state_update(
         self, variational_posterior, datas,
-        inputs, masks, tags,
+        inputs, masks, tags, system_inputs,
         num_samples):
 
         # 0. Draw samples of q(x) for Monte Carlo approximating expectations
@@ -506,8 +505,8 @@ class SLDS(object):
         #    - Compute the expected log likelihoods (i.e. log dynamics probs)
         #    - If emissions depend on z, compute expected emission likelihoods
         discrete_state_params = []
-        for x_samples, data, input, mask, tag in \
-            zip(x_sampless, datas, inputs, masks, tags):
+        for x_samples, data, input, mask, tag, system_input in \
+            zip(x_sampless, datas, inputs, masks, tags, system_inputs):
 
             # Make a mask for the continuous states
             x_mask = np.ones_like(x_samples[0], dtype=bool)
@@ -518,7 +517,7 @@ class SLDS(object):
                  for x in x_samples], axis=0)
 
             Ps = np.mean(
-                [self.transitions.transition_matrices(x, input, x_mask, tag)
+                [self.transitions.transition_matrices(x, input, x_mask, tag, system_input)
                  for x in x_samples], axis=0)
 
             log_likes = np.mean(
@@ -546,6 +545,7 @@ class SLDS(object):
                                         input,
                                         mask,
                                         tag,
+                                        system_input,
                                         x,
                                         Ez,
                                         Ezzp1,
@@ -554,7 +554,7 @@ class SLDS(object):
         x_mask = np.ones_like(x, dtype=bool)
         log_pi0 = self.init_state_distn.log_initial_state_distn
         log_Ps = self.transitions.\
-            log_transition_matrices(x, input, x_mask, tag)
+            log_transition_matrices(x, input, x_mask, tag, system_input)
         log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
         log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
 
@@ -566,23 +566,23 @@ class SLDS(object):
         return -1 * elp / scale
 
     # We also need the hessian of the of the expected log joint
-    def _laplace_neg_hessian_params(self, data, input, mask, tag, x, Ez, Ezzp1):
+    def _laplace_neg_hessian_params(self, data, input, mask, tag, x, Ez, Ezzp1, system_input):
         T, D = np.shape(x)
         x_mask = np.ones((T, D), dtype=bool)
 
         J_ini, J_dyn_11, J_dyn_21, J_dyn_22 = self.dynamics.\
             neg_hessian_expected_log_dynamics_prob(Ez, x, input, x_mask, tag)
         J_transitions = self.transitions.\
-            neg_hessian_expected_log_trans_prob(x, input, x_mask, tag, Ezzp1)
+            neg_hessian_expected_log_trans_prob(x, input, x_mask, tag, Ezzp1, system_input=system_input)
         J_dyn_11 += J_transitions
 
         J_obs = self.emissions.\
             neg_hessian_log_emissions_prob(data, input, mask, tag, x, Ez)
         return J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs
 
-    def _laplace_hessian_neg_expected_log_joint(self, data, input, mask, tag, x, Ez, Ezzp1, scale=1):
+    def _laplace_hessian_neg_expected_log_joint(self, data, input, mask, tag, system_input, x, Ez, Ezzp1, scale=1):
         J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs = \
-            self._laplace_neg_hessian_params(data, input, mask, tag, x, Ez, Ezzp1)
+            self._laplace_neg_hessian_params(data, input, mask, tag, x, Ez, Ezzp1, system_input)
 
         hessian_diag = np.zeros_like(J_obs)
         hessian_diag[:] += J_obs
@@ -618,6 +618,7 @@ class SLDS(object):
                                                 inputs,
                                                 masks,
                                                 tags,
+                                                system_inputs,
                                                 continuous_optimizer,
                                                 continuous_tolerance,
                                                 continuous_maxiter):
@@ -635,16 +636,16 @@ class SLDS(object):
         # for q(x).
         continuous_state_params = []
         x0s = variational_posterior.mean_continuous_states
-        for (Ez, Ezzp1, _), x0, data, input, mask, tag in \
+        for (Ez, Ezzp1, _), x0, data, input, mask, tag, system_input in \
             zip(variational_posterior.discrete_expectations,
-                x0s, datas, inputs, masks, tags):
+                x0s, datas, inputs, masks, tags, system_inputs):
 
             # Use Newton's method or LBFGS to find the argmax of the expected log joint
             scale = x0.size
-            kwargs = dict(data=data, input=input, mask=mask, tag=tag, Ez=Ez, Ezzp1=Ezzp1, scale=scale)
+            kwargs = dict(data=data, input=input, mask=mask, tag=tag, system_input=system_input, Ez=Ez, Ezzp1=Ezzp1, scale=scale)
 
             def _objective(x, iter): return self._laplace_neg_expected_log_joint(x=x, **kwargs)
-            def _grad_obj(x): return grad(self._laplace_neg_expected_log_joint, argnum=4)(data, input, mask, tag, x, Ez, Ezzp1, scale)
+            def _grad_obj(x): return grad(self._laplace_neg_expected_log_joint, argnum=5)(data, input, mask, tag, system_input, x, Ez, Ezzp1, scale)
             def _hess_obj(x): return self._laplace_hessian_neg_expected_log_joint(x=x, **kwargs)
 
             if continuous_optimizer == "newton":
@@ -663,7 +664,7 @@ class SLDS(object):
             assert np.all(np.isfinite(_objective(x, -1)))
 
             J_ini, J_dyn_11, J_dyn_21, J_dyn_22, J_obs = self.\
-                _laplace_neg_hessian_params(data, input, mask, tag, x, Ez, Ezzp1)
+                _laplace_neg_hessian_params(data, input, mask, tag, x, Ez, Ezzp1, system_input)
             h_ini, h_dyn_1, h_dyn_2, h_obs = \
                 self._laplace_neg_hessian_params_to_hs(x, J_ini, J_dyn_11,
                                               J_dyn_21, J_dyn_22, J_obs)
@@ -687,6 +688,7 @@ class SLDS(object):
                                       inputs,
                                       masks,
                                       tags,
+                                      system_inputs,
                                       emission_optimizer,
                                       emission_optimizer_maxiter,
                                       alpha):
@@ -708,8 +710,8 @@ class SLDS(object):
         xmasks = [np.ones_like(x, dtype=bool) for x in continuous_samples]
         for distn in [self.init_state_distn, self.transitions]:
             curr_prms = copy.deepcopy(distn.params)
-            if curr_prms == tuple(): continue # TODO: Why?
-            distn.m_step(discrete_expectations, continuous_samples, inputs, xmasks, tags)
+            if curr_prms == tuple(): continue 
+            distn.m_step(discrete_expectations, continuous_samples, inputs, xmasks, tags, system_inputs=system_inputs)
             distn.params = convex_combination(curr_prms, distn.params, alpha)
 
         kwargs = dict(expectations=discrete_expectations,
@@ -748,6 +750,7 @@ class SLDS(object):
                          inputs,
                          masks,
                          tags,
+                         system_inputs, 
                          n_samples=1):
 
         def estimate_expected_log_joint(n_samples):
@@ -761,13 +764,13 @@ class SLDS(object):
                 # log p(theta)
                 exp_log_joint += self.log_prior()
 
-                for x, (Ez, Ezzp1, _), data, input, mask, tag in \
-                    zip(continuous_samples, discrete_expectations, datas, inputs, masks, tags):
+                for x, (Ez, Ezzp1, _), data, input, mask, tag, system_input in \
+                    zip(continuous_samples, discrete_expectations, datas, inputs, masks, tags, system_inputs):
 
                     # The "mask" for x is all ones
                     x_mask = np.ones_like(x, dtype=bool)
                     log_pi0 = self.init_state_distn.log_initial_state_distn
-                    log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag)
+                    log_Ps = self.transitions.log_transition_matrices(x, input, x_mask, tag, system_input)
                     log_likes = self.dynamics.log_likelihoods(x, input, x_mask, tag)
                     log_likes += self.emissions.log_likelihoods(data, input, mask, tag, x)
 
@@ -781,6 +784,7 @@ class SLDS(object):
 
     def _fit_laplace_em(self, variational_posterior, datas,
                         inputs=None, masks=None, tags=None,
+                        system_inputs=None,
                         verbose = 2,
                         num_iters=100,
                         num_samples=1,
@@ -798,7 +802,7 @@ class SLDS(object):
         and that we update q(x) via Laplace approximation.
         Assume q(z) is a chain-structured discrete graphical model.
         """
-        elbos = [self._laplace_em_elbo(variational_posterior, datas, inputs, masks, tags)]
+        elbos = [self._laplace_em_elbo(variational_posterior, datas, inputs, masks, tags, system_inputs)]
 
         pbar = ssm_pbar(num_iters, verbose, "ELBO: {:.1f}", [elbos[-1]])
 
@@ -806,21 +810,21 @@ class SLDS(object):
             # 1. Update the discrete state posterior q(z) if K>1
             if self.K > 1:
                 self._fit_laplace_em_discrete_state_update(
-                    variational_posterior, datas, inputs, masks, tags, num_samples)
+                    variational_posterior, datas, inputs, masks, tags, system_inputs, num_samples)
 
             # 2. Update the continuous state posterior q(x)
             self._fit_laplace_em_continuous_state_update(
-                variational_posterior, datas, inputs, masks, tags,
+                variational_posterior, datas, inputs, masks, tags, system_inputs,
                 continuous_optimizer, continuous_tolerance, continuous_maxiter)
 
             # Update parameters
             if learning:
                 self._fit_laplace_em_params_update(
-                    variational_posterior, datas, inputs, masks, tags,
+                    variational_posterior, datas, inputs, masks, tags, system_inputs,
                     emission_optimizer, emission_optimizer_maxiter, alpha)
-
+            
             elbos.append(self._laplace_em_elbo(
-                variational_posterior, datas, inputs, masks, tags))
+                variational_posterior, datas, inputs, masks, tags, system_inputs))
             if verbose == 2:
               pbar.set_description("ELBO: {:.1f}".format(elbos[-1]))
 
@@ -862,7 +866,7 @@ class SLDS(object):
         return posterior
 
     @ensure_args_are_lists
-    def fit(self, datas, inputs=None, masks=None, tags=None, verbose=2,
+    def fit(self, datas, inputs=None, masks=None, tags=None, system_inputs=None, verbose=2,
             method="laplace_em", variational_posterior="structured_meanfield",
             variational_posterior_kwargs=None,
             initialize=True,
@@ -907,7 +911,7 @@ class SLDS(object):
         posterior = self._make_variational_posterior(
             variational_posterior, datas, inputs, masks, tags, method, **variational_posterior_kwargs)
         elbos = _fitting_methods[method](
-            posterior, datas, inputs, masks, tags, verbose,
+            posterior, datas, inputs, masks, tags, system_inputs, verbose,
             learning=True, **kwargs)
         return elbos, posterior
 

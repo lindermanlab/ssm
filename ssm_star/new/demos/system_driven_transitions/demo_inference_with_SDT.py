@@ -51,7 +51,7 @@ print("Fitting SLDS using Linderman's SSM repo")
 slds = ssm_star.SLDS(N, K_true, D_true, L=L_true, emissions="gaussian", transitions="system_driven")
 
 # get default initializations
-e1, d1, t1 = slds.emissions.params, slds.transitions.params, slds.dynamics.params 
+e1, t1, d1 = slds.emissions.params, slds.transitions.params, slds.dynamics.params 
 
 ### Warning!  Linderman's initialization seems to assume that the obs dim exceeds the state dim!
 # And if initialization is not done, results are very poor.
@@ -59,10 +59,19 @@ e1, d1, t1 = slds.emissions.params, slds.transitions.params, slds.dynamics.param
 if smart_initialize:
     slds.initialize(y, num_init_restarts=num_init_ar_hmms, system_inputs = SYSTEM_REGIMES_ONE_HOT)
 
+# get smart initializations
+e2, t2, d2 = slds.emissions.params, slds.transitions.params, slds.dynamics.params 
+
+
 q_elbos, q = slds.fit(
     y,
+    system_inputs = SYSTEM_REGIMES_ONE_HOT,
     method="laplace_em",
     variational_posterior="structured_meanfield",
     initialize=False,
     num_iters=num_iters_laplace_em,
 )
+
+# get final values 
+e3, t3, d3 = slds.emissions.params, slds.transitions.params, slds.dynamics.params 
+

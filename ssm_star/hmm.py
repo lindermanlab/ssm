@@ -440,6 +440,7 @@ class HMM(object):
         E step: compute E[z_t] and E[z_t, z_{t+1}] with message passing;
         M-step: analytical maximization of E_{p(z | x)} [log p(x, z; theta)].
         """
+        #breakpoint()
         lls  = [self.log_probability(datas, inputs, masks, tags, system_inputs=system_inputs)]
 
         pbar = ssm_pbar(num_iters, verbose, "LP: {:.1f}", [lls[-1]])
@@ -489,6 +490,9 @@ class HMM(object):
                             format(method, _fitting_methods.keys()))
 
         if initialize:
+            # Rk: The initialization of the HMM involves initializing emissions, transitions, initial discrete state.
+            # When this is an AR-HMM called for iniitalization of an SLDS, these initializations appear to be redundant
+            # with what has already happened in the SLDS class.  
             self.initialize(datas,
                             inputs=inputs,
                             masks=masks,

@@ -72,7 +72,7 @@ class StickyRecurrentTransitions(InputDrivenTransitions):
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
-    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints, **kwargs):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
 
         T, D = data.shape
@@ -173,7 +173,7 @@ class StickyRecurrentOnlyTransitions(Transitions):
         Transitions.m_step(self, expectations, datas, inputs, masks, tags, optimizer="lbfgs", num_iters=1000, **kwargs)
 
 
-    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints, **kwargs):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
 
         T, D = data.shape
