@@ -311,7 +311,6 @@ class SystemDrivenTransitions(InputDrivenTransitions):
         # TODO: Make lambda_ settable elsewhere.  It is the strength of the system-level influence
         # on the transitions. 
         lambda_ = 1.0 #100.0
-        self.lambda_ = lambda_
 
         if L>K:
             if np.mod(L,K) !=0:

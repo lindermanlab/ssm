@@ -13,6 +13,7 @@ from ssm_star.new.plotting import (
 
 """
 SDT = "System Driven Transitions"
+he
 
 We check on the quality of inference.
 """
@@ -28,7 +29,9 @@ D_true = 3 # state_dim
 N =  4 # obs_dim 
 T = 200
 seed = 10
-
+observed_time_series_is_influenced_by_system = True 
+lambda_=100.0 # strength of influence of system on observed time series.
+ 
 # Inference 
 num_iters_laplace_em = 100
 smart_initialize = True 
@@ -49,10 +52,22 @@ SYSTEM_REGIMES_ONE_HOT = one_hot_encoded_array_from_categorical_indices(SYSTEM_R
 # Generate Data
 ####
 
-# TODO: allow data generation with system inputs as well
-print("Generating data from a SLDS")
-y, x_true, z_true = generate_multi_dim_data_with_multi_dim_states_and_two_regimes(N, D_true)
-plot_sample(x_true,y,z_true)
+if observed_time_series_is_influenced_by_system:
+    print("Sampling SLDS with system-driven transitions")
+    slds_for_generation = ssm_star.SLDS(N, K_true, D_true, L=L_true, emissions="gaussian", transitions="system_driven")
+    slds_for_generation.transitions.Xis *= lambda_
+
+    # insight into system level regimes 
+    print(f"lambda_, the strength of influence of system level regimes on transitions between entity regimes is: {lambda_}")
+    print(f"Xi, the KxL t.p.m governing how current system regime influences current entity regime is: \n {slds.transitions.Xis}")
+    z_true, x_true, y = slds_for_generation.sample(T, system_input=SYSTEM_REGIMES_ONE_HOT)
+    plot_sample(x_true, y, z_true)
+else:
+    # TODO: allow data generation with system inputs as well
+    print("Generating data from a SLDS with no-system driven transitions")
+    y, x_true, z_true = generate_multi_dim_data_with_multi_dim_states_and_two_regimes(N, D_true)
+    plot_sample(x_true,y,z_true)
+
 
 ###
 # Inference 
