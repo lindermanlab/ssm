@@ -202,7 +202,7 @@ class SLDS(object):
                     format(emissions, list(emission_classes.keys())))
 
             emission_kwargs = emission_kwargs or {}
-            emissions = emission_classes[emissions](N, K, D, M=M, L=L,
+            emissions = emission_classes[emissions](N, K, D, M=M,
                 single_subspace=single_subspace, **emission_kwargs)
         if not isinstance(emissions, emssn.Emissions):
             raise TypeError("'emissions' must be a subclass of"
@@ -247,7 +247,7 @@ class SLDS(object):
                 into the analysis.
         """
         # First initialize the observation model
-        self.emissions.initialize(datas, inputs, masks, tags, system_inputs=system_inputs)
+        self.emissions.initialize(datas, inputs, masks, tags)
 
         # SSM repo: Get the initialized variational mean for the data
         # Invert is a way to get x-hat given y, (C_k, d_k).
