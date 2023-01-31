@@ -35,7 +35,7 @@ def plot_sample(x : NumpyArray2D, y : NumpyArray2D, z : typing.List[int]) -> Non
     plt.figure(figsize=(8, 9))
 
     plt.subplot(311)
-    plt.imshow(z[None, :], aspect="auto")
+    plt.imshow(np.array(z)[None, :], aspect="auto")
     plt.yticks([0], ["$z_{{\\mathrm{{true}}}}$"])
     plt.title("(Entity-Level) Regimes")    
 

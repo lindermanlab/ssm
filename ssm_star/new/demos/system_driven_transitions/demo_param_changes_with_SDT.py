@@ -5,16 +5,17 @@ import ssm_star
 from ssm_star.new.generate import (
     generate_multi_dim_data_with_multi_dim_states_and_two_regimes
 )
-from ssm_star.new.plotting import (
-    plot_sample,
-    plot_elbos,
-    plot_results_for_one_entity,
-)
 
 """
 SDT = "System Driven Transitions"
 
-We check on the quality of inference.
+This demo just surfaces the parameters at three points:
+1) After default initialization
+2) After smart initialization
+3) After inference
+
+We can inspect whether/how the parameters change. This is especially
+important for the new parameters introduced by the system-level module.
 """
 
 ###
@@ -45,27 +46,33 @@ from lds.util import one_hot_encoded_array_from_categorical_indices
 SYSTEM_REGIMES_ONE_HOT = one_hot_encoded_array_from_categorical_indices(SYSTEM_REGIMES_INDICES, L_true)
 
 
+
 ###
 # Generate Data
 ####
 
 # TODO: allow data generation with system inputs as well
-print("Generating data from a SLDS")
+
 y, x_true, z_true = generate_multi_dim_data_with_multi_dim_states_and_two_regimes(N, D_true)
-plot_sample(x_true,y,z_true)
 
 ###
 # Inference 
 ###
 
-print("Fitting SLDS.")
+print("Fitting SLDS using Linderman's SSM repo")
 slds = ssm_star.SLDS(N, K_true, D_true, L=L_true, emissions="gaussian", transitions="system_driven")
+
+# get default initializations
+e1, t1, d1 = slds.emissions.params, slds.transitions.params, slds.dynamics.params 
 
 ### Warning!  Linderman's initialization seems to assume that the obs dim exceeds the state dim!
 # And if initialization is not done, results are very poor.
 # See: https://github.com/lindermanlab/ssm/blob/646e1889ec9a7efb37d4153f7034c258745c83a5/ssm/lds.py#L161
 if smart_initialize:
     slds.initialize(y, num_init_restarts=num_init_ar_hmms, system_inputs = SYSTEM_REGIMES_ONE_HOT)
+
+# get smart initializations
+e2, t2, d2 = slds.emissions.params, slds.transitions.params, slds.dynamics.params 
 
 
 q_elbos, q = slds.fit(
@@ -77,10 +84,6 @@ q_elbos, q = slds.fit(
     num_iters=num_iters_laplace_em,
 )
 
-###
-# Postmortem
-###
-plot_elbos(q_elbos)
-plot_results_for_one_entity(
-    q, slds, y, x_true, z_true, system_input = SYSTEM_REGIMES_ONE_HOT
-)
+# get final values 
+e3, t3, d3 = slds.emissions.params, slds.transitions.params, slds.dynamics.params 
+
