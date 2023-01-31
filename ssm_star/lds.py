@@ -314,13 +314,35 @@ class SLDS(object):
                self.dynamics.log_prior() + \
                self.emissions.log_prior()
 
+    def sample_with_fixed_z(self, fixed_z, input=None, tag=None, with_noise=True):
+        """
+        Arguments:
+            fixed_z: Allows us to sample with fixed regime sequence 
+        """
+        T = len(fixed_z)
+
+        D = (self.D,) if isinstance(self.D, int) else self.D
+        M = (self.M,) if isinstance(self.M, int) else self.M
+
+        input = np.zeros((T,) + M) if input is None else np.concatenate((np.zeros((1,) + M), input))
+        
+        x = np.zeros((T,) + D)
+        for t in range(T):
+            x[t] = self.dynamics.sample_x(fixed_z[t], x[:t], input=input[t], tag=tag, with_noise=with_noise)
+        
+        y = self.emissions.sample(fixed_z, x, input=input, tag=tag)
+        return fixed_z, x, y 
+
+
     def sample(self, T, input=None, tag=None, prefix=None, with_noise=True, system_input=None):
         """
         Arguments:
             prefix: If not None, appears to be a tuple (zhist, xhist, yhist)
                 which I believe is giving information about the head (start) of the sequence.
                 I believe we only return what we are appending to. 
+            fixed_z: Allows us to sample with fixed regime sequence 
         """
+
         # TODO: What is `tag`?
         N = self.N
         K = self.K
@@ -333,7 +355,11 @@ class SLDS(object):
 
         # If prefix is given, pad the output with it
         if prefix is None:
-            # TODO: Why pad with 1 by default?
+            # Rk: I think we use "pad=1" by default in order to give initial values of z,x,y
+            # that are informed by the initial regime/state distributions.  Note, however, that we do NOT
+            # return these values (which seems strange to me) [TODO: what happens at inference time?]
+            #
+            # If we provide a "prefix" (head of sequences) then we can just pick up where those left off.
             pad = 1
             z = np.zeros(T+1, dtype=int)
             x = np.zeros((T+1,) + D)
@@ -371,7 +397,7 @@ class SLDS(object):
                 ))[0]
             z[t] = npr.choice(self.K, p=Pt[z[t-1]])
             x[t] = self.dynamics.sample_x(z[t], x[:t], input=input[t], tag=tag, with_noise=with_noise)
-        
+
         # Sample observations given latent states
         # TODO: sample in the loop above?
         y = self.emissions.sample(z, x, input=input, tag=tag)

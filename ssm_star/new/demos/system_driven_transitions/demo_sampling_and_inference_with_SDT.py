@@ -2,25 +2,31 @@ import autograd.numpy as np
 
 import ssm_star
 
-from ssm_star.new.generate import (
-    generate_multi_dim_data_with_multi_dim_states_and_two_regimes
-)
+from ssm_star.new.generate import generate_regimes_sequences_with_runs
+
 from ssm_star.new.plotting import (
     plot_sample,
     plot_elbos,
     plot_results_for_one_entity,
 )
 
+
 """
 SDT = "System Driven Transitions"
-he
 
-We check on the quality of inference.
+We consider two scenarios - when the system DOES and DOES NOT drive entity-level regime transitions.
+
+We check that we can 
+1) successfully sample
+2) successful do inference 
+
+in each of these two scenarios.
 """
 
 ###
 # Configs 
 ###
+
 
 # Data generation
 L_true = 6 # currently must be even multiple of K 
@@ -28,15 +34,18 @@ K_true = 2 # TODO: extract this from generative mechanism; even better would be 
 D_true = 3 # state_dim 
 N =  4 # obs_dim 
 T = 200
-seed = 10
-observed_time_series_is_influenced_by_system = True 
-lambda_=0.0 # strength of influence of system on observed time series.
- 
+seed = 1
+use_fixed_cyclic_z = False #True 
+# `system_influence_scalar` gives the strength of influence of system on observed time series.
+#  For no influence set to 0.
+# This is not used if `use_fixed_cyclic_z` = True. 
+system_influence_scalar = 100.0 
+
+
 # Inference 
 num_iters_laplace_em = 100
 smart_initialize = True 
 num_init_ar_hmms = 1
-
 
 
 ###
@@ -52,21 +61,23 @@ SYSTEM_REGIMES_ONE_HOT = one_hot_encoded_array_from_categorical_indices(SYSTEM_R
 # Generate Data
 ####
 
-if observed_time_series_is_influenced_by_system:
-    print("Sampling SLDS with system-driven transitions")
-    slds_for_generation = ssm_star.SLDS(N, K_true, D_true, L=L_true, emissions="gaussian", transitions="system_driven")
-    slds_for_generation.transitions.Xis *= lambda_
+np.random.seed(seed)
 
-    # insight into system level regimes 
-    print(f"lambda_, the strength of influence of system level regimes on transitions between entity regimes is: {lambda_}")
+print(f"Sampling SLDS ...")
+slds_for_generation = ssm_star.SLDS(N, K_true, D_true, L=L_true, emissions="gaussian", transitions="system_driven")
+
+if use_fixed_cyclic_z:
+    print(f"...with fixed cyclic regimes.")
+    fixed_z=generate_regimes_sequences_with_runs(T, K_true, num_cycles=2)
+    slds_for_generation = ssm_star.SLDS(N, K_true, D_true, L=L_true, emissions="gaussian", transitions="system_driven")
+    z_true, x_true, y = slds_for_generation.sample_with_fixed_z(fixed_z=fixed_z)
+else:
+    print(f"...with system-driven regime transitions. System influence scalar: {system_influence_scalar:.02f}")
+    slds_for_generation.transitions.Xis *= system_influence_scalar
     print(f"Xi, the KxL t.p.m governing how current system regime influences current entity regime is: \n {slds_for_generation.transitions.Xis}")
     z_true, x_true, y = slds_for_generation.sample(T, system_input=SYSTEM_REGIMES_ONE_HOT)
-    plot_sample(x_true, y, z_true)
-else:
-    # TODO: allow data generation with system inputs as well
-    print("Generating data from a SLDS with no-system driven transitions")
-    y, x_true, z_true = generate_multi_dim_data_with_multi_dim_states_and_two_regimes(N, D_true)
-    plot_sample(x_true,y,z_true)
+
+plot_sample(x_true, y, z_true)
 
 
 ###
