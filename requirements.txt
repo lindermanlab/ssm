@@ -1,2 +1,4 @@
 numpy==1.23.5 # avoids an importing error with "SystemError: initialization of _internal failed without raising an exception."   
 cython 
+pydantic # for configs 
+pyyaml # for configs 

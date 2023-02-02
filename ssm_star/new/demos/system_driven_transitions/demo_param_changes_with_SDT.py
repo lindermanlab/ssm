@@ -24,7 +24,7 @@ important for the new parameters introduced by the system-level module.
 
 # Data generation
 L_true = 6 # currently must be even multiple of K 
-K_true = 2 # TODO: extract this from generative mechanism; even better would be to update generator to be flexible to this.
+K_true = 2 
 D_true = 3 # state_dim 
 N =  4 # obs_dim 
 T = 200
