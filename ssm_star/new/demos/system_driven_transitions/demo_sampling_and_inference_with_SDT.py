@@ -40,6 +40,8 @@ use_fixed_cyclic_z = False #True
 #  For no influence set to 0.
 # This is not used if `use_fixed_cyclic_z` = True. 
 system_influence_scalar = 100.0 
+alpha = 1.0 # Dirichlet parameter for symmetric Dirichlet on rows on t.p.m for regimes ....
+kappa = 100.0 #0.0 # ...with symmetry-breaking increment to prior to encourage self-transitions. 
 
 
 # Inference 
@@ -85,7 +87,9 @@ plot_sample(x_true, y, z_true)
 ###
 
 print("Fitting SLDS.")
-slds = ssm_star.SLDS(N, K_true, D_true, L=L_true, emissions="gaussian", transitions="system_driven")
+slds = ssm_star.SLDS(N, K_true, D_true, L=L_true, emissions="gaussian", transitions="system_driven", 
+        transition_kwargs=dict(alpha=alpha, kappa=kappa))
+
 
 ### Warning!  Linderman's initialization seems to assume that the obs dim exceeds the state dim!
 # And if initialization is not done, results are very poor.

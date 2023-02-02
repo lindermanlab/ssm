@@ -3,7 +3,82 @@ Seed library
 """
 
 """
-This one switches once, part way through.
+Shows we can handle lack of system-driven transitions 
+"""
+L_true = 6 # currently must be even multiple of K 
+K_true = 2 # TODO: extract this from generative mechanism; even better would be to update generator to be flexible to this.
+D_true = 3 # state_dim 
+N =  4 # obs_dim 
+T = 200
+seed = 1
+use_fixed_cyclic_z = True 
+system_influence_scalar = 100.0 
+
+"""
+Shows we can handle the system-driven transitions 
+"""
+L_true = 6 # currently must be even multiple of K 
+K_true = 2 # TODO: extract this from generative mechanism; even better would be to update generator to be flexible to this.
+D_true = 3 # state_dim 
+N =  4 # obs_dim 
+T = 200
+seed = 1
+use_fixed_cyclic_z = False #True 
+system_influence_scalar = 100.0 
+
+
+
+"""
+Other fixed zs (no system influence):  Inference learns on a time series whose changes seem hard to perceive.
+"""
+L_true = 6 # currently must be even multiple of K 
+K_true = 2 # TODO: extract this from generative mechanism; even better would be to update generator to be flexible to this.
+D_true = 3 # state_dim 
+N =  4 # obs_dim 
+T = 200
+seed = 99
+system_influence_scalar = 0.0 # strength of influence of system on observed time series. For no influence set to 0.
+ 
+
+"""
+Here we have four entity-level regimes. Inference is good when there are long run lengths 
+"""
+L_true = 8 # currently must be even multiple of K 
+K_true = 4 # TODO: extract this from generative mechanism; even better would be to update generator to be flexible to this.
+D_true = 3 # state_dim 
+N =  4 # obs_dim 
+T = 200
+seed = 1
+use_fixed_cyclic_z = True 
+# `system_influence_scalar` gives the strength of influence of system on observed time series.
+#  For no influence set to 0.
+# This is not used if `use_fixed_cyclic_z` = True. 
+system_influence_scalar = 100.0 
+
+"""
+Here we have four entity-level regimes.  When there are quick cycles of system-driven inference,
+we get poor infernece for regime segmentations, but we still get good inference for continuous 
+states AND observations.    Note: perhaps the sticky transitions "prior" is at fault here. 
+"""
+L_true = 8 # currently must be even multiple of K 
+K_true = 4 # TODO: extract this from generative mechanism; even better would be to update generator to be flexible to this.
+D_true = 3 # state_dim 
+N =  4 # obs_dim 
+T = 200
+seed = 1
+use_fixed_cyclic_z = False  
+# `system_influence_scalar` gives the strength of influence of system on observed time series.
+#  For no influence set to 0.
+# This is not used if `use_fixed_cyclic_z` = True. 
+system_influence_scalar = 100.0 
+
+
+ ###
+ # Below this is stuff which there's no need to show.
+ ###
+
+"""
+Other fixed zs (no system influence): This one switches once, part way through.
 """
 # Data generation
 L_true = 6 # currently must be even multiple of K 
@@ -16,7 +91,7 @@ system_influence_scalar = 0.0 # strength of influence of system on observed time
  
 
 """
-This goes A -> BBBBBB -> A
+Other fixed zs (no system influence):  This goes A -> BBBBBB -> A
 """
 L_true = 6 # currently must be even multiple of K 
 K_true = 2 # TODO: extract this from generative mechanism; even better would be to update generator to be flexible to this.
@@ -27,18 +102,7 @@ seed = 25
 system_influence_scalar = 0.0 # strength of influence of system on observed time series. For no influence set to 0.
  
 """
-Inference learns on a time series whose changes seem hard to perceive.
-"""
-L_true = 6 # currently must be even multiple of K 
-K_true = 2 # TODO: extract this from generative mechanism; even better would be to update generator to be flexible to this.
-D_true = 3 # state_dim 
-N =  4 # obs_dim 
-T = 200
-seed = 99
-system_influence_scalar = 0.0 # strength of influence of system on observed time series. For no influence set to 0.
- 
-"""
-Fun immediate change mid-way through. 
+Other fixed zs (no system influence):  Fun immediate change mid-way through. 
 """
 L_true = 6 # currently must be even multiple of K 
 K_true = 2 # TODO: extract this from generative mechanism; even better would be to update generator to be flexible to this.
@@ -47,4 +111,5 @@ N =  4 # obs_dim
 T = 200
 seed = 777
 system_influence_scalar = 0.0 # strength of influence of system on observed time series. For no influence set to 0.
- 
+
+

@@ -210,6 +210,16 @@ class StickyTransitions(StationaryTransitions):
         self.kappa = kappa
 
     def log_prior(self):
+        # RK: The prior on the transition matrix (source x destination) appears to be given by independent Dirichlet
+        # distributions on each row of the transition matrix (which gives probabilities of transitioning
+        # into each destination).
+        #
+        # The Dirichlet on the k-th row is given by (alpha, ..., alpha, alpha+kappa, alpha...,alpha)
+        # with kappa added to the k-th location, in order to encourage self-transitions 
+        # i.e.     pi_k ~ Dir(alpha + kappa * e_k)
+        #
+        # Note that the normalizing constant, which is a beta function on the parameter alpha+kappa * e_k
+        # is ignored here, presumably because the ELBO does not depend on it (it's a hyperparmeter.)
         K = self.K
         log_P = self.log_Ps - logsumexp(self.log_Ps, axis=1, keepdims=True)
 
@@ -300,7 +310,7 @@ class SystemDrivenTransitions(InputDrivenTransitions):
         
         # TODO: Stop hard-coding L 
         super(SystemDrivenTransitions, self).__init__(K, D, M, L=L, alpha=alpha, kappa=kappa)
-  
+
         ### Parameters linking past observations to regime distribution
         self.Rs = np.zeros((K, D))
         

@@ -99,7 +99,7 @@ def plot_results_for_one_entity(
     plt.imshow(np.row_stack((z_true, z_most_likely)), aspect="auto")
     plt.axhline(y=0.5, color='r', linestyle='-')
     plt.yticks([0, 1], ["$z_{{\\mathrm{{true}}}}$", "$z_{{\\mathrm{{est}}}}$"])
-    plt.title("True and Most Likely Inferred States")
+    plt.title(f"True and Most Likely Inferred States (acc={pct_correct_regimes:.02f})")
 
     plt.subplot(412)
     plt.imshow(q_Ez[0].T, aspect="auto", cmap="Greys")
