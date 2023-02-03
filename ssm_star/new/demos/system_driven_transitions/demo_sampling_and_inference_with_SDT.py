@@ -23,9 +23,10 @@ We check that we can
 in each of these two scenarios.
 """
 
-path_to_config="configs/test.yaml"
+path_to_config="configs/configs_9.yaml"
 CFG = config_util.load(path_to_config)
 
+print(f"\n---{CFG.summary_of_run}---\n")
 
 ###
 # Make system regimes, hard-coded 

@@ -10,6 +10,11 @@ class Config(BaseSettings):
     # TODO: Add other configs used in the demo (e.g. string-valued choice of transitions)
 
     ###
+    # Meta data 
+    ###
+    summary_of_run: str 
+    
+    ###
     # Data Generation
     ### 
     L_true: int # num system level regimes, currently must be an even multiple of K_true 
