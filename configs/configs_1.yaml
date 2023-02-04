@@ -17,7 +17,7 @@ fixed_run_length_for_system_level_regimes : 1
 # `system_influence_scalar` gives the strength of influence of system on observed time series.
 #  For no influence set to 0.
 # This is not used if `fixed_run_length_for_entity_level_regimes` = True. 
-system_influence_scalar : 100.0 
+system_influence_scalar : 0.0 
 alpha : 1.0 # Dirichlet parameter for symmetric Dirichlet on rows on t.p.m for regimes ....
 kappa : 0.0 # ...with symmetry-breaking increment to prior to encourage self-transitions. 
 

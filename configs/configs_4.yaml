@@ -3,7 +3,8 @@
 
 ### Summary
 summary_of_run: | 
-  System influence. Here we have four entity-level regimes. Inference is good when there are long run lengths.
+  System influence. Here we have four entity-level regimes. 
+  Inference is somewhat good when there are long run lengths.
 
 ### Data Generation 
 L_true: 8 # currently must be even multiple of K 
@@ -12,8 +13,8 @@ D_true: 3 # state_dim
 N : 4 # obs_dim 
 T : 200
 seed : 1
-fixed_run_length_for_entity_level_regimes : 25 
-fixed_run_length_for_system_level_regimes : 1
+fixed_run_length_for_entity_level_regimes : 0
+fixed_run_length_for_system_level_regimes : 25
 # `system_influence_scalar` gives the strength of influence of system on observed time series.
 #  For no influence set to 0.
 # This is not used if `fixed_run_length_for_entity_level_regimes` = True. 

@@ -19,7 +19,7 @@ We check that we can
 in each of these two scenarios.
 """
 
-path_to_config = "configs/configs_2.yaml"
+path_to_config = "configs/configs_5.yaml"
 CFG = config_util.load(path_to_config)
 
 print(f"\n---{CFG.summary_of_run}---\n")
