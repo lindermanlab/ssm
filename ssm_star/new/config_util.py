@@ -23,8 +23,8 @@ class Config(BaseSettings):
     N: int  # obs dim 
     T: int # num timesteps 
     seed : int 
-    use_fixed_cyclic_z : bool # for data generation
-    system_influence_scalar: float # strength of system influence; not used if `use_fixed_cyclic_z` = True
+    use_fixed_cycling_through_regimes_instead_of_Markov_chain_sampling : bool # for data generation
+    system_influence_scalar: float # strength of system influence; not used if `use_fixed_cycling_through_regimes_instead_of_Markov_chain_sampling` = True
     alpha : float # Dirichlet parameter for symmetric Dirichlet on rows on t.p.m for regimes ....
     kappa :float # ...with symmetry-breaking increment to prior to encourage self-transitions. 
     ###

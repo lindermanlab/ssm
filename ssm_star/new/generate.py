@@ -16,7 +16,7 @@ np.set_printoptions(suppress=True, precision=3)
 ###
 # Generate z
 ###
-def generate_regimes_sequences_with_runs(T: int, K: int, num_cycles: int) -> NumpyArray1D:
+def generate_regime_sequences_with_runs(T: int, K: int, num_cycles: int) -> NumpyArray1D:
     """
     Generate regimes sequences with runs, specifically regime sequences
     of the form 
@@ -41,7 +41,7 @@ def generate_1dim_data_with_1dim_states_and_two_regimes() -> Tuple[np.array, np.
     # Hyperparameters
     ###
     regime_run_length = 200
-    # TODO: Generate regime_seq_true via `generate_regimes_sequences_with_runs`
+    # TODO: Generate regime_seq_true via `generate_regime_sequences_with_runs`
     regime_seq_true = ([0] * regime_run_length + [1] * regime_run_length) * 2
     params_dict_regime_0 = {
         "a": 0.99,
@@ -79,7 +79,7 @@ def generate_1dim_data_with_1dim_states_and_two_regimes() -> Tuple[np.array, np.
 def generate_multi_dim_data_with_multi_dim_states_and_two_regimes(obs_dim, state_dim):
 
     regime_run_length = 50
-    # TODO: Generate regime_seq_true via `generate_regimes_sequences_with_runs`
+    # TODO: Generate regime_seq_true via `generate_regime_sequences_with_runs`
     regime_seq_true = ([0] * regime_run_length + [1] * regime_run_length) * 2
     params_dict_regime_0 = {
         "a_scalar": 0.99,

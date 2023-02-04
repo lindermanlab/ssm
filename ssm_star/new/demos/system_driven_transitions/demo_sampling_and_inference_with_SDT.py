@@ -2,7 +2,7 @@ import autograd.numpy as np
 
 import ssm_star
 
-from ssm_star.new.generate import generate_regimes_sequences_with_runs
+from ssm_star.new.generate import generate_regime_sequences_with_runs
 
 from ssm_star.new.plotting import (
     plot_sample,
@@ -50,9 +50,9 @@ slds_for_generation = ssm_star.SLDS(
     transitions="system_driven"
 )
 
-if CFG.use_fixed_cyclic_z:
+if CFG.use_fixed_cycling_through_regimes_instead_of_Markov_chain_sampling:
     print(f"...with fixed cyclic regimes.")
-    fixed_z = generate_regimes_sequences_with_runs(CFG.T, CFG.K_true, num_cycles=2)
+    fixed_z = generate_regime_sequences_with_runs(CFG.T, CFG.K_true, num_cycles=2)
     z_true, x_true, y = slds_for_generation.sample_with_fixed_z(fixed_z=fixed_z)
 else:
     print(f"...with system-driven regime transitions. System influence scalar: {CFG.system_influence_scalar:.02f}")

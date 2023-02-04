@@ -15,10 +15,10 @@ D_true: 3 # state_dim
 N : 4 # obs_dim 
 T : 200
 seed : 1
-use_fixed_cyclic_z : False  
+use_fixed_cycling_through_regimes_instead_of_Markov_chain_sampling : False  
 # `system_influence_scalar` gives the strength of influence of system on observed time series.
 #  For no influence set to 0.
-# This is not used if `use_fixed_cyclic_z` = True. 
+# This is not used if `use_fixed_cycling_through_regimes_instead_of_Markov_chain_sampling` = True. 
 system_influence_scalar : 100.0
 alpha : 1.0 # Dirichlet parameter for symmetric Dirichlet on rows on t.p.m for regimes ....
 kappa : 0.0 # ...with symmetry-breaking increment to prior to encourage self-transitions. 
