@@ -9,3 +9,18 @@ git+https://github.com/mattjj/pybasicbayes
 git+https://github.com/mattjj/pyhsmm
 git+https://github.com/mattjj/pylds
 
+### Usual dev requirements
+pip>=19.1.1
+wheel
+mock
+pylint
+coverage
+flake8
+ipython
+isort; python_version >= '3.8'
+pytest
+pytest-cov
+pytest-lazy-fixture
+pytest-watch
+pre-commit
+black; python_version >= '3.8'
