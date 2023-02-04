@@ -1,4 +1,5 @@
 import autograd.numpy as np
+from lds.util import one_hot_encoded_array_from_categorical_indices
 
 import ssm_star
 from ssm_star.new import config_util
@@ -18,7 +19,7 @@ We check that we can
 in each of these two scenarios.
 """
 
-path_to_config = "configs/configs_4.yaml"
+path_to_config = "configs/configs_2.yaml"
 CFG = config_util.load(path_to_config)
 
 print(f"\n---{CFG.summary_of_run}---\n")
@@ -26,10 +27,9 @@ print(f"\n---{CFG.summary_of_run}---\n")
 ###
 # Make system regimes, hard-coded
 ###
-SYSTEM_REGIMES_INDICES = np.tile(range(CFG.L_true), int(CFG.T))[: CFG.T]
-from lds.util import one_hot_encoded_array_from_categorical_indices
-
-
+SYSTEM_REGIMES_INDICES = generate_regime_sequences_with_runs(
+    CFG.T, CFG.L_true, run_length=CFG.fixed_run_length_for_system_level_regimes
+)
 SYSTEM_REGIMES_ONE_HOT = one_hot_encoded_array_from_categorical_indices(
     SYSTEM_REGIMES_INDICES, CFG.L_true
 )
@@ -52,10 +52,10 @@ slds_for_generation = ssm_star.SLDS(
 )
 
 
-if CFG.fixed_regime_run_length_for_entities != 0:
+if CFG.fixed_run_length_for_entity_level_regimes != 0:
     print(f"...with fixed cyclic regimes.")
     fixed_z = generate_regime_sequences_with_runs(
-        CFG.T, CFG.K_true, run_length=CFG.fixed_regime_run_length_for_entities
+        CFG.T, CFG.K_true, run_length=CFG.fixed_run_length_for_entity_level_regimes
     )
     z_true, x_true, y = slds_for_generation.sample_with_fixed_z(fixed_z=fixed_z)
 else:
