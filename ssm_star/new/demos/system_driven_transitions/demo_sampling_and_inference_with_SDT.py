@@ -18,7 +18,7 @@ We check that we can
 in each of these two scenarios.
 """
 
-path_to_config = "configs/configs_9.yaml"
+path_to_config = "configs/configs_4.yaml"
 CFG = config_util.load(path_to_config)
 
 print(f"\n---{CFG.summary_of_run}---\n")
@@ -52,9 +52,11 @@ slds_for_generation = ssm_star.SLDS(
 )
 
 
-if CFG.use_fixed_cycling_through_regimes_instead_of_Markov_chain_sampling:
+if CFG.fixed_regime_run_length_for_entities != 0:
     print(f"...with fixed cyclic regimes.")
-    fixed_z = generate_regime_sequences_with_runs(CFG.T, CFG.K_true, num_cycles=2)
+    fixed_z = generate_regime_sequences_with_runs(
+        CFG.T, CFG.K_true, run_length=CFG.fixed_regime_run_length_for_entities
+    )
     z_true, x_true, y = slds_for_generation.sample_with_fixed_z(fixed_z=fixed_z)
 else:
     print(

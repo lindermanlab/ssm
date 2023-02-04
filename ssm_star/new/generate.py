@@ -2,9 +2,9 @@
 Generate pLGSSM data with univariate state and emissions,
 and K=2 regimes.
 """
-from typing import Tuple 
-import numpy as np
+from typing import Optional, Tuple
 
+import numpy as np
 from lds.generate import make_params_for_univariate_state_space_model
 from lds.piecewise.generate import generate_piecewise_time_invariant_LGSSM
 from lds.piecewise.util import make_ssm_params_by_regime_from_list_of_dicts
@@ -13,30 +13,50 @@ from lds.types import NumpyArray1D
 
 np.set_printoptions(suppress=True, precision=3)
 
+
 ###
 # Generate z
 ###
-def generate_regime_sequences_with_runs(T: int, K: int, num_cycles: int) -> NumpyArray1D:
+def generate_regime_sequences_with_runs(
+    T: int,
+    K: int,
+    num_cycles: Optional[int] = None,
+    run_length: Optional[int] = None,
+) -> NumpyArray1D:
     """
-    Generate regimes sequences with runs, specifically regime sequences
-    of the form 
+    Generate regimes sequences with runs.  specifically regime sequences
+    of the form
         [0,...,0, 1,...1, ... K,...,K] * 'num_cycles'
+
+    Note that the last cycle may be a partical cycle in order to force the regime
+    sequence to have T elements.
 
     Arguments:
         T: number of time steps
         K: number of regimes
-        num_cycles: number of times we cycle through all the regimes
+        num_cycles: number of times we cycle through all the regimes.
+            If set, `run_length` must be kept at None.
+        run_length: length of each run.
+            If set, `num_cycles` must be kept at None.
     """
-    run_length = int(T/(K*num_cycles))
-    one_tile= np.ndarray.flatten(np.array([[k]*run_length for k in range(K)]))
-    return np.tile(one_tile, num_cycles)
+    if (run_length is not None) and (num_cycles is not None):
+        raise ValueError("Only one of run_length and num_cycles should be set.")
+
+    if run_length is None:
+        run_length = int(T / (K * num_cycles))
+    if num_cycles is None:
+        num_cycles = int(T / (K * run_length))
+
+    one_tile = np.ndarray.flatten(np.array([[k] * run_length for k in range(K)]))
+    return np.tile(one_tile, num_cycles + 1)[:T]
+
 
 ###
 # Generate x,y,z
 ###
 
-def generate_1dim_data_with_1dim_states_and_two_regimes() -> Tuple[np.array, np.array]:
 
+def generate_1dim_data_with_1dim_states_and_two_regimes() -> Tuple[np.array, np.array]:
     ###
     # Hyperparameters
     ###
@@ -59,14 +79,17 @@ def generate_1dim_data_with_1dim_states_and_two_regimes() -> Tuple[np.array, np.
         "mu_0": 0.0,
         "sigma_0": 1.0,
     }
-    num_regimes = 2  # to do: extract rather than hardcode
     seed = 2000
 
     ###
     # Generate Data
     ###
-    params_regime_0 = make_params_for_univariate_state_space_model(**params_dict_regime_0)
-    params_regime_1 = make_params_for_univariate_state_space_model(**params_dict_regime_1)
+    params_regime_0 = make_params_for_univariate_state_space_model(
+        **params_dict_regime_0
+    )
+    params_regime_1 = make_params_for_univariate_state_space_model(
+        **params_dict_regime_1
+    )
     ssm_params_by_regime = [params_regime_0, params_regime_1]
 
     y_seq, state_seq_true = generate_piecewise_time_invariant_LGSSM(
@@ -76,8 +99,8 @@ def generate_1dim_data_with_1dim_states_and_two_regimes() -> Tuple[np.array, np.
     )
     return y_seq, state_seq_true, regime_seq_true
 
-def generate_multi_dim_data_with_multi_dim_states_and_two_regimes(obs_dim, state_dim):
 
+def generate_multi_dim_data_with_multi_dim_states_and_two_regimes(obs_dim, state_dim):
     regime_run_length = 50
     # TODO: Generate regime_seq_true via `generate_regime_sequences_with_runs`
     regime_seq_true = ([0] * regime_run_length + [1] * regime_run_length) * 2

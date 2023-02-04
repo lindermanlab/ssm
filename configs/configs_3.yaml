@@ -2,7 +2,8 @@
 # For documentation on all these fields, see the `config_util` module.
 
 ### Summary
-summary_of_run: "Here we show that the algo can segment even when changes are hard to perceive visually."
+summary_of_run: |
+  No system influence. Here we show that the algo can segment even when changes are hard to perceive visually.
 
 ### Data Generation 
 L_true: 6 # currently must be even multiple of K 
@@ -11,10 +12,10 @@ D_true: 3 # state_dim
 N : 4 # obs_dim 
 T : 200
 seed : 99
-use_fixed_cycling_through_regimes_instead_of_Markov_chain_sampling : False 
+fixed_regime_run_length_for_entities : 0
 # `system_influence_scalar` gives the strength of influence of system on observed time series.
 #  For no influence set to 0.
-# This is not used if `use_fixed_cycling_through_regimes_instead_of_Markov_chain_sampling` = True. 
+# This is not used if `fixed_regime_run_length_for_entities` = True. 
 system_influence_scalar : 0.0
 alpha : 1.0 # Dirichlet parameter for symmetric Dirichlet on rows on t.p.m for regimes ....
 kappa : 0.0 # ...with symmetry-breaking increment to prior to encourage self-transitions. 
