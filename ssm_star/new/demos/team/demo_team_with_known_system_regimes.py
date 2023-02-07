@@ -1,5 +1,5 @@
 """
-We demo (known)-system level regimes driving rSLDS's
+We demo sampling and inference where (known)-system level regimes are driving rSLDS's
 for a collection of entity-level time series.  Each 
 entity has unique rSLDS models, but the same driving
 system-level regimes. 
@@ -11,7 +11,8 @@ from lds.util import one_hot_encoded_array_from_categorical_indices
 import ssm_star
 from ssm_star.new import config_util
 from ssm_star.new.generate import generate_regime_sequences_with_runs
-from ssm_star.new.plotting import plot_elbos, plot_results_for_one_entity, plot_sample
+from ssm_star.new.plotting.inference import plot_elbos, plot_results_for_one_entity
+from ssm_star.new.plotting.sampling import plot_sample
 
 
 path_to_config = "configs/configs_4.yaml"

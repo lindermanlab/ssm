@@ -13,10 +13,10 @@ npr.seed(0)
 
 import matplotlib.pyplot as plt
 import seaborn as sns
-from ssm_star.lds import SLDS
-
 from lds.piecewise.metrics import compute_regime_labeling_accuracy
 from lds.types import NumpyArray1D, NumpyArray2D
+
+from ssm_star.lds import SLDS
 
 
 color_names = ["windows blue", "red", "amber", "faded green"]
@@ -24,39 +24,6 @@ colors = sns.xkcd_palette(color_names)
 sns.set_style("white")
 sns.set_context("talk")
 
-def plot_sample(x : NumpyArray2D, y : NumpyArray2D, z : typing.List[int]) -> None:
-    """
-    Arguments:
-        x: continuous states
-        y: observations
-        z: (discrete) regimes, entity-level
-    """
-    
-    plt.figure(figsize=(8, 9))
-
-    plt.subplot(311)
-    plt.imshow(np.array(z)[None, :], aspect="auto")
-    plt.yticks([0], ["$z_{{\\mathrm{{true}}}}$"])
-    plt.title("(Entity-Level) Regimes")    
-
-
-    plt.subplot(312)
-    plt.plot(x, "-k", label="True")
-    plt.ylabel("$x$")
-    plt.title("States")    
-
-    plt.subplot(313)
-    N = np.shape(y)[1]  # number of observed dimensions
-    spc = 1.1 * abs(y).max()
-    for n in range(N):
-        plt.plot(y[:, n] - spc * n, "-k", label="True" if n == 0 else None)
-    plt.yticks(-spc * np.arange(N), ["$y_{}$".format(n + 1) for n in range(N)])
-    plt.xlabel("time")
-    plt.ylabel("$y$")
-    plt.title("Observations")  
-
-    plt.tight_layout()
-    plt.show()
 
 def plot_elbos(q_elbos: NumpyArray1D) -> None:
     plt.figure()
@@ -66,21 +33,21 @@ def plot_elbos(q_elbos: NumpyArray1D) -> None:
     plt.tight_layout()
     plt.show()
 
+
 def plot_results_for_one_entity(
-    q, 
-    slds: SLDS, 
+    q,
+    slds: SLDS,
     y: NumpyArray2D,
     x_true: NumpyArray2D,
     z_true: typing.List[int],
     system_input: NumpyArray2D,
 ) -> None:
-
     # TODO: Make `method` and `variational_posterior` arguments to the function
     # TODO: Relabel q_x, q_y, q_z as expectations.
     # TODO: Figure out what all the entries of q_Ez are.
     q_Ez, q_x = q.mean[0]
-    q_y = slds.smooth(q_x, y, system_input = system_input)
-    z_most_likely = slds.most_likely_states(q_x, y, system_input = system_input)
+    q_y = slds.smooth(q_x, y, system_input=system_input)
+    z_most_likely = slds.most_likely_states(q_x, y, system_input=system_input)
     pct_correct_regimes = compute_regime_labeling_accuracy(z_most_likely, z_true)
     print(f"\n Pct correct segmentations: {pct_correct_regimes:.02f}.")
 
@@ -97,7 +64,7 @@ def plot_results_for_one_entity(
     plt.subplot(411)
     plt.imshow(np.array(z_true)[None, :], aspect="auto")
     plt.imshow(np.row_stack((z_true, z_most_likely)), aspect="auto")
-    plt.axhline(y=0.5, color='r', linestyle='-')
+    plt.axhline(y=0.5, color="r", linestyle="-")
     plt.yticks([0, 1], ["$z_{{\\mathrm{{true}}}}$", "$z_{{\\mathrm{{est}}}}$"])
     plt.title(f"True and Most Likely Inferred States (acc={pct_correct_regimes:.02f})")
 
