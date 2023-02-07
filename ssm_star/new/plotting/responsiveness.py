@@ -1,10 +1,15 @@
+from typing import List, Optional
+
 import numpy as np
 import seaborn as sns
 from lds.types import NumpyArray3D
 from matplotlib import pyplot as plt
 
 
-def plot_entity_responsivenesses(entity_responsivenesses: NumpyArray3D) -> None:
+def plot_entity_responsivenesses_to_system(
+    entity_responsivenesses: NumpyArray3D,
+    system_influence_scalars: Optional[List[float]] = None,
+) -> None:
     """
     Arguments:
         entity_responsivenesses: (J, T-1, K). The variance (across the L system-level regimes)
@@ -34,9 +39,25 @@ def plot_entity_responsivenesses(entity_responsivenesses: NumpyArray3D) -> None:
             :, :, k
         ]  #  J x (T-1)
         plt.subplot(K, 1, k + 1)
-        for j in range(J):
-            plt.plot(responsivenesses_when_transitioning_to_k[j, :], color=colors[j])
+        for j in reversed(range(J)):
+            label = (
+                f"{system_influence_scalars[j]:02}"
+                if system_influence_scalars
+                else f"{j}"
+            )
+            plt.plot(
+                responsivenesses_when_transitioning_to_k[j, :],
+                color=colors[j],
+                label=label,
+            )
         plt.title(f"Entity responsiveness when transitioning to regime {k+1}")
 
+    legend_title = (
+        "System influence scalar for entity in DGP"
+        if system_influence_scalars
+        else "Entity ID"
+    )
+    # plt.legend(title=legend_title, bbox_to_anchor=(1.1, 1.05), title_fontsize=12, fontsize=12)
+    plt.legend(title=legend_title, loc="best", title_fontsize=12, fontsize=12)
     plt.tight_layout()
     plt.show()

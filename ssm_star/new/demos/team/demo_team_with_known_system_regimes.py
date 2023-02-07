@@ -1,8 +1,13 @@
 """
-We demo sampling and inference where (known)-system level regimes are driving rSLDS's
-for a collection of entity-level time series.  Each 
-entity has unique rSLDS models, but the same driving
-system-level regimes. 
+This demo handles the case where (known)-system level regimes are driving rSLDS's
+for a collection of entity-level time series.  
+
+Each entity has unique rSLDS models, but the same driving system-level regimes. 
+
+The demo provides info on
+    1) Sampling
+    2) Inference
+    3) Responsiveness (of the entity to the system when transitioning into a certain entity-level regime)
 """
 
 import autograd.numpy as np
@@ -11,12 +16,22 @@ from lds.util import one_hot_encoded_array_from_categorical_indices
 import ssm_star
 from ssm_star.new import config_util
 from ssm_star.new.generate import generate_regime_sequences_with_runs
+from ssm_star.new.metrics.responsiveness import (
+    compute_entity_responsivenesses_to_system,
+)
 from ssm_star.new.plotting.inference import plot_elbos, plot_results_for_one_entity
+from ssm_star.new.plotting.responsiveness import plot_entity_responsivenesses_to_system
 from ssm_star.new.plotting.sampling import plot_sample
+from ssm_star.new.team import TeamSLDS
 
 
-path_to_config = "configs/configs_4.yaml"
+###
+# Configs (from file plus addiitonal)
+###
+
+path_to_config = "devel/tmp/tmp2.yaml"
 CFG = config_util.load(path_to_config)
+system_influence_scalars = [0.0, 2.5, 5.0]
 
 print(f"\n---{CFG.summary_of_run}---\n")
 
@@ -38,13 +53,17 @@ SYSTEM_REGIMES_ONE_HOT = one_hot_encoded_array_from_categorical_indices(
 from ssm_star.new.team import EntityData
 
 
-# TODO: Make this a standalone function?
-np.random.seed(CFG.seed)
+###
+# Sample
+###
 
-N_ENTITIES = 2
-team_data = [None] * N_ENTITIES
+np.random.seed(CFG.seed + 100)
 
-for j in range(N_ENTITIES):
+### TODO: Make this a standalone function?
+NUM_ENTITIES = len(system_influence_scalars)
+team_data = [None] * NUM_ENTITIES
+
+for j in range(NUM_ENTITIES):
     print(f"Sampling SLDS ...")
     slds_for_generation = ssm_star.SLDS(
         CFG.N,
@@ -56,9 +75,9 @@ for j in range(N_ENTITIES):
     )
 
     print(
-        f"...with system-driven regime transitions. System influence scalar: {CFG.system_influence_scalar:.02f}"
+        f"...with system-driven regime transitions. System influence scalar: {system_influence_scalars[j]:.02f}"
     )
-    slds_for_generation.transitions.Xis *= CFG.system_influence_scalar
+    slds_for_generation.transitions.Xis *= system_influence_scalars[j]
     print(
         f"Xi, the KxL t.p.m governing how current system regime influences current entity regime is: \n {slds_for_generation.transitions.Xis}"
     )
@@ -73,11 +92,9 @@ for j in range(N_ENTITIES):
 ###
 #  Construct team model
 ###
-from ssm_star.new.team import TeamSLDS
-
 
 team_slds = TeamSLDS(
-    N_ENTITIES,
+    NUM_ENTITIES,
     CFG.N,
     CFG.K_true,
     CFG.D_true,
@@ -102,12 +119,12 @@ team_results = team_slds.fit(
 
 
 ###
-# Postmortem
+# Postmortem - Fit
 ###
 
 # TODO: Make this a standalone function?
-for j in range(N_ENTITIES):
-    print(f"Now plotting results for entity {j+1}/{N_ENTITIES}.")
+for j in range(NUM_ENTITIES):
+    print(f"Now plotting results for entity {j+1}/{NUM_ENTITIES}.")
     plot_elbos(team_results.elbo_traces[j])
     plot_results_for_one_entity(
         team_results.qs[j],
@@ -117,3 +134,15 @@ for j in range(N_ENTITIES):
         team_data[j].z_true,
         system_input=SYSTEM_REGIMES_ONE_HOT,
     )
+
+###
+# Postmortem - Entity Responsiveness to Systems
+###
+
+entity_responsivenesses = compute_entity_responsivenesses_to_system(
+    team_results, team_slds, num_of_system_regimes=CFG.L_true
+)
+
+plot_entity_responsivenesses_to_system(
+    entity_responsivenesses, system_influence_scalars
+)
