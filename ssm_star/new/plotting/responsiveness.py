@@ -50,14 +50,20 @@ def plot_entity_responsivenesses_to_system(
                 color=colors[j],
                 label=label,
             )
-        plt.title(f"Entity responsiveness when transitioning to regime {k+1}")
+        plt.xlabel("Timestep", fontsize=14)
+        plt.title(
+            f"Learned entity responsiveness to system when transitioning into regime {k+1}",
+            fontsize=14,
+        )
 
     legend_title = (
-        "System influence scalar for entity in DGP"
+        "Entity (indexed by strength of system influence during data generation)"
         if system_influence_scalars
         else "Entity ID"
     )
-    # plt.legend(title=legend_title, bbox_to_anchor=(1.1, 1.05), title_fontsize=12, fontsize=12)
-    plt.legend(title=legend_title, loc="best", title_fontsize=12, fontsize=12)
+    plt.legend(
+        title=legend_title, bbox_to_anchor=(0.8, -0.9), title_fontsize=10, fontsize=10
+    )
+    # plt.legend(title=legend_title, loc="upper center", title_fontsize=12, fontsize=12)
     plt.tight_layout()
     plt.show()

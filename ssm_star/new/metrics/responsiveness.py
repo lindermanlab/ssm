@@ -40,6 +40,11 @@ def compute_entity_responsivenesses_to_system(
     _, T, K = np.shape(team_results.qs[0].mean_discrete_states)
     L = num_of_system_regimes
 
+    if K != L:
+        raise NotImplementedError(
+            f"This function currently assumes that the number of entity-level regimes"
+            f",K={K}, equals the number of system-level regimes, L={L}."
+        )
     entity_responsivenesses = np.zeros((J, T - 1, K))
     for j in range(J):
         # TODO: why is there a list of discrete states and continuous states with one entry in each?!

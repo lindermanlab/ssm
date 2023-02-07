@@ -29,7 +29,7 @@ from ssm_star.new.team import TeamSLDS
 # Configs (from file plus addiitonal)
 ###
 
-path_to_config = "devel/tmp/tmp2.yaml"
+path_to_config = "configs/configs_10.yaml"
 CFG = config_util.load(path_to_config)
 system_influence_scalars = [0.0, 2.5, 5.0]
 
@@ -57,7 +57,7 @@ from ssm_star.new.team import EntityData
 # Sample
 ###
 
-np.random.seed(CFG.seed + 100)
+np.random.seed(CFG.seed + 999)
 
 ### TODO: Make this a standalone function?
 NUM_ENTITIES = len(system_influence_scalars)
