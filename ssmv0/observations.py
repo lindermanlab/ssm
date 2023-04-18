@@ -1258,13 +1258,15 @@ class AutoRegressiveDiagonalNoiseObservations(AutoRegressiveObservations):
     def __init__(self, K, D, M=0, seed=0, lags=1,
                  l2_penalty_A=1e-8,
                  l2_penalty_b=1e-8,
-                 l2_penalty_V=1e-8):
+                 l2_penalty_V=1e-8,
+                 temporal_penalty=1.0):
 
         super(AutoRegressiveDiagonalNoiseObservations, self).\
             __init__(K, D, M, lags=lags,
                      l2_penalty_A=l2_penalty_A,
                      l2_penalty_b=l2_penalty_b,
-                     l2_penalty_V=l2_penalty_V)
+                     l2_penalty_V=l2_penalty_V,
+                     temporal_penalty=temporal_penalty)
 
         # Initialize the dynamics and the noise covariances
         self._As = .80 * np.array([
