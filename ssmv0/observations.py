@@ -941,12 +941,12 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         #print(A_penalty)
 
         # Set natural parameters of Gaussian prior on (A, V, b) weight matrix
-#         J0_diag = np.concatenate((A_penalty, #l2_penalty_A * np.ones(D * lags),
-#                                   l2_penalty_V * np.ones(M),
-#                                   l2_penalty_b * np.ones(1)))
-        J0_diag = np.concatenate((l2_penalty_A * np.ones(D * lags),
+        J0_diag = np.concatenate((A_penalty, #l2_penalty_A * np.ones(D * lags),
                                   l2_penalty_V * np.ones(M),
                                   l2_penalty_b * np.ones(1)))
+#         J0_diag = np.concatenate((l2_penalty_A * np.ones(D * lags),
+#                                   l2_penalty_V * np.ones(M),
+#                                   l2_penalty_b * np.ones(1)))
         self.J0 = np.tile(np.diag(J0_diag)[None, :, :], (K, 1, 1))
 
 #         h0 = np.concatenate((np.zeros((D,D)),#l2_penalty_A * np.eye(D),
