@@ -918,7 +918,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                  l2_penalty_A=1e-8,
                  l2_penalty_b=1e-8,
                  l2_penalty_V=1e-8,
-                 temporal_penalty=1e-8,
+                 temporal_penalty=1e0,
                  nu0=1e-4, Psi0=1e-4):
         super(AutoRegressiveObservations, self).\
             __init__(K, D, M, seed=seed+1, lags=lags)
