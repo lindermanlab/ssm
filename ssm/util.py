@@ -88,6 +88,11 @@ def random_rotation(n, theta=None):
 
 def ensure_args_are_lists(f):
     def wrapper(self, datas, inputs=None, masks=None, tags=None, **kwargs):
+        # print('inputs9', inputs)
+        # print('inputs9.shape', np.array(inputs).shape)
+
+        # print('datas9.shape', np.array(datas).shape)
+
         datas = [datas] if not isinstance(datas, (list, tuple)) else datas
 
         M = (self.M,) if isinstance(self.M, int) else self.M
@@ -97,6 +102,55 @@ def ensure_args_are_lists(f):
             inputs = [np.zeros((data.shape[0],) + M) for data in datas]
         elif not isinstance(inputs, (list, tuple)):
             inputs = [inputs]
+            # print('input12.shape', np.array(inputs).shape)
+            # print('input12', inputs)
+
+
+        if masks is None:
+            masks = [np.ones_like(data, dtype=bool) for data in datas]
+        elif not isinstance(masks, (list, tuple)):
+            masks = [masks]
+
+        if tags is None:
+            tags = [None] * len(datas)
+        elif not isinstance(tags, (list, tuple)):
+            tags = [tags]
+        # print('inputs10.shape', np.array(inputs).shape)
+        # print('datas10.shape', np.array(datas).shape)
+        # print('inputs10', inputs)
+
+        return f(self, datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
+
+    return wrapper
+
+
+def ensure_args_are_lists_modified(f): #zizi: zoe made this for HHM_TO
+    def wrapper(self, datas, transition_input=None, observation_input=None, masks=None, tags=None, **kwargs):
+        # observation_input=list(observation_input)
+        # print('observation_input9.shape', np.array(observation_input).shape)
+        # print('datas9.shape', np.array(datas).shape)
+        # print('transition_input9.shape', np.array(transition_input).shape)
+        # print('observation_input9', observation_input)
+
+        datas = [datas] if not isinstance(datas, (list, tuple)) else datas
+
+        M_obs = (self.M_obs,) if isinstance(self.M_obs, int) else self.M_obs
+        assert isinstance(M_obs, tuple)
+
+        M_trans = (self.M_trans,) if isinstance(self.M_trans, int) else self.M_trans
+        assert isinstance(M_trans, tuple)
+
+        if transition_input is None:
+            transition_input = [np.zeros((data.shape[0],) + M_trans) for data in datas]
+        elif not isinstance(transition_input, (list, tuple)):
+            transition_input = [transition_input]
+
+        if observation_input is None:
+            observation_input = [np.zeros((data.shape[0],) + M_obs) for data in datas]
+            # print('observation_input11.shape', np.array(observation_input).shape)
+        elif not isinstance(observation_input, (list, tuple)):
+            observation_input = [observation_input]
+            # print('observation_input12.shape', np.array(observation_input).shape)
 
         if masks is None:
             masks = [np.ones_like(data, dtype=bool) for data in datas]
@@ -108,7 +162,13 @@ def ensure_args_are_lists(f):
         elif not isinstance(tags, (list, tuple)):
             tags = [tags]
 
-        return f(self, datas, inputs=inputs, masks=masks, tags=tags, **kwargs)
+        # print('observation_input10.shape', np.array(observation_input).shape)
+        # print('data10.shape', np.array(datas).shape)
+        # print('transition_input10.shape', np.array(transition_input).shape)
+        #
+        # print('observation_input10.shape', observation_input)
+
+        return f(self, datas, transition_input=transition_input, observation_input=observation_input, masks=masks, tags=tags, **kwargs)
 
     return wrapper
 
@@ -158,6 +218,35 @@ def ensure_args_not_none(f):
         return f(self, data, input=input, mask=mask, tag=tag, **kwargs)
     return wrapper
 
+def ensure_args_not_none_modified(f): # zizi: this is because of hmm_TO
+
+    def wrapper(self, data, transition_input=None, observation_input=None, mask=None, tag=None, **kwargs):
+        assert data is not None
+
+        M_obs = (self.M_obs,) if isinstance(self.M_obs, int) else self.M_obs
+        assert isinstance(M_obs, tuple)
+
+        M_trans = (self.M_trans,) if isinstance(self.M_trans, int) else self.M_trans
+        assert isinstance(M_trans, tuple)
+
+        transition_input = np.zeros((data.shape[0],) + M) if transition_input is None else transition_input
+        observation_input = np.zeros((data.shape[0],) + M) if observation_input is None else observation_input
+
+        # if transition_input is None:
+        #     transition_input = [np.zeros((data.shape[0],) + M_trans) for data in datas]
+        # elif not isinstance(transition_input, (list, tuple)):
+        #     transition_input = [transition_input]
+        #
+        # if observation_input is None:
+        #     observation_input = [np.zeros((data.shape[0],) + M_obs) for data in datas]
+        # elif not isinstance(transition_input, (list, tuple)):
+        #     observation_input = [observation_input]
+
+        mask = np.ones_like(data, dtype=bool) if mask is None else mask
+        # print('input3=', input)
+        # print('input_type3=', type(input))
+        return f(self, data, transition_input=transition_input, observation_input=observation_input, mask=mask, tag=tag, **kwargs)
+    return wrapper
 
 def ensure_slds_args_not_none(f):
     def wrapper(self, variational_mean, data, input=None, mask=None, tag=None, **kwargs):

@@ -5,7 +5,7 @@
 
 This package has fast and flexible code for simulating, learning, and performing inference in a variety of state space models.
 Currently, it supports:
-lhhj
+
 - Hidden Markov Models (HMM)
 - Auto-regressive HMMs (ARHMM)
 - Input-output HMMs (IOHMM)
