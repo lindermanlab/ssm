@@ -28,7 +28,8 @@ class HMM(object):
     Notation:
     K: number of discrete latent states
     D: dimensionality of observations
-    M: dimensionality of inputs
+    M_obs: dimensionality of observation inputs
+    M_trans: dimensionality of transition inputs
 
     In the code we will sometimes refer to the discrete
     latent state sequence as z and the data as x.
