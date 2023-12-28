@@ -2,7 +2,13 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="559bb5c7-6a29-4c85-a22e-836f48557240" name="Default Changelist" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ssm/hmm.py" beforeDir="false" afterPath="$PROJECT_DIR$/ssm/hmm.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ssm/init_state_distns.py" beforeDir="false" afterPath="$PROJECT_DIR$/ssm/init_state_distns.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ssm/messages.py" beforeDir="false" afterPath="$PROJECT_DIR$/ssm/messages.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ssm/observations.py" beforeDir="false" afterPath="$PROJECT_DIR$/ssm/observations.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ssm/transitions.py" beforeDir="false" afterPath="$PROJECT_DIR$/ssm/transitions.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ssm/util.py" beforeDir="false" afterPath="$PROJECT_DIR$/ssm/util.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

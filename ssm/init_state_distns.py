@@ -47,10 +47,6 @@ class InitialStateDistribution(object):
         pi0 = sum([Ez[0] for Ez, _, _ in expectations]) + 1e-8
         self.log_pi0 = np.log(pi0 / pi0.sum())
 
-    def m_step_modified(self, expectations, datas, transition_input, observation_input, masks, tags, **kwargs): #this is for hmm_TO
-        pi0 = sum([Ez[0] for Ez, _, _ in expectations]) + 1e-8
-        self.log_pi0 = np.log(pi0 / pi0.sum())
-
 class FixedInitialStateDistribution(InitialStateDistribution):
     def __init__(self, K, D, pi0=None, M=0):
         super(FixedInitialStateDistribution, self).__init__(K, D, M=M)
