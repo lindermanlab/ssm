@@ -345,6 +345,8 @@ class InputDrivenTransitionsAlternativeFormulation(StickyTransitions):
         log_Ps = np.tile(self.log_Ps[None, :, :], (T-1, 1, 1))
         #append column of zeros so that Ws_with_zeros is now KxM
         Ws_with_zeros = np.vstack([self.Ws, np.zeros((1, self.Ws.shape[1]))])
+        if self.Ws.shape[0] > input[1:].shape[1]: #if it has already a zeros column
+            Ws_with_zeros=self.Ws
         # Input effect
         log_Ps = log_Ps + np.dot(input[1:], Ws_with_zeros.T)[:, None, :]
         normalized_Ps = log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)

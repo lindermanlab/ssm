@@ -141,7 +141,7 @@ class HMM_TO(object):
         self.transitions.params = value[1]
         self.observations.params = value[2]
 
-    @ensure_args_are_lists
+    @ensure_args_are_lists_modified
     def initialize(self, datas, transition_input=None, observation_input=None, masks=None, tags=None, init_method="random"):
         """
         Initialize parameters given data.
