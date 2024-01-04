@@ -361,6 +361,20 @@ class HMM_TO(object):
         ell = self.expected_log_likelihood(expectations, datas, transition_inputs=transition_inputs, observation_inputs=observation_inputs, masks=masks, tags=tags)
         return ell + self.log_prior()
 
+    def trans_weights_K(self, hmm_params, K):
+        """
+        Standardize the GLM transition weights.
+        """
+        trans_weight_append_zero = np.vstack((hmm_params[1][1], np.zeros((1, hmm_params[1][1].shape[1]))))
+        permutation = range(K)
+        trans_weight_append_zero_standard = trans_weight_append_zero
+        v1 = - np.mean(trans_weight_append_zero, axis=0)
+        trans_weight_append_zero_standard[-1, :] = v1
+        for i in range(K - 1):
+            trans_weight_append_zero_standard[i, :] = v1 + trans_weight_append_zero[i, :]  # vi = v1 + wi
+        weight_vectors_trans = trans_weight_append_zero_standard[permutation]  
+        return weight_vectors_trans
+
     # Model fitting
     def _fit_sgd(self, optimizer, datas, transition_input, observation_input, masks, tags, verbose = 2, num_iters=1000, **kwargs):
         """

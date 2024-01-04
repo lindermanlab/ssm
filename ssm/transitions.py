@@ -296,7 +296,7 @@ class InputDrivenTransitionsAlternativeFormulation(StickyTransitions):
     """
     Hidden Markov Model whose transition probabilities are
     determined by a generalized linear model applied to the
-    exogenous input.
+    exogenous input. This has K-1 weight vectors so as to cope with degeneracy.
     """
     def __init__(self, K, D, M, prior_sigma=1000, alpha=1, kappa=0):
         """
@@ -345,7 +345,7 @@ class InputDrivenTransitionsAlternativeFormulation(StickyTransitions):
         log_Ps = np.tile(self.log_Ps[None, :, :], (T-1, 1, 1))
         #append column of zeros so that Ws_with_zeros is now KxM
         Ws_with_zeros = np.vstack([self.Ws, np.zeros((1, self.Ws.shape[1]))])
-        if self.Ws.shape[0] > input[1:].shape[1]: #if it has already a zeros column
+        if self.Ws.shape[0] > input[1:].shape[1]: #If it already has a column of zeros
             Ws_with_zeros=self.Ws
         # Input effect
         log_Ps = log_Ps + np.dot(input[1:], Ws_with_zeros.T)[:, None, :]
