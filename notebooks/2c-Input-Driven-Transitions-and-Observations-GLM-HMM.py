@@ -12,6 +12,10 @@
 #     name: python3
 # ---
 
+"""
+Input Driven Observations and Transitions (GLM-HMM)
+===================================================
+"""
 # # Input Driven Observations and Transitions (GLM-HMM)
 
 # This notebook is written by Zeinab Mohammadi. Here, a class called "HMM_TO" is defined which contains GLM-HMM with Input-Driven Observations and Transitions. We used a HMM enriched with two sets of per-state GLM. These GLMs consist of a Bernoulli GLM, which models observations (mice choices), and a multinomial GLM, which handles transitions between different states. This sophisticated framework effectively captures the dynamic interplay between covariates, mouse choices, and state transitions. As a result, it offers a more refined description of behavioral activity when compared to classical models. 
