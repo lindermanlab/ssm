@@ -62,14 +62,10 @@ class Transitions(object):
         def _objective(params, itr):
             self.params = params
             obj = _expected_log_joint(expectations)
-            # print('params=',params)
             return -obj / T
 
         # Call the optimizer. Persist state (e.g. SGD momentum) across calls to m_step.
         optimizer_state = self.optimizer_state if hasattr(self, "optimizer_state") else None
-        self.params, self.optimizer_state = \
-            optimizer(_objective, self.params, num_iters=num_iters,
-                      state=optimizer_state, full_output=True, **kwargs)
         self.params, self.optimizer_state = \
             optimizer(_objective, self.params, num_iters=num_iters,
                       state=optimizer_state, full_output=True, **kwargs)
@@ -196,6 +192,7 @@ class StickyTransitions(StationaryTransitions):
     def log_prior(self):
         K = self.K
         log_P = self.log_Ps - logsumexp(self.log_Ps, axis=1, keepdims=True)
+
         lp = 0
         for k in range(K):
             alpha = self.alpha * np.ones(K) + self.kappa * (np.arange(K) == k)
@@ -250,40 +247,16 @@ class InputDrivenTransitions(StickyTransitions):
         return lp
 
     def log_transition_matrices(self, data, input, mask, tag):
-        T = np.array(data).shape[0]
-        assert np.array(input).shape[0] == T
+        T = data.shape[0]
+        assert input.shape[0] == T
         # Previous state effect
         log_Ps = np.tile(self.log_Ps[None, :, :], (T-1, 1, 1))
         # Input effect
         log_Ps = log_Ps + np.dot(input[1:], self.Ws.T)[:, None, :]
         return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
 
-    def m_step(self, expectations, datas, inputs, masks, tags,
-               optimizer="lbfgs", num_iters=1000, **kwargs):
-        optimizer = dict(sgd=sgd, adam=adam, rmsprop=rmsprop, bfgs=bfgs, lbfgs=lbfgs)[optimizer]
-
-        # Maximize the expected log joint
-        def _expected_log_joint(expectations):
-            elbo = self.log_prior()
-            for data, input, mask, tag, (expected_states, expected_joints, _) \
-                    in zip(datas, inputs, masks, tags, expectations):
-                log_Ps = self.log_transition_matrices(data, input, mask, tag)
-
-
-                elbo += np.sum(expected_joints * log_Ps)
-            return elbo
-        # Normalize and negate for minimization
-        T = sum([data.shape[0] for data in datas])
-
-        def _objective(params, itr):
-            self.params = params
-            obj = _expected_log_joint(expectations)
-            return -obj / T
-        # Call the optimizer. Persist state (e.g. SGD momentum) across calls to m_step.
-        optimizer_state = self.optimizer_state if hasattr(self, "optimizer_state") else None
-        self.params, self.optimizer_state = \
-            optimizer(_objective, self.params, num_iters=num_iters,
-                      state=optimizer_state, full_output=True, **kwargs)
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
 
     def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
@@ -292,7 +265,7 @@ class InputDrivenTransitions(StickyTransitions):
 
 
 class InputDrivenTransitionsAlternativeFormulation(StickyTransitions):
-    # this contains K-1 weight vectors so as to cope with degeneracy
+    # This class contains K-1 weight vectors so as to cope with degeneracy
     """
     Hidden Markov Model whose transition probabilities are
     determined by a generalized linear model applied to the
@@ -343,9 +316,9 @@ class InputDrivenTransitionsAlternativeFormulation(StickyTransitions):
         assert np.array(input).shape[0] == T
         # Previous state effect
         log_Ps = np.tile(self.log_Ps[None, :, :], (T-1, 1, 1))
-        #append column of zeros so that Ws_with_zeros is now KxM
+        # Append column of zeros so that Ws_with_zeros is now KxM
         Ws_with_zeros = np.vstack([self.Ws, np.zeros((1, self.Ws.shape[1]))])
-        if self.Ws.shape[0] > input[1:].shape[1]: #If it already has a column of zeros
+        if self.Ws.shape[0] > input[1:].shape[1]: # If it already has a column of zeros
             Ws_with_zeros=self.Ws
         # Input effect
         log_Ps = log_Ps + np.dot(input[1:], Ws_with_zeros.T)[:, None, :]

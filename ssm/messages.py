@@ -42,7 +42,6 @@ def forward_pass(pi0,
                  alphas):
 
     T = log_likes.shape[0]  # number of time steps
-
     K = log_likes.shape[1]  # number of discrete states
 
     assert Ps.shape[0] == T-1 or Ps.shape[0] == 1

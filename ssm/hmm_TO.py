@@ -8,7 +8,7 @@ from autograd import value_and_grad
 from ssm.optimizers import adam_step, rmsprop_step, sgd_step, convex_combination
 from ssm.primitives import hmm_normalizer
 from ssm.messages import hmm_expected_states, hmm_filter, hmm_sample, viterbi
-from ssm.util import ensure_args_are_lists,ensure_args_not_none_modified, ensure_args_not_none, \
+from ssm.util import ensure_args_are_lists, ensure_args_not_none_modified, ensure_args_not_none, \
     ensure_slds_args_not_none, ensure_variational_args_are_lists, \
     replicate, collapse, ssm_pbar, ensure_args_are_lists_modified
 
@@ -34,6 +34,7 @@ class HMM_TO(object):
     In the code we will sometimes refer to the discrete
     latent state sequence as z and the data as x.
     """
+
     def __init__(self, K, D, M_trans=0, M_obs=0, init_state_distn=None,
                  transitions='standard',
                  transition_kwargs=None,
@@ -60,20 +61,20 @@ class HMM_TO(object):
             recurrent_only=trans.RecurrentOnlyTransitions,
             rbf_recurrent=trans.RBFRecurrentTransitions,
             nn_recurrent=trans.NeuralNetworkRecurrentTransitions
-            )
+        )
 
         if isinstance(transitions, str):
             if transitions not in transition_classes:
                 raise Exception("Invalid transition model: {}. Must be one of {}".
-                    format(transitions, list(transition_classes.keys())))
+                                format(transitions, list(transition_classes.keys())))
 
             transition_kwargs = transition_kwargs or {}
             transitions = \
                 hier.HierarchicalTransitions(transition_classes[transitions], K, D, M=M_trans,
                                              tags=hierarchical_transition_tags,
                                              **transition_kwargs) \
-                if hierarchical_transition_tags is not None \
-                else transition_classes[transitions](K, D, M=M_trans, **transition_kwargs)
+                    if hierarchical_transition_tags is not None \
+                    else transition_classes[transitions](K, D, M=M_trans, **transition_kwargs)
         if not isinstance(transitions, trans.Transitions):
             raise TypeError("'transitions' must be a subclass of"
                             " ssm.transitions.Transitions")
@@ -105,21 +106,21 @@ class HMM_TO(object):
             robust_autoregressive=obs.RobustAutoRegressiveObservations,
             diagonal_robust_ar=obs.RobustAutoRegressiveDiagonalNoiseObservations,
             diagonal_robust_autoregressive=obs.RobustAutoRegressiveDiagonalNoiseObservations,
-            )
+        )
 
         if isinstance(observations, str):
             observations = observations.lower()
             if observations not in observation_classes:
                 raise Exception("Invalid observation model: {}. Must be one of {}".
-                    format(observations, list(observation_classes.keys())))
+                                format(observations, list(observation_classes.keys())))
 
             observation_kwargs = observation_kwargs or {}
             observations = \
                 hier.HierarchicalObservations(observation_classes[observations], K, D, M_obs=M_obs,
                                               tags=hierarchical_observation_tags,
                                               **observation_kwargs) \
-                if hierarchical_observation_tags is not None \
-                else observation_classes[observations](K, D, M_obs=M_obs, **observation_kwargs)
+                    if hierarchical_observation_tags is not None \
+                    else observation_classes[observations](K, D, M_obs=M_obs, **observation_kwargs)
         if not isinstance(observations, obs.Observations):
             raise TypeError("'observations' must be a subclass of"
                             " ssm.observations.Observations")
@@ -142,7 +143,8 @@ class HMM_TO(object):
         self.observations.params = value[2]
 
     @ensure_args_are_lists_modified
-    def initialize(self, datas, transition_input=None, observation_input=None, masks=None, tags=None, init_method="random"):
+    def initialize(self, datas, transition_input=None, observation_input=None, masks=None, tags=None,
+                   init_method="random"):
         """
         Initialize parameters given data.
         """
@@ -219,7 +221,7 @@ class HMM_TO(object):
             dummy_data = self.observations.sample_x(0, np.empty(0, ) + D)
             dtype = dummy_data.dtype
 
-        # fit the data array
+        # Fit the data array
         if prefix is None:
             # No prefix is given.  Sample the initial state as the prefix.
             pad = 1
@@ -233,9 +235,10 @@ class HMM_TO(object):
             # Sample the first state from the initial distribution
             pi0 = self.init_state_distn.initial_state_distn
             z[0] = npr.choice(self.K, p=pi0)
-            data[0] = self.observations.sample_x(z[0], data[:0], observation_input=observation_input[0], with_noise=with_noise)
+            data[0] = self.observations.sample_x(z[0], data[:0], observation_input=observation_input[0],
+                                                 with_noise=with_noise)
 
-            # We only need to sample T-1 datapoints now
+            # We only need to sample T-1 data points now
             T = T - 1
 
         else:
@@ -248,14 +251,17 @@ class HMM_TO(object):
             # Construct the states, data, transition_input, observation_input and mask arrays
             z = np.concatenate((zpre, np.zeros(T, dtype=int)))
             data = np.concatenate((xpre, np.zeros((T,) + D, dtype)))
-            transition_input = np.zeros((T+pad,) + M_trans) if transition_input is None else np.concatenate((np.zeros((pad,) + M_trans), transition_input))
-            observation_input = np.zeros((T + pad,) + M_obs) if observation_input is None else np.concatenate((np.zeros((pad,) + M_obs), observation_input))
-            mask = np.ones((T+pad,) + D, dtype=bool)
+            transition_input = np.zeros((T + pad,) + M_trans) if transition_input is None else np.concatenate(
+                (np.zeros((pad,) + M_trans), transition_input))
+            observation_input = np.zeros((T + pad,) + M_obs) if observation_input is None else np.concatenate(
+                (np.zeros((pad,) + M_obs), observation_input))
+            mask = np.ones((T + pad,) + D, dtype=bool)
 
         # Fill in the rest of the data
-        for t in range(pad, pad+T):
-            Pt = self.transitions.transition_matrices(data[t-1:t+1], transition_input[t-1:t+1], mask=mask[t-1:t+1], tag=tag)[0]
-            z[t] = npr.choice(self.K, p=Pt[z[t-1]])
+        for t in range(pad, pad + T):
+            Pt = self.transitions.transition_matrices(data[t - 1:t + 1], transition_input[t - 1:t + 1],
+                                                      mask=mask[t - 1:t + 1], tag=tag)[0]
+            z[t] = npr.choice(self.K, p=Pt[z[t - 1]])
             data[t] = self.observations.sample_x(z[t], data[:t], observation_input=observation_input[t], tag=tag,
                                                  with_noise=with_noise)
 
@@ -285,7 +291,7 @@ class HMM_TO(object):
         return viterbi(pi0, Ps, log_likes)
 
     @ensure_args_not_none_modified
-    def filter(self, data, transition_input=None,observation_input=None, mask=None, tag=None):
+    def filter(self, data, transition_input=None, observation_input=None, mask=None, tag=None):
         pi0 = self.init_state_distn.initial_state_distn
         Ps = self.transitions.transition_matrices(data, transition_input, mask, tag)
         log_likes = self.observations.log_likelihoods(data, observation_input, mask, tag)
@@ -299,7 +305,6 @@ class HMM_TO(object):
         """
         Ez, _, _ = self.expected_states(data, transition_input, observation_input, mask)
         return self.observations.smooth(Ez, data, transition_input, observation_input, tag)
-
 
     def log_prior(self):
         """
@@ -319,7 +324,8 @@ class HMM_TO(object):
         :return total log probability of the data.
         """
         ll = 0
-        for data, transition_input, observation_input, mask, tag in zip(datas, transition_input, observation_input, masks, tags):
+        for data, transition_input, observation_input, mask, tag in zip(datas, transition_input, observation_input,
+                                                                        masks, tags):
             pi0 = self.init_state_distn.initial_state_distn
             Ps = self.transitions.transition_matrices(data, transition_input, mask, tag)
             log_likes = self.observations.log_likelihoods(data, observation_input, mask, tag)
@@ -331,7 +337,8 @@ class HMM_TO(object):
     def log_probability(self, datas, transition_input=None, observation_input=None, masks=None, tags=None):
         return self.log_likelihood(datas, transition_input, observation_input, masks, tags) + self.log_prior()
 
-    def expected_log_likelihood(self, expectations, datas, transition_inputs=None, observation_inputs=None, masks=None, tags=None):
+    def expected_log_likelihood(self, expectations, datas, transition_inputs=None, observation_inputs=None, masks=None,
+                                tags=None):
         """
         Compute log-likelihood given current model parameters.
 
@@ -341,7 +348,6 @@ class HMM_TO(object):
         ell = 0.0
         for (Ez, Ezzp1, _), data, transition_input, observation_input, mask, tag in \
                 zip(expectations, datas, transition_inputs, observation_inputs, masks, tags):
-
             pi0 = self.init_state_distn.initial_state_distn
             log_Ps = self.transitions.log_transition_matrices(data, transition_input, mask, tag)
             log_likes = self.observations.log_likelihoods(data, observation_input, mask, tag)
@@ -353,12 +359,14 @@ class HMM_TO(object):
 
         return ell
 
-    def expected_log_probability(self, expectations, datas, transition_inputs=None, observation_inputs=None, masks=None, tags=None):
+    def expected_log_probability(self, expectations, datas, transition_inputs=None, observation_inputs=None, masks=None,
+                                 tags=None):
         """
         Compute the log-probability of the data given current
         model parameters.
         """
-        ell = self.expected_log_likelihood(expectations, datas, transition_inputs=transition_inputs, observation_inputs=observation_inputs, masks=masks, tags=tags)
+        ell = self.expected_log_likelihood(expectations, datas, transition_inputs=transition_inputs,
+                                           observation_inputs=observation_inputs, masks=masks, tags=tags)
         return ell + self.log_prior()
 
     def trans_weights_K(self, hmm_params, K):
@@ -372,22 +380,24 @@ class HMM_TO(object):
         trans_weight_append_zero_standard[-1, :] = v1
         for i in range(K - 1):
             trans_weight_append_zero_standard[i, :] = v1 + trans_weight_append_zero[i, :]  # vi = v1 + wi
-        weight_vectors_trans = trans_weight_append_zero_standard[permutation]  
+        weight_vectors_trans = trans_weight_append_zero_standard[permutation]
         return weight_vectors_trans
 
     # Model fitting
-    def _fit_sgd(self, optimizer, datas, transition_input, observation_input, masks, tags, verbose = 2, num_iters=1000, **kwargs):
+    def _fit_sgd(self, optimizer, datas, transition_input, observation_input, masks, tags, verbose=2, num_iters=1000,
+                 **kwargs):
         """
         Fit the model with maximum marginal likelihood.
         """
         T = sum([data.shape[0] for data in datas])
+
         def _objective(params, itr):
             self.params = params
             obj = self.log_probability(datas, transition_input, observation_input, masks, tags)
             return -obj / T
 
         # Set up the progress bar
-        lls  = [-_objective(self.params, 0) * T]
+        lls = [-_objective(self.params, 0) * T]
         pbar = ssm_pbar(num_iters, verbose, "Epoch {} Itr {} LP: {:.1f}", [0, 0, lls[-1]])
 
         # Run the optimizer
@@ -397,11 +407,12 @@ class HMM_TO(object):
             self.params, val, g, state = step(value_and_grad(_objective), self.params, itr, state, **kwargs)
             lls.append(-val * T)
             if verbose == 2:
-              pbar.set_description("LP: {:.1f}".format(lls[-1]))
-              pbar.update(1)
+                pbar.set_description("LP: {:.1f}".format(lls[-1]))
+                pbar.update(1)
         return lls
 
-    def _fit_stochastic_em(self, optimizer, datas, transition_input, observation_input, masks, tags, verbose=2, num_epochs=100, **kwargs):
+    def _fit_stochastic_em(self, optimizer, datas, transition_input, observation_input, masks, tags, verbose=2,
+                           num_epochs=100, **kwargs):
         """
         Replace the M-step of EM with a stochastic gradient update using the ELBO computed
         on a minibatch of data.
@@ -411,6 +422,7 @@ class HMM_TO(object):
 
         # A helper to grab a minibatch of data
         perm = [np.random.permutation(M) for _ in range(num_epochs)]
+
         def _get_minibatch(itr):
             epoch = itr // M
             m = itr % M
@@ -443,7 +455,7 @@ class HMM_TO(object):
             return -obj / T
 
         # Set up the progress bar
-        lls  = [-_objective(self.params, 0) * T]
+        lls = [-_objective(self.params, 0) * T]
         pbar = ssm_pbar(num_epochs * M, verbose, "Epoch {} Itr {} LP: {:.1f}", [0, 0, lls[-1]])
 
         # Run the optimizer
@@ -455,11 +467,11 @@ class HMM_TO(object):
             m = itr % M
             lls.append(-val * T)
             if verbose == 2:
-              pbar.set_description("Epoch {} Itr {} LP: {:.1f}".format(epoch, m, lls[-1]))
-              pbar.update(1)
+                pbar.set_description("Epoch {} Itr {} LP: {:.1f}".format(epoch, m, lls[-1]))
+                pbar.update(1)
         return lls
 
-    def _fit_em(self, datas, transition_input, observation_input, masks, tags, verbose = 2, num_iters=100, tolerance=0,
+    def _fit_em(self, datas, transition_input, observation_input, masks, tags, verbose=2, num_iters=100, tolerance=0,
                 init_state_mstep_kwargs={},
                 transitions_mstep_kwargs={},
                 observations_mstep_kwargs={},
@@ -480,7 +492,8 @@ class HMM_TO(object):
                             in zip(datas, transition_input, observation_input, masks, tags)]
 
             # M step: maximize expected log joint wrt parameters
-            self.init_state_distn.m_step_modified(expectations, datas, transition_input, observation_input, masks, tags, **init_state_mstep_kwargs)
+            self.init_state_distn.m_step_modified(expectations, datas, transition_input, observation_input, masks, tags,
+                                                  **init_state_mstep_kwargs)
             self.transitions.m_step(expectations, datas, transition_input, masks, tags, **transitions_mstep_kwargs)
             self.observations.m_step(expectations, datas, observation_input, masks, tags, **observations_mstep_kwargs)
 
@@ -488,12 +501,12 @@ class HMM_TO(object):
             lls.append(self.log_prior() + sum([ll for (_, _, ll) in expectations]))
 
             if verbose == 2:
-              pbar.set_description("LP: {:.1f}".format(lls[-1]))
+                pbar.set_description("LP: {:.1f}".format(lls[-1]))
 
             # Check for convergence
             if itr > 0 and abs(lls[-1] - lls[-2]) < tolerance:
                 if verbose == 2:
-                  pbar.set_description("Converged to LP: {:.1f}".format(lls[-1]))
+                    pbar.set_description("Converged to LP: {:.1f}".format(lls[-1]))
                 break
 
         return lls
