@@ -821,7 +821,6 @@ class InputDrivenObservations(Observations):
         """
         raise NotImplementedError
 
-
 class InputDrivenObservationsDiffInputs(Observations):
 
     def __init__(self, K, D, M_obs=0, C=2, prior_mean=0, prior_sigma=1000):
