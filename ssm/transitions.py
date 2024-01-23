@@ -70,7 +70,6 @@ class Transitions(object):
             optimizer(_objective, self.params, num_iters=num_iters,
                       state=optimizer_state, full_output=True, **kwargs)
 
-
     def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
         # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
         warn("Analytical Hessian is not implemented for this transition class. \
