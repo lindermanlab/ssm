@@ -625,7 +625,7 @@ class CategoricalObservations(Observations):
         of latent discrete states.
         """
         raise NotImplementedError
-    
+
 class InputDrivenObservations(Observations):
 
     def __init__(self, K, D, M=0, C=2, prior_mean = 0, prior_sigma=1000):
