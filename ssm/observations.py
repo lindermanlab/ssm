@@ -15,7 +15,6 @@ from ssm.cstats import robust_ar_statistics
 from ssm.optimizers import adam, bfgs, rmsprop, sgd, lbfgs
 import ssm.stats as stats
 
-
 class Observations(object):
     # K = number of discrete states
     # D = number of observed dimensions
@@ -81,14 +80,13 @@ class Observations(object):
         def _expected_log_joint(expectations):
             elbo = self.log_prior()
             for data, input, mask, tag, (expected_states, _, _) \
-                    in zip(datas, inputs, masks, tags, expectations):
+                in zip(datas, inputs, masks, tags, expectations):
                 lls = self.log_likelihoods(data, input, mask, tag)
                 elbo += np.sum(expected_states * lls)
             return elbo
 
         # define optimization target
         T = sum([data.shape[0] for data in datas])
-
         def _objective(params, itr):
             self.params = params
             obj = _expected_log_joint(expectations)
@@ -168,7 +166,6 @@ class GaussianObservations(Observations):
         """
         return expectations.dot(self.mus)
 
-
 class ExponentialObservations(Observations):
     def __init__(self, K, D, M=0):
         super(ExponentialObservations, self).__init__(K, D, M)
@@ -192,7 +189,7 @@ class ExponentialObservations(Observations):
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         lambdas = np.exp(self.log_lambdas)
-        return npr.exponential(1 / lambdas[z])
+        return npr.exponential(1/lambdas[z])
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         x = np.concatenate(datas)
@@ -205,7 +202,7 @@ class ExponentialObservations(Observations):
         Compute the mean observation under the posterior distribution
         of latent discrete states.
         """
-        return expectations.dot(1 / np.exp(self.log_lambdas))
+        return expectations.dot(1/np.exp(self.log_lambdas))
 
 
 class DiagonalGaussianObservations(Observations):
@@ -250,7 +247,7 @@ class DiagonalGaussianObservations(Observations):
         weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
             self.mus[k] = np.average(x, axis=0, weights=weights[:, k])
-            sqerr = (x - self.mus[k]) ** 2
+            sqerr = (x - self.mus[k])**2
             self._log_sigmasq[k] = np.log(np.average(sqerr, weights=weights[:, k], axis=0))
 
     def smooth(self, expectations, data, input, tag):
@@ -325,7 +322,7 @@ class StudentsTObservations(Observations):
         for y in datas:
             # nu: (K,D)  mus: (K, D)  sigmas: (K, D)  y: (T, D)  -> tau: (T, K, D)
             alpha = self.nus / 2 + 1 / 2
-            beta = self.nus / 2 + 1 / 2 * (y[:, None, :] - self.mus) ** 2 / self.sigmasq
+            beta = self.nus / 2 + 1 / 2 * (y[:, None, :] - mus) ** 2 / self.sigmasq
             E_taus.append(alpha / beta)
 
         # Update the mean (notation from natural params of Gaussian)
@@ -414,7 +411,7 @@ class MultivariateStudentsTObservations(Observations):
         # significant performance benefit if we call it with (TxD), (D,), (D,D), and (,)
         # arrays as inputs
         return np.column_stack([stats.multivariate_studentst_logpdf(data, mu, Sigma, nu)
-                                for mu, Sigma, nu in zip(mus, Sigmas, nus)])
+                               for mu, Sigma, nu in zip(mus, Sigmas, nus)])
 
         # return stats.multivariate_studentst_logpdf(data[:, None, :], mus, Sigmas, nus)
 
@@ -434,8 +431,8 @@ class MultivariateStudentsTObservations(Observations):
         E_taus = []
         for y in datas:
             # nu: (K,)  mus: (K, D)  Sigmas: (K, D, D)  y: (T, D)  -> tau: (T, K)
-            alpha = self.nus / 2 + D / 2
-            beta = self.nus / 2 + 1 / 2 * stats.batch_mahalanobis(self._sqrt_Sigmas, y[:, None, :] - self.mus)
+            alpha = self.nus/2 + D/2
+            beta = self.nus/2 + 1/2 * stats.batch_mahalanobis(self._sqrt_Sigmas, y[:, None, :] - self.mus)
             E_taus.append(alpha / beta)
 
         # Update the mean (notation from natural params of Gaussian)
@@ -476,8 +473,8 @@ class MultivariateStudentsTObservations(Observations):
         weights = np.zeros(K)
         for y, (Ez, _, _) in zip(datas, expectations):
             # nu: (K,)  mus: (K, D)  Sigmas: (K, D, D)  y: (T, D)  -> alpha/beta: (T, K)
-            alpha = self.nus / 2 + D / 2
-            beta = self.nus / 2 + 1 / 2 * stats.batch_mahalanobis(self._sqrt_Sigmas, y[:, None, :] - self.mus)
+            alpha = self.nus/2 + D/2
+            beta = self.nus/2 + 1/2 * stats.batch_mahalanobis(self._sqrt_Sigmas, y[:, None, :] - self.mus)
 
             E_taus += np.sum(Ez * (alpha / beta), axis=0)
             E_logtaus += np.sum(Ez * (digamma(alpha) - np.log(beta)), axis=0)
@@ -532,7 +529,7 @@ class BernoulliObservations(Observations):
         x = np.concatenate(datas)
         weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
-            ps = np.clip(np.average(x, axis=0, weights=weights[:, k]), 1e-3, 1 - 1e-3)
+            ps = np.clip(np.average(x, axis=0, weights=weights[:,k]), 1e-3, 1-1e-3)
             self.logit_ps[k] = logit(ps)
 
     def smooth(self, expectations, data, input, tag):
@@ -574,7 +571,7 @@ class PoissonObservations(Observations):
         x = np.concatenate(datas)
         weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
-            self.log_lambdas[k] = np.log(np.average(x, axis=0, weights=weights[:, k]) + 1e-16)
+            self.log_lambdas[k] = np.log(np.average(x, axis=0, weights=weights[:,k]) + 1e-16)
 
     def smooth(self, expectations, data, input, tag):
         """
@@ -633,7 +630,7 @@ class CategoricalObservations(Observations):
 
 class InputDrivenObservations(Observations):
 
-    def __init__(self, K, D, M=0, C=2, prior_mean=0, prior_sigma=1000):
+    def __init__(self, K, D, M=0, C=2, prior_mean = 0, prior_sigma=1000):
         """
         @param K: number of states
         @param D: dimensionality of output
@@ -668,7 +665,7 @@ class InputDrivenObservations(Observations):
             for c in range(self.C - 1):
                 weights = self.Wk[k][c]
                 lp += stats.multivariate_normal_logpdf(weights, mus=np.repeat(self.prior_mean, (self.M)),
-                                                       Sigmas=((self.prior_sigma) ** 2) * np.identity(self.M))
+                                                 Sigmas=((self.prior_sigma) ** 2) * np.identity(self.M))
         return lp
 
     # Calculate time dependent logits - output is matrix of size TxKxC
@@ -685,8 +682,7 @@ class InputDrivenObservations(Observations):
         Wk = np.transpose(np.vstack([Wk_tranpose, np.zeros((1, Wk_tranpose.shape[1], Wk_tranpose.shape[2]))]),
                           (1, 0, 2))
         # Input effect; transpose so that output has dims TxKxC
-        time_dependent_logits = np.transpose(np.dot(Wk, input.T), (2, 0,
-                                                                   1))  # Note: this has an unexpected effect when both input (and thus Wk) are empty arrays and returns an array of zeros
+        time_dependent_logits = np.transpose(np.dot(Wk, input.T), (2, 0, 1)) #Note: this has an unexpected effect when both input (and thus Wk) are empty arrays and returns an array of zeros
         time_dependent_logits = time_dependent_logits - logsumexp(time_dependent_logits, axis=2, keepdims=True)
         return time_dependent_logits
 
@@ -700,8 +696,7 @@ class InputDrivenObservations(Observations):
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         assert self.D == 1, "InputDrivenObservations written for D = 1!"
-        if input.ndim == 1 and input.shape == (
-        self.M,):  # if input is vector of size self.M (one time point), expand dims to be (1, M)
+        if input.ndim == 1 and input.shape == (self.M,): # if input is vector of size self.M (one time point), expand dims to be (1, M)
             input = np.expand_dims(input, axis=0)
         time_dependent_logits = self.calculate_logits(input)  # size TxKxC
         ps = np.exp(time_dependent_logits)
@@ -712,9 +707,9 @@ class InputDrivenObservations(Observations):
             sample = np.array([npr.choice(self.C, p=ps[t, z[t]]) for t in range(T)])
         return sample
 
-    def m_step(self, expectations, datas, inputs, masks, tags, optimizer="bfgs", **kwargs):
+    def m_step(self, expectations, datas, inputs, masks, tags, optimizer = "bfgs", **kwargs):
 
-        T = sum([data.shape[0] for data in datas])  # total number of datapoints
+        T = sum([data.shape[0] for data in datas]) #total number of datapoints
 
         def _multisoftplus(X):
             '''
@@ -722,15 +717,12 @@ class InputDrivenObservations(Observations):
             :param X: array of size Tx(C-1)
             :return f(X) of size T and df of size (Tx(C-1))
             '''
-            X_augmented = np.append(X, np.zeros((X.shape[0], 1)),
-                                    1)  # append a column of zeros to X for rowmax calculation
-            rowmax = np.max(X_augmented, axis=1,
-                            keepdims=1)  # get max along column for log-sum-exp trick, rowmax is size T
+            X_augmented = np.append(X, np.zeros((X.shape[0], 1)), 1) # append a column of zeros to X for rowmax calculation
+            rowmax = np.max(X_augmented, axis = 1, keepdims=1) #get max along column for log-sum-exp trick, rowmax is size T
             # compute f:
-            f = np.log(np.exp(-rowmax[:, 0]) + np.sum(np.exp(X - rowmax), axis=1)) + rowmax[:, 0]
+            f = np.log(np.exp(-rowmax[:,0]) + np.sum(np.exp(X - rowmax), axis = 1)) + rowmax[:,0]
             # compute df
-            df = np.exp(X - rowmax) / np.expand_dims((np.exp(-rowmax[:, 0]) + np.sum(np.exp(X - rowmax), axis=1)),
-                                                     axis=1)
+            df = np.exp(X - rowmax)/np.expand_dims((np.exp(-rowmax[:,0]) + np.sum(np.exp(X - rowmax), axis = 1)), axis = 1)
             return f, df
 
         def _objective(params, k):
@@ -747,12 +739,12 @@ class InputDrivenObservations(Observations):
                 f, _ = _multisoftplus(xproj)
                 assert data.shape[1] == 1, "InputDrivenObservations written for D = 1!"
                 data_one_hot = one_hot(data[:, 0], self.C)  # convert to one-hot representation of size TxC
-                temp_obj = (-np.sum(data_one_hot[:, :-1] * xproj, axis=1) + f) @ expected_states[:, k]
+                temp_obj = (-np.sum(data_one_hot[:,:-1]*xproj, axis = 1) + f)@expected_states[:,k]
                 obj += temp_obj
 
             # add contribution of prior:
             if self.prior_sigma != 0:
-                obj += 1 / (2 * self.prior_sigma ** 2) * np.sum(W ** 2)
+                obj += 1/(2*self.prior_sigma**2)*np.sum(W**2)
             return obj / T
 
         def _gradient(params, k):
@@ -762,21 +754,21 @@ class InputDrivenObservations(Observations):
             :param k: state whose parameters we are currently optimizing
             :return gradient of objective with respect to parameters; vector of size (C-1)xM
             '''
-            W = np.reshape(params, (self.C - 1, self.M))
-            grad = np.zeros((self.C - 1, self.M))
+            W = np.reshape(params, (self.C-1, self.M))
+            grad = np.zeros((self.C-1, self.M))
             for data, input, mask, tag, (expected_states, _, _) \
                     in zip(datas, inputs, masks, tags, expectations):
-                xproj = input @ W.T  # projection of input onto weight matrix for particular state, size is Tx(C-1)
+                xproj = input@W.T #projection of input onto weight matrix for particular state, size is Tx(C-1)
                 _, df = _multisoftplus(xproj)
                 assert data.shape[1] == 1, "InputDrivenObservations written for D = 1!"
-                data_one_hot = one_hot(data[:, 0], self.C)  # convert to one-hot representation of size TxC
-                grad += (df - data_one_hot[:, :-1]).T @ (expected_states[:, [k]] * input)  # gradient is shape (C-1,M)
+                data_one_hot = one_hot(data[:, 0], self.C) #convert to one-hot representation of size TxC
+                grad  += (df - data_one_hot[:,:-1]).T@(expected_states[:, [k]]*input) #gradient is shape (C-1,M)
             # Add contribution to gradient from prior:
             if self.prior_sigma != 0:
-                grad += (1 / (self.prior_sigma) ** 2) * W
+                grad += (1/(self.prior_sigma)**2)*W
             # Now flatten grad into a vector:
             grad = grad.flatten()
-            return grad / T
+            return grad/T
 
         def _hess(params, k):
             '''
@@ -786,48 +778,43 @@ class InputDrivenObservations(Observations):
             :return hessian of objective with respect to parameters; matrix of size ((C-1)xM) x ((C-1)xM)
             '''
             W = np.reshape(params, (self.C - 1, self.M))
-            hess = np.zeros(((self.C - 1) * self.M, (self.C - 1) * self.M))
+            hess = np.zeros(((self.C - 1)*self.M, (self.C - 1)*self.M))
             for data, input, mask, tag, (expected_states, _, _) \
                     in zip(datas, inputs, masks, tags, expectations):
                 xproj = input @ W.T  # projection of input onto weight matrix for particular state
                 _, df = _multisoftplus(xproj)
                 # center blocks:
-                dftensor = np.expand_dims(df, axis=2)  # dims are now (T,  (C-1), 1)
-                Xdf = np.expand_dims(input,
-                                     axis=1) * dftensor  # multiply every input covariate term with every class derivative term for a given time step; dims are now (T, (C-1), M)
+                dftensor = np.expand_dims(df, axis = 2) # dims are now (T,  (C-1), 1)
+                Xdf = np.expand_dims(input, axis = 1) * dftensor # multiply every input covariate term with every class derivative term for a given time step; dims are now (T, (C-1), M)
                 # reshape Xdf to (T, (C-1)*M)
                 Xdf = np.reshape(Xdf, (Xdf.shape[0], -1))
                 # weight Xdf by posterior state probabilities
-                pXdf = expected_states[:, [k]] * Xdf  # output is size (T, (C-1)*M)
+                pXdf = expected_states[:, [k]]*Xdf # output is size (T, (C-1)*M)
                 # outer product with input vector, size (M, (C-1)*M)
                 XXdf = input.T @ pXdf
                 # center blocks of hessian:
                 temp_hess = np.zeros(((self.C - 1) * self.M, (self.C - 1) * self.M))
                 for c in range(1, self.C):
-                    inds = range((c - 1) * self.M, c * self.M)
+                    inds = range((c - 1)*self.M,c*self.M)
                     temp_hess[np.ix_(inds, inds)] = XXdf[:, inds]
                 # off diagonal entries:
-                hess += temp_hess - Xdf.T @ pXdf
+                hess += temp_hess - Xdf.T@pXdf
             # add contribution of prior to hessian
             if self.prior_sigma != 0:
                 hess += (1 / (self.prior_sigma) ** 2)
-            return hess / T
+            return hess/T
 
         from scipy.optimize import minimize
         # Optimize weights for each state separately:
         for k in range(self.K):
             def _objective_k(params):
                 return _objective(params, k)
-
             def _gradient_k(params):
                 return _gradient(params, k)
-
             def _hess_k(params):
                 return _hess(params, k)
-
-            sol = minimize(_objective_k, self.params[k].reshape(((self.C - 1) * self.M)), hess=_hess_k, jac=_gradient_k,
-                           method="trust-ncg")
-            self.params[k] = np.reshape(sol.x, (self.C - 1, self.M))
+            sol = minimize(_objective_k, self.params[k].reshape(((self.C-1) * self.M)), hess=_hess_k, jac=_gradient_k, method="trust-ncg")
+            self.params[k] = np.reshape(sol.x, (self.C-1, self.M))
 
     def smooth(self, expectations, data, input, tag):
         """
