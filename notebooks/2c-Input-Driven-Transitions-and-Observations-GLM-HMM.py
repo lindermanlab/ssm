@@ -154,7 +154,7 @@ true_glmhmm = ssm.HMM_TO(num_states, obs_dim, M_trans=input_dim_T, M_obs=input_d
                          transitions="inputdrivenalt")
 
 # # 3a. Initializing the model
-# To ensure that the model accurately reflects the mouse behavior, we must bring the GLM-HMM into an appropriate parameter regime (see Zeinab et al. (2024)), and provide a good initialization for the observation and transition weights.
+# To ensure that the model accurately reflects the mouse behavior, we must bring the GLM-HMM into an appropriate parameter regime (see Mohammadi et al. (2024)), and provide a good initialization for the observation and transition weights.
 #
 # By carefully adjusting these parameters and initializing the model accurately, we aim to create a model that closely mirrors the behavioral patterns observed in mice. This fine-tuning process will contribute to a better representation of real-world scenarios, enhancing the model's reliability in studying mice behavior.
 
