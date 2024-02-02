@@ -117,3 +117,5 @@ notebooks/*.html
 .vscode
 
 .DS_Store
+
+notebooks/2-Input-Driven-HMM.ipynb
