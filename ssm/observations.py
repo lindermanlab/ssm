@@ -685,8 +685,6 @@ class InputDrivenObservations(Observations):
         return time_dependent_logits
 
     def log_likelihoods(self, data, input, mask, tag):
-        if input.ndim == 1 and input.shape == (self.M,):
-            input = np.expand_dims(input, axis=0)
         time_dependent_logits = self.calculate_logits(input)
         assert self.D == 1, "InputDrivenObservations written for D = 1!"
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
