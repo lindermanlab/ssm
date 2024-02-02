@@ -172,7 +172,7 @@ true_glmhmm.transitions.params[1][None] = Ws_transition
 fig = plt.figure(figsize=(10, 3), dpi=80, facecolor='w', edgecolor='k')
 cols = ['darkviolet', 'gold', 'chocolate']
 
-########### 1) Observation ##########
+# 1) Observation 
 gen_weights_obs = gen_weights
 
 plt.subplot(1, 2, 1)
@@ -190,7 +190,7 @@ plt.xticks([0, 1], ['Obs_in1', 'Obs_in2'], fontsize=12, rotation=45)
 plt.axhline(y=0, color="k", alpha=0.5, ls="--")
 plt.title("Observation GLM")
 
-########### 2) transition ##########
+# 2) transition 
 gen_log_trans_mat = true_glmhmm.transitions.params[0]
 gen_weights_Trans = true_glmhmm.transitions.params[1]
 generative_weights_Trans = true_glmhmm.trans_weights_K(true_glmhmm.params, num_states)
@@ -289,8 +289,8 @@ plt.show()
 glmhmm.permute(find_permutation(true_states, glmhmm.most_likely_states(obs, transition_input=transition_input, observation_input=observation_input)))
 
 # +
-################## Plot generative parameters ##################
-########## 1) Observation ##########
+# Plot generative parameters 
+# 1) Observation 
 gen_weights_obs = gen_weights
 recovered_weights = glmhmm.observations.params
 
@@ -321,7 +321,7 @@ plt.yticks(fontsize=10)
 plt.axhline(y=0, color="k", alpha=0.5, ls="--")
 plt.legend()
 
-########## 2) transition ##########
+# 2) transition
 gen_log_trans_mat = true_glmhmm.transitions.params[0]
 gen_weights_Trans = true_glmhmm.transitions.params[1]
 recovered_trans_mat = np.exp(glmhmm.transitions.params[0])
