@@ -259,7 +259,7 @@ print("true_lp = " + str(true_lp))
 # \end{align}
 # $$
 #
-# In this model, as mentioned, we have defined two sets of covariates, $\mathbf{X}^{ob}={x}^{ob}_{1}, ..., {x}^{ob}_{T}$ and $\mathbf{X}^{tr}={x}^{tr}_{1}, ..., {x}^{tr}_{T}$ which coresspond to the observation and transition covariates respectively and a set of latent states as $\mathbf{Z}={z}_{1}, ..., {z}_{T} $.
+# In this model, as mentioned, we have defined two sets of covariates, $\mathbf{X}^{ob}={x}^{ob}_{1}, ..., {x}^{ob}_{T}$ and $\mathbf{X}^{tr}={x}^{tr}_{1}, ..., {x}^{tr}_{T}$ which correspond to the observation and transition covariates respectively and a set of latent states as $\mathbf{Z}={z}_{1}, ..., {z}_{T} $.
 # The model parameters, represented as $\theta=\{ \mathbf{w}^{tr}, \mathbf{w}^{ob}, \pi\}$, encompass the initial state distribution, transition weights, and observation weights for all states.
 
 glmhmm = ssm.HMM_TO(num_states, obs_dim, input_dim_T, input_dim_O, observations="input_driven_obs_diff_inputs", 
