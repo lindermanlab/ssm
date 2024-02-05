@@ -113,6 +113,42 @@ def ensure_args_are_lists(f):
     return wrapper
 
 
+def ensure_args_are_lists_modified(f):
+    def wrapper(self, datas, transition_input=None, observation_input=None, masks=None, tags=None, **kwargs):
+
+        datas = [datas] if not isinstance(datas, (list, tuple)) else datas
+
+        M_obs = (self.M_obs,) if isinstance(self.M_obs, int) else self.M_obs
+        assert isinstance(M_obs, tuple)
+
+        M_trans = (self.M_trans,) if isinstance(self.M_trans, int) else self.M_trans
+        assert isinstance(M_trans, tuple)
+
+        if transition_input is None:
+            transition_input = [np.zeros((data.shape[0],) + M_trans) for data in datas]
+        elif not isinstance(transition_input, (list, tuple)):
+            transition_input = [transition_input]
+
+        if observation_input is None:
+            observation_input = [np.zeros((data.shape[0],) + M_obs) for data in datas]
+        elif not isinstance(observation_input, (list, tuple)):
+            observation_input = [observation_input]
+
+        if masks is None:
+            masks = [np.ones_like(data, dtype=bool) for data in datas]
+        elif not isinstance(masks, (list, tuple)):
+            masks = [masks]
+
+        if tags is None:
+            tags = [None] * len(datas)
+        elif not isinstance(tags, (list, tuple)):
+            tags = [tags]
+
+        return f(self, datas, transition_input=transition_input, observation_input=observation_input, masks=masks, tags=tags, **kwargs)
+
+    return wrapper
+
+
 def ensure_variational_args_are_lists(f):
     def wrapper(self, arg0, datas, inputs=None, masks=None, tags=None, **kwargs):
         datas = [datas] if not isinstance(datas, (list, tuple)) else datas
@@ -158,6 +194,24 @@ def ensure_args_not_none(f):
         return f(self, data, input=input, mask=mask, tag=tag, **kwargs)
     return wrapper
 
+def ensure_args_not_none_modified(f):
+
+    def wrapper(self, data, transition_input=None, observation_input=None, mask=None, tag=None, **kwargs):
+        assert data is not None
+
+        M_obs = (self.M_obs,) if isinstance(self.M_obs, int) else self.M_obs
+        assert isinstance(M_obs, tuple)
+
+        M_trans = (self.M_trans,) if isinstance(self.M_trans, int) else self.M_trans
+        assert isinstance(M_trans, tuple)
+
+        transition_input = np.zeros((data.shape[0],) + M) if transition_input is None else transition_input
+        observation_input = np.zeros((data.shape[0],) + M) if observation_input is None else observation_input
+
+        mask = np.ones_like(data, dtype=bool) if mask is None else mask
+
+        return f(self, data, transition_input=transition_input, observation_input=observation_input, mask=mask, tag=tag, **kwargs)
+    return wrapper
 
 def ensure_slds_args_not_none(f):
     def wrapper(self, variational_mean, data, input=None, mask=None, tag=None, **kwargs):
