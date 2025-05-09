@@ -797,7 +797,7 @@ class InputDrivenObservations(Observations):
                 hess += temp_hess - Xdf.T@pXdf
             # add contribution of prior to hessian
             if self.prior_sigma != 0:
-                hess += (1 / (self.prior_sigma) ** 2)
+                hess += (1 / (self.prior_sigma) ** 2) * np.eye((self.C - 1) * self.M)
             return hess/T
 
         from scipy.optimize import minimize
