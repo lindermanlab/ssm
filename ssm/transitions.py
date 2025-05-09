@@ -262,6 +262,99 @@ class InputDrivenTransitions(StickyTransitions):
         T, D = data.shape
         return np.zeros((T-1, D, D))
 
+
+class InputDrivenTransitionsAlternativeFormulation(StickyTransitions):
+    # This class contains K-1 weight vectors so as to cope with degeneracy
+    """
+    Hidden Markov Model whose transition probabilities are
+    determined by a generalized linear model applied to the
+    exogenous input. This has K-1 weight vectors so as to cope with degeneracy.
+    """
+    def __init__(self, K, D, M, prior_sigma=1000, alpha=1, kappa=0):
+        """
+        @param K: number of states
+        @param D: dimensionality of output
+        @param C: number of distinct classes for each dimension of output
+        @param prior_sigma: parameter governing strength of prior. Prior on GLM weights is multivariate
+        normal distribution with mean 'prior_mean' and diagonal covariance matrix (prior_sigma is on diagonal)
+        """
+
+        super(InputDrivenTransitionsAlternativeFormulation, self).__init__(K, D, M=M, alpha=alpha, kappa=kappa)
+
+        # Parameters linking input to state distribution
+        self.Ws = npr.randn(K-1, M)
+
+        # Regularization of Ws
+        # self.l2_penalty = l2_penalty
+        self.prior_sigma = prior_sigma
+        # self.global_fit = global_fit
+
+    @property
+    def params(self):
+        return [self.log_Ps, self.Ws]
+
+    @params.setter
+    def params(self, value):
+        [self.log_Ps, self.Ws] = value
+
+    def permute(self, perm):
+        """
+        Permute the discrete latent states.
+        """
+        self.log_Ps = self.log_Ps[np.ix_(perm, perm)]
+        self.Ws = np.vstack([self.Ws, np.zeros((1, self.Ws.shape[1]))])
+        self.Ws = self.Ws[perm]
+
+    def log_prior(self):
+        lp = super(InputDrivenTransitionsAlternativeFormulation, self).log_prior()
+        lp = lp + np.sum(-0.5 * (1 / (self.prior_sigma ** 2)) * self.Ws**2)
+        return lp
+
+    def log_transition_matrices(self, data, input, mask, tag):
+        T = np.array(data).shape[0]
+        assert np.array(input).shape[0] == T
+        # Previous state effect
+        log_Ps = np.tile(self.log_Ps[None, :, :], (T-1, 1, 1))
+        # Append column of zeros so that Ws_with_zeros is now KxM
+        Ws_with_zeros = np.vstack([self.Ws, np.zeros((1, self.Ws.shape[1]))])
+        if self.Ws.shape[0] > input[1:].shape[1]: # If it already has a column of zeros
+            Ws_with_zeros=self.Ws
+        # Input effect
+        log_Ps = log_Ps + np.dot(input[1:], Ws_with_zeros.T)[:, None, :]
+        normalized_Ps = log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)
+        return normalized_Ps
+
+    def m_step(self, expectations, datas, inputs, masks, tags,
+               optimizer="lbfgs", num_iters=1000, **kwargs):
+        optimizer = dict(sgd=sgd, adam=adam, rmsprop=rmsprop, bfgs=bfgs, lbfgs=lbfgs)[optimizer]
+        # Maximize the expected log joint
+        def _expected_log_joint(expectations):
+            elbo = self.log_prior()
+            for data, input, mask, tag, (expected_states, expected_joints, _) \
+                    in zip(datas, inputs, masks, tags, expectations):
+                log_Ps = self.log_transition_matrices(data, input, mask, tag)
+                K = np.array(log_Ps).shape[1]
+                elbo += np.sum(expected_joints * log_Ps)
+            return elbo
+
+        T = sum([data.shape[0] for data in datas])
+
+        def _objective(params, itr):
+            self.params = params
+            obj = _expected_log_joint(expectations)
+            return -obj / T
+
+        # Call the optimizer. Persist state (e.g. SGD momentum) across calls to m_step
+        optimizer_state = self.optimizer_state if hasattr(self, "optimizer_state") else None
+        self.params, self.optimizer_state = \
+            optimizer(_objective, self.params, num_iters=num_iters,
+                      state=optimizer_state, full_output=True, **kwargs)
+
+    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+        # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
+        T, D = data.shape
+        return np.zeros((T-1, D, D))
+
 class RecurrentTransitions(InputDrivenTransitions):
     """
     Generalization of the input driven HMM in which the observations serve as future inputs
