@@ -13,6 +13,7 @@ from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
     replicate, collapse, ssm_pbar
 
 import ssm.observations as obs
+from ssm import probit_obs
 import ssm.transitions as trans
 import ssm.init_state_distns as isd
 import ssm.hierarchical as hier
@@ -89,6 +90,7 @@ class HMM(object):
             bernoulli=obs.BernoulliObservations,
             categorical=obs.CategoricalObservations,
             input_driven_obs=obs.InputDrivenObservations,
+            probit_input_driven_obs=probit_obs.ProbitInputDrivenObservations,
             poisson=obs.PoissonObservations,
             vonmises=obs.VonMisesObservations,
             ar=obs.AutoRegressiveObservations,
