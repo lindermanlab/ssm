@@ -28,9 +28,9 @@ correspondence is well-defined.
 from __future__ import annotations
 import autograd.numpy as np
 import autograd.numpy.random as npr
-from autograd import grad
 from autograd.scipy.stats import norm
 from scipy.optimize import minimize
+from scipy.stats import norm as snorm
 
 from ssm.observations import Observations
 import ssm.stats as stats
@@ -106,38 +106,68 @@ class ProbitInputDrivenObservations(Observations):
         return out
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        """One BFGS step per state on the negative expected complete LL.
+        """Trust-region Newton (trust-ncg) per state on the negative expected
+        complete LL with analytic gradient and Hessian.
 
-        Objective for state k:
-            - sum_t  E[z_t = k]  * log P(y_t | x_t, z_t = k)
-            + 0.5 / sigma^2 * ||w_k - mu||^2
-        normalised by T_total for numerical stability.
+        Objective for state k (normalised by total trial count):
+
+            F_k(w) = -sum_t E[z_t=k] * log P(y_t | x_t; w)
+                    + 0.5 / sigma^2 * ||w - mu||^2
+
+        Letting s_t = 2 y_t - 1, eta_t = w . x_t, and z_t = s_t eta_t,
+
+            log P(y_t | x_t; w) = log Phi(z_t)
+            d/dw  = -s_t * lambda(z_t) * x_t       (lambda = phi/Phi)
+            d^2/dw^2 = lambda(z_t) * (z_t + lambda(z_t)) * x_t x_t^T
+
+        The Hessian factor lambda*(z+lambda) is the truncated-normal
+        variance and is non-negative, so the objective is convex.
         """
         T_total = sum(d.shape[0] for d in datas)
-        sig2 = self.prior_sigma ** 2 if self.prior_sigma != 0 else None
+        sig2 = (self.prior_sigma ** 2) if self.prior_sigma != 0 else None
         mu = self.prior_mean
 
-        def _objective(wk, k):
-            obj = 0.0
-            for data, input, mask, (Ez, _, _) in zip(datas, inputs, masks,
-                                                     expectations):
-                eta = input @ wk                          # (T,)
-                y = data[:, 0]
-                signed = np.where(y == 1, eta, -eta)
-                ll = norm.logcdf(signed)                  # (T,)
-                obj = obj - np.sum(Ez[:, k] * ll)
-            if sig2 is not None:
-                obj = obj + 0.5 / sig2 * np.sum((wk - mu) ** 2)
-            return obj / T_total
+        # Precompute per-dataset quantities that don't depend on w.
+        s_arrs, X_arrs, Ez_arrs = [], [], []
+        for data, input, (Ez, _, _) in zip(datas, inputs, expectations):
+            y = data[:, 0]
+            s_arrs.append(2.0 * y - 1.0)            # (T,)  ±1
+            X_arrs.append(np.asarray(input))         # (T, M)
+            Ez_arrs.append(np.asarray(Ez))           # (T, K)
 
-        grad_fn = grad(lambda wk, k: _objective(wk, k))
+        def _f_g_h(wk, k):
+            f = 0.0
+            g = np.zeros_like(wk)
+            H = np.zeros((wk.size, wk.size))
+            for s, X, Ez in zip(s_arrs, X_arrs, Ez_arrs):
+                eta = X @ wk                         # (T,)
+                z = s * eta                          # (T,)
+                logPhi = snorm.logcdf(z)             # (T,)
+                # inverse Mills ratio phi/Phi, stable for z << 0.
+                lam = np.exp(snorm.logpdf(z) - logPhi)
+                we = Ez[:, k]                        # (T,)
+                f -= np.sum(we * logPhi)
+                g += X.T @ (-we * s * lam)
+                hf = we * lam * (z + lam)            # (T,)  >= 0
+                H += (X * hf[:, None]).T @ X
+            if sig2 is not None:
+                f += 0.5 / sig2 * np.sum((wk - mu) ** 2)
+                g += (wk - mu) / sig2
+                H += np.eye(wk.size) / sig2
+            return f / T_total, g / T_total, H / T_total
 
         for k in range(self.K):
-            x0 = np.array(self.Wk[k])
-            sol = minimize(
-                _objective, x0, args=(k,), jac=grad_fn,
-                method="L-BFGS-B",
-            )
+            x0 = np.asarray(self.Wk[k], dtype=float)
+
+            def _obj(w, k=k):
+                return _f_g_h(w, k)[:2]
+
+            def _hess(w, k=k):
+                return _f_g_h(w, k)[2]
+
+            sol = minimize(_obj, x0, jac=True, hess=_hess,
+                           method="trust-ncg",
+                           options=dict(maxiter=100))
             self.Wk[k] = sol.x
 
     def smooth(self, expectations, data, input, tag):
