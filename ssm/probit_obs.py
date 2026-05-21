@@ -91,6 +91,9 @@ class ProbitInputDrivenObservations(Observations):
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         assert self.D == 1
+        # ssm.HMM.sample probes output dtype by calling with input=None.
+        if input is None:
+            return np.zeros(1, dtype=int)
         if input.ndim == 1 and input.shape == (self.M,):
             input = np.expand_dims(input, axis=0)
         eta = self._eta(input)                 # (T, K)
